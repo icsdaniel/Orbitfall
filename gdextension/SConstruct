@@ -1,0 +1,17 @@
+#!/usr/bin/env python
+# Builds the Orbitfall GDExtension: godot-cpp + core/ sources + binding in src/.
+import os
+env = SConscript("godot-cpp/SConstruct")
+env.Append(CPPPATH=["src/", "../core/"])
+core_dirs = ["sim", "pools", "systems", "spatial", "content"]
+sources = Glob("src/*.cpp")
+for d in core_dirs:
+    for root, _, files in os.walk(os.path.join("..", "core", d)):
+        for f in files:
+            if f.endswith(".cpp"):
+                sources.append(File(os.path.join(root, f)))
+if env["platform"] == "web":
+    env.Append(CPPDEFINES=["ORBITFALL_SINGLE_THREADED"])
+suffix = env["suffix"]  # e.g. .linux.template_debug.x86_64
+lib = env.SharedLibrary("../bin/liborbitfall{}{}".format(suffix, env["SHLIBSUFFIX"]), source=sources)
+Default(lib)

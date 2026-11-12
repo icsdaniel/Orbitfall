@@ -1,0 +1,17 @@
+.godot/
+/build/
+/out/
+bin/*.so
+bin/*.dll
+bin/*.dylib
+bin/*.wasm
+bin/*.lib
+bin/*.exp
+*.os
+*.o
+*.obj
+.sconsign*.dblite
+gdextension/godot-cpp/bin/
+gdextension/godot-cpp/gen/
+reports/
+export_presets.cfg.bak
