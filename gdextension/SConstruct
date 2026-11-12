@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 # Builds the Orbitfall GDExtension: godot-cpp + core/ sources + binding in src/.
 import os
-env = SConscript("godot-cpp/SConstruct")
+# GODOT_CPP_PATH lets worktrees share one prebuilt godot-cpp checkout.
+godot_cpp = os.environ.get("GODOT_CPP_PATH", "godot-cpp")
+env = SConscript(os.path.join(godot_cpp, "SConstruct"))
 env.Append(CPPPATH=["src/", "../core/"])
 core_dirs = ["sim", "pools", "systems", "spatial", "content"]
 sources = Glob("src/*.cpp")
