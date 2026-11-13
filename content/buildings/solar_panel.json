@@ -1,5 +1,5 @@
 {
-  "id": "solar_panel", "kind": "panel", "footprint": 1, "layer": "ground", "cost": 40,
+  "id": "solar_panel", "kind": "panel", "footprint": 1, "layer": "ground", "cost": 50,
   "panelRate": 3, "aimMount": false, "aimOffsetDeg": 0,
   "targeting": [],
   "paths": [], "active": null,

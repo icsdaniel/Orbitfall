@@ -1,6 +1,6 @@
-// Deterministic bot runs on the shipped content, as a sanity check of the M1
-// numbers: a scripted, never-rotating build survives waves 1 to 3, and a run
-// that never builds loses. Building ids are looked up at the edge, like a
+// Deterministic bot run on the shipped content: a run that never builds loses,
+// and each wave costs exactly what its spawns say. The strategy bots and the
+// balance targets are in test_balance.cpp. Building ids are looked up at the edge, like a
 // client would; the sim only sees indices.
 #include <string>
 #include <vector>
@@ -79,29 +79,7 @@ BotResult runBot(const std::vector<Order>& orders, uint32_t maxWaves, uint32_t s
   return r;
 }
 
-// One Gatling under each lane and panels ahead of the drifting sun; slot i is
-// at 10 * i degrees, lanes come in at 30 and 170, the sun starts at 0.
-const std::vector<Order>& starterBuild() {
-  static const std::vector<Order> orders = {
-      {0, 3, "gatling"}, {0, 5, "solar_panel"}, {0, 6, "solar_panel"},
-      {1, 17, "gatling"}, {1, 7, "solar_panel"}, {1, 8, "solar_panel"},
-      {2, 4, "gatling"}, {2, 16, "gatling"}, {2, 9, "solar_panel"}, {2, 10, "solar_panel"},
-  };
-  return orders;
-}
-
 }  // namespace
-
-TEST_CASE("bot: a scripted placement survives waves 1 to 3") {
-  const BotResult r = runBot(starterBuild(), 3);
-  CHECK(r.phase == Phase::Intermission);
-  CHECK(r.wavesCleared == 3);
-  CHECK(r.hp > 0.5f * shipped().planets[0].hp);  // comfortably, not by a thread
-  CHECK(r.rejected == 0);                         // every order was affordable
-  CHECK(r.kills > 0);
-  // Deterministic: the same run again gives the same state.
-  CHECK(runBot(starterBuild(), 3).hash == r.hash);
-}
 
 TEST_CASE("bot: never building loses, and each wave hurts as much as its spawns say") {
   const ContentDB& db = shipped();

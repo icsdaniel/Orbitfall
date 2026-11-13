@@ -1,7 +1,7 @@
 {
-  "id": "cannon", "kind": "tower", "footprint": 1, "layer": "ground", "cost": 90,
+  "id": "cannon", "kind": "tower", "footprint": 1, "layer": "ground", "cost": 110,
   "arcDeg": 25, "range": 450, "fireRate": 0.8, "aimMount": true, "aimOffsetDeg": 0,
-  "projectile": { "kind": "shell", "speed": 600, "damage": 3, "type": "explosive", "splash": 40 },
+  "projectile": { "kind": "shell", "speed": 600, "damage": 3, "type": "explosive", "splash": 28 },
   "falloff": [[0, 1], [1, 1]],
   "targeting": ["first", "strong", "close"],
   "paths": [], "active": null,

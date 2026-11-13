@@ -69,6 +69,11 @@ Small choices an agent had to make where the brief was silent. Each is data, not
 | 2026-11-13 | Content loader | `killBounty` in rules is a multiplier (1) on each enemy's own `bounty` | `content/rules.json` |
 | 2026-11-13 | Content loader | The 0.25 damage floor is tunable upward in `rules.json` (`minDamageMult`) but can never go below 0.25 (fixed in the loader) | `core/content/content.h` |
 | 2026-11-13 | Content loader | Dart carries the `fast` trait (its "triangle, trail" cue); it has no gameplay effect in M1 | `content/enemies/dart.json` |
+| 2026-11-13 | M1 balance | First balance pass, data only; replaces the BRIEF §8.2 starter numbers where listed. Before it, three Gatlings bought from the starting 150 won every wave with no panels. Costs: Gatling 50 → 60, Cannon 90 → 110, Panel 40 → 50 (`panelRate` stays 3). Gatling 6 → 5 shots/s; Cannon splash 40 → 28 | `content/buildings/*.json` |
+| 2026-11-13 | M1 balance | Waves grow much larger from wave 4 (wave 8: 240 green Drifters on lane B; 160 Darts + 65 greens + 2 Eclipsers on lane A) so that tower count, and therefore income, decides the late waves; waves 1–3 are sized so that never building loses in wave 3. `spawnSeconds` 14–24 | `content/waves/m1.json` |
+| 2026-11-13 | M1 balance | `killBounty` 1 → 0.4 (bounties stay tiny next to panel income); lane spawn radius 900 → 600 and lane jitter 0 → ±8° (shorter approach, a stream instead of a single file) | `content/rules.json` |
+| 2026-11-13 | M1 balance | Eclipser: HP 40 → 80, speed 25 → 30, spawn radius 900 → 600, hover 15 → 12 s, descend speed 10 → 14 (a full run is 3–4 min of wave time) | `content/enemies/eclipser.json` |
+| 2026-11-13 | M1 balance | The four strategy bots in `core/tests/balance_bots.h` are the balance regression suite (never-build, towers-only, sun-chaser, sensible); outcome table: `./build/core_tests --no-skip -tc="balance report"` | `core/tests/test_balance.cpp` |
 
 ## 4. Entry template
 

@@ -156,6 +156,8 @@ TEST_CASE("medium planet matches BRIEF 8.2, degrees converted to radians") {
   CHECK(p.lanes[1].bearing == doctest::Approx(170 * kDeg));
 }
 
+// Numbers below are the shipped ones: BRIEF 8.2 starters as changed by the M1
+// balance pass (docs/design/DECISIONS.md, section 3). A balance change edits them here too.
 TEST_CASE("sun and rules match the brief; lit arc is about 90 degrees") {
   const ContentDB db = shipped_db();
   const SunDef& s = db.suns[0];
@@ -168,19 +170,19 @@ TEST_CASE("sun and rules match the brief; lit arc is about 90 degrees") {
   CHECK(litArc / kDeg == doctest::Approx(90).epsilon(0.01));
 
   CHECK(db.rules.tickRate == 30);
-  CHECK(db.rules.killBounty == doctest::Approx(1));
+  CHECK(db.rules.killBounty == doctest::Approx(0.4));
   CHECK(db.rules.minDamageMult == doctest::Approx(0.25));
   CHECK(db.rules.lightChargeMult == doctest::Approx(2));
 }
 
-TEST_CASE("buildings match BRIEF 8.2") {
+TEST_CASE("buildings match BRIEF 8.2 and the M1 balance pass") {
   const ContentDB db = shipped_db();
   const BuildingDef& g = db.buildings[static_cast<size_t>(db.building_index("gatling"))];
   CHECK(g.kind == BuildingKind::Tower);
-  CHECK(g.cost == doctest::Approx(50));
+  CHECK(g.cost == doctest::Approx(60));
   CHECK(g.arc == doctest::Approx(40 * kDeg));
   CHECK(g.range == doctest::Approx(350));
-  CHECK(g.fireRate == doctest::Approx(6));
+  CHECK(g.fireRate == doctest::Approx(5));
   REQUIRE(g.hasProjectile);
   CHECK(g.projectile.kind == ProjectileKind::Dot);
   CHECK(g.projectile.speed == doctest::Approx(900));
@@ -195,7 +197,7 @@ TEST_CASE("buildings match BRIEF 8.2") {
   CHECK(g.visual.color == "tower.gatling");
 
   const BuildingDef& c = db.buildings[static_cast<size_t>(db.building_index("cannon"))];
-  CHECK(c.cost == doctest::Approx(90));
+  CHECK(c.cost == doctest::Approx(110));
   CHECK(c.arc == doctest::Approx(25 * kDeg));
   CHECK(c.range == doctest::Approx(450));
   CHECK(c.fireRate == doctest::Approx(0.8));
@@ -203,14 +205,14 @@ TEST_CASE("buildings match BRIEF 8.2") {
   CHECK(c.projectile.speed == doctest::Approx(600));
   CHECK(c.projectile.damage == doctest::Approx(3));
   CHECK(c.projectile.type == DamageType::Explosive);
-  CHECK(c.projectile.splash == doctest::Approx(40));
+  CHECK(c.projectile.splash == doctest::Approx(28));
   CHECK(c.visual.shape == Shape::Square);
   REQUIRE(c.falloff.size() == 2);
   CHECK(c.falloff[1].mult == doctest::Approx(1));
 
   const BuildingDef& s = db.buildings[static_cast<size_t>(db.building_index("solar_panel"))];
   CHECK(s.kind == BuildingKind::Panel);
-  CHECK(s.cost == doctest::Approx(40));
+  CHECK(s.cost == doctest::Approx(50));
   CHECK(s.panelRate == doctest::Approx(3));
   CHECK_FALSE(s.hasProjectile);
   CHECK(s.targeting.empty());
@@ -240,7 +242,7 @@ TEST_CASE("layer chain drifter_green -> blue -> red resolves to 3 layers") {
   CHECK(db.enemies[static_cast<size_t>(green)].land_damage(1) == doctest::Approx(1));
 }
 
-TEST_CASE("dart and eclipser match BRIEF 8.2") {
+TEST_CASE("dart and eclipser match BRIEF 8.2 and the M1 balance pass") {
   const ContentDB db = shipped_db();
   const EnemyDef& d = db.enemies[static_cast<size_t>(db.enemy_index("dart"))];
   CHECK(d.shape == Shape::Triangle);
@@ -257,16 +259,16 @@ TEST_CASE("dart and eclipser match BRIEF 8.2") {
   CHECK(e.behavior == EnemyBehavior::Eclipser);
   CHECK(e.shadowCaster);
   CHECK(e.hpBar);
-  CHECK(e.hp == doctest::Approx(40));
-  CHECK(e.speed == doctest::Approx(25));
+  CHECK(e.hp == doctest::Approx(80));
+  CHECK(e.speed == doctest::Approx(30));
   CHECK(e.size == doctest::Approx(28));
   CHECK(e.bounty == doctest::Approx(15));
   CHECK(e.land_damage(1) == doctest::Approx(15));
   REQUIRE(e.hasHover);
   CHECK(e.hover.hoverRadius == doctest::Approx(260));
-  CHECK(e.hover.hoverSeconds == doctest::Approx(15));
-  CHECK(e.hover.descendSpeed == doctest::Approx(10));
-  CHECK(e.hover.spawnRadius == doctest::Approx(900));
+  CHECK(e.hover.hoverSeconds == doctest::Approx(12));
+  CHECK(e.hover.descendSpeed == doctest::Approx(14));
+  CHECK(e.hover.spawnRadius == doctest::Approx(600));
   CHECK(e.hover.spawnJitter == doctest::Approx(6 * kDeg));
 
   // Drifters cast no shadow; only the Eclipser does in M1.
@@ -275,7 +277,7 @@ TEST_CASE("dart and eclipser match BRIEF 8.2") {
   CHECK(casters == 1);
 }
 
-TEST_CASE("m1 waves match the BRIEF 8.2 table; wave 5 lightMult is 0.5") {
+TEST_CASE("m1 waves match the balanced BRIEF 8.2 table; wave 5 lightMult is 0.5") {
   const ContentDB db = shipped_db();
   const int set = db.wave_set_index("m1");
   REQUIRE(set != kNoIndex);
@@ -295,12 +297,13 @@ TEST_CASE("m1 waves match the BRIEF 8.2 table; wave 5 lightMult is 0.5") {
     int count;
   };
   const Row table[] = {
-      {1, "A", "drifter_red", 8},    {2, "A", "drifter_blue", 10},  {2, "B", "drifter_red", 4},
-      {3, "A", "dart", 6},           {3, "B", "drifter_blue", 10},  {4, "A", "drifter_blue", 12},
-      {4, "B", "eclipser", 1},       {5, "A", "drifter_green", 14}, {5, "B", "dart", 8},
-      {6, "A", "eclipser", 1},       {6, "A", "dart", 10},          {6, "B", "drifter_blue", 16},
-      {7, "A", "drifter_green", 20}, {7, "B", "eclipser", 1},       {7, "B", "drifter_green", 12},
-      {8, "A", "eclipser", 2},       {8, "A", "dart", 15},          {8, "B", "drifter_green", 25}};
+      {1, "A", "drifter_red", 14},    {2, "A", "drifter_blue", 16},  {2, "B", "drifter_red", 8},
+      {3, "A", "dart", 12},           {3, "B", "drifter_blue", 20},  {4, "A", "drifter_blue", 40},
+      {4, "B", "eclipser", 1},        {4, "B", "drifter_red", 12},   {5, "A", "drifter_green", 55},
+      {5, "B", "dart", 40},           {6, "A", "eclipser", 1},       {6, "A", "dart", 70},
+      {6, "B", "drifter_blue", 100},  {6, "B", "drifter_green", 35}, {7, "A", "drifter_green", 150},
+      {7, "B", "eclipser", 1},        {7, "B", "drifter_green", 115}, {8, "A", "eclipser", 2},
+      {8, "A", "dart", 160},          {8, "A", "drifter_green", 65}, {8, "B", "drifter_green", 240}};
   const PlanetDef& planet = db.planets[static_cast<size_t>(ws.planet)];
   size_t row = 0;
   for (size_t w = 0; w < ws.waves.size(); ++w) {
@@ -308,7 +311,7 @@ TEST_CASE("m1 waves match the BRIEF 8.2 table; wave 5 lightMult is 0.5") {
     CAPTURE(wave.wave);
     CHECK(wave.wave == static_cast<int>(w) + 1);
     CHECK(wave.lightMult == doctest::Approx(light[w]));
-    CHECK(wave.spawnSeconds >= 15.0f);
+    CHECK(wave.spawnSeconds >= 14.0f);
     CHECK(wave.spawnSeconds <= 25.0f);
     CHECK(wave.forecast.exactAhead == 1);
     CHECK(wave.forecast.iconsAhead == 3);
@@ -341,8 +344,8 @@ TEST_CASE("rejects unknown references") {
                     "\"enemy\": \"blimp\", \"count\": 8", "unknown enemy id 'blimp'");
   }
   SUBCASE("wave lane") {
-    expect_rejected("waves/m1.json", "\"lane\": \"B\", \"enemy\": \"drifter_red\"",
-                    "\"lane\": \"C\", \"enemy\": \"drifter_red\"", "unknown lane 'C'");
+    expect_rejected("waves/m1.json", "\"lane\": \"B\", \"enemy\": \"drifter_red\", \"count\": 8",
+                    "\"lane\": \"C\", \"enemy\": \"drifter_red\", \"count\": 8", "unknown lane 'C'");
   }
   SUBCASE("wave planet") {
     expect_rejected("waves/m1.json", "\"planet\": \"medium\"", "\"planet\": \"huge\"",
@@ -389,13 +392,13 @@ TEST_CASE("rejects unknown enum values") {
 }
 
 TEST_CASE("rejects negative numbers") {
-  expect_rejected("buildings/gatling.json", "\"cost\": 50", "\"cost\": -50", "must not be negative");
+  expect_rejected("buildings/gatling.json", "\"cost\": 60", "\"cost\": -60", "must not be negative");
   expect_rejected("buildings/gatling.json", "\"damage\": 1", "\"damage\": -1", "must not be negative");
   expect_rejected("buildings/solar_panel.json", "\"panelRate\": 3", "\"panelRate\": -3",
                   "must not be negative");
   expect_rejected("enemies/dart.json", "\"speed\": 110", "\"speed\": -110", "must not be negative");
   expect_rejected("enemies/dart.json", "\"bounty\": 1", "\"bounty\": -1", "must not be negative");
-  expect_rejected("enemies/eclipser.json", "\"hoverSeconds\": 15", "\"hoverSeconds\": -15",
+  expect_rejected("enemies/eclipser.json", "\"hoverSeconds\": 12", "\"hoverSeconds\": -12",
                   "must not be negative");
   expect_rejected("planets/medium.json", "\"hp\": 100", "\"hp\": -100", "must not be negative");
   expect_rejected("planets/medium.json", "\"startStardust\": 150", "\"startStardust\": -1",
@@ -405,7 +408,7 @@ TEST_CASE("rejects negative numbers") {
   expect_rejected("waves/m1.json", "\"count\": 14}", "\"count\": -14}", "must not be negative");
   expect_rejected("waves/m1.json", "\"lightMult\": 0.5", "\"lightMult\": -0.5",
                   "must not be negative");
-  expect_rejected("rules.json", "\"killBounty\": 1", "\"killBounty\": -1", "must not be negative");
+  expect_rejected("rules.json", "\"killBounty\": 0.4", "\"killBounty\": -1", "must not be negative");
 }
 
 TEST_CASE("rejects out-of-range values") {
@@ -457,7 +460,7 @@ TEST_CASE("rejects damage multipliers below 0.25 (no hard counters)") {
 }
 
 TEST_CASE("rejects missing fields") {
-  expect_rejected("buildings/gatling.json", "\"cost\": 50,", "", "missing field 'cost'");
+  expect_rejected("buildings/gatling.json", "\"cost\": 60,", "", "missing field 'cost'");
   expect_rejected("buildings/gatling.json", "\"range\": 350,", "", "missing field 'range'");
   expect_rejected("buildings/gatling.json", "\"aimMount\": true,", "", "missing field 'aimMount'");
   expect_rejected("buildings/gatling.json", "\"speed\": 900,", "", "missing field 'speed'");
@@ -475,7 +478,7 @@ TEST_CASE("rejects missing fields") {
 }
 
 TEST_CASE("rejects wrong types") {
-  expect_rejected("buildings/gatling.json", "\"cost\": 50", "\"cost\": \"50\"", "expected number, got string");
+  expect_rejected("buildings/gatling.json", "\"cost\": 60", "\"cost\": \"60\"", "expected number, got string");
   expect_rejected("buildings/gatling.json", "\"aimMount\": true", "\"aimMount\": 1", "expected bool");
   expect_rejected("planets/medium.json", "{ \"id\": \"A\", \"bearingDeg\": 30 }", "\"A\"", "expected object");
 }
@@ -524,7 +527,7 @@ TEST_CASE("rejects bad ids and broken layer chains") {
 
 TEST_CASE("a failed load leaves the output untouched and reports every problem") {
   Files files = shipped_files();
-  edit(files, "buildings/gatling.json", "\"cost\": 50", "\"cost\": -50");
+  edit(files, "buildings/gatling.json", "\"cost\": 60", "\"cost\": -60");
   edit(files, "enemies/dart.json", "\"speed\": 110", "\"speed\": -110");
   ContentDB db = shipped_db();
   const size_t enemiesBefore = db.enemies.size();
