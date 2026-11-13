@@ -10,6 +10,7 @@
 #include "sim/events.h"
 #include "sim/rng.h"
 #include "spatial/grid.h"
+#include "systems/shadows.h"
 
 namespace orbitfall {
 
@@ -122,6 +123,8 @@ struct World {
   // --- derived each tick (not hashed) ---
   SpatialGrid grid;              // enemies by position, rebuilt by spatialRebuild
   float maxEnemyRadius = 0.0f;   // largest EnemyDef::size, pads grid queries
+  std::vector<ShadeInterval> shade;   // merged shadows in beam space, sorted
+  uint32_t shadeCount = 0;
   std::vector<uint32_t> slotTargets;  // per slot: enemy index picked by towerTargeting
 
   // --- queues (not hashed: pending input and undrained output) ---

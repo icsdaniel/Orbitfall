@@ -4,6 +4,8 @@
 
 #include "sim/mathx.h"
 #include "sim/world.h"
+#include "systems/enemies.h"
+#include "systems/shadows.h"
 #include "systems/systems.h"
 
 namespace orbitfall {
@@ -45,15 +47,44 @@ void sunlight(World& world, float dt) {
   }
   world.beamStrength = world.sun->baseStrength * world.lightMult;
 
-  // Lit flags are refreshed in every phase: the planet also turns between waves.
   const float radius = world.planet->radius, width = world.sun->beamWidth;
+  const float sx = std::cos(world.sunBearing), sy = std::sin(world.sunBearing);
+
+  // Shadows (M1.8): one interval per shadow caster, merged.
+  uint32_t count = 0;
+  if (world.content != nullptr) {
+    const EnemyPool& e = world.enemies;
+    const uint32_t capacity = static_cast<uint32_t>(world.shade.size());
+    for (uint32_t i = 0; i < e.count && count < capacity; ++i) {
+      const EnemyDef& def = world.content->enemies[e.type[i]];
+      if (!def.shadowCaster || (e.flags[i] & kEnemyDead)) continue;
+      if (casterInterval(e.posX[i], e.posY[i], def.size, sx, sy, radius, world.shade[count])) ++count;
+    }
+  }
+  world.shadeCount = mergeIntervals(world.shade.data(), count);
+
+  // Lit and shaded flags are refreshed in every phase: the planet also turns
+  // between waves.
   const uint32_t n = world.slotCount();
+  uint32_t shadedSlots = 0;
+  bool changed = false;
   for (uint32_t s = 0; s < n; ++s) {
     BuildingSlot& b = world.slots[s];
+    const uint8_t before = b.flags;
     b.flags &= static_cast<uint8_t>(~(kSlotLit | kSlotShaded));
-    if (inBeam(radius, width, world.sunBearing, world.slotAngle(s) + world.planetRotation)) {
+    const float angle = world.slotAngle(s) + world.planetRotation;
+    if (inBeam(radius, width, world.sunBearing, angle)) {
       b.flags |= kSlotLit;
+      if (isShaded(world.shade.data(), world.shadeCount, radius * std::sin(angle - world.sunBearing))) {
+        b.flags |= kSlotShaded;
+        ++shadedSlots;
+      }
     }
+    changed = changed || ((before ^ b.flags) & kSlotShaded) != 0;
+  }
+  if (changed) {
+    world.emit(EventType::ShadowChanged, static_cast<int32_t>(shadedSlots),
+               static_cast<int32_t>(world.shadeCount));
   }
 }
 
