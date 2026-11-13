@@ -81,7 +81,9 @@ float sd_rhombus(vec2 p, vec2 b) {
 float shape_sdf(int shape, vec2 p) {
 	vec2 up = vec2(p.x, -p.y); // canvas y points down; shapes point up on screen
 	if (shape == 1) {
-		return sd_triangle(up, 0.85);
+		// Narrowed so the nose is unmistakable: an equilateral triangle reads
+		// the same in three headings.
+		return sd_triangle(vec2(up.x * 1.45, up.y), 0.85) / 1.45;
 	} else if (shape == 2) {
 		return sd_box(p, 0.8);
 	} else if (shape == 3) {

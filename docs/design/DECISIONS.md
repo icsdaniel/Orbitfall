@@ -74,6 +74,18 @@ Small choices an agent had to make where the brief was silent. Each is data, not
 | 2026-11-13 | M1 balance | `killBounty` 1 → 0.4 (bounties stay tiny next to panel income); lane spawn radius 900 → 600 and lane jitter 0 → ±8° (shorter approach, a stream instead of a single file) | `content/rules.json` |
 | 2026-11-13 | M1 balance | Eclipser: HP 40 → 80, speed 25 → 30, spawn radius 900 → 600, hover 15 → 12 s, descend speed 10 → 14 (a full run is 3–4 min of wave time) | `content/enemies/eclipser.json` |
 | 2026-11-13 | M1 balance | The four strategy bots in `core/tests/balance_bots.h` are the balance regression suite (never-build, towers-only, sun-chaser, sensible); outcome table: `./build/core_tests --no-skip -tc="balance report"` | `core/tests/test_balance.cpp` |
+| 2026-11-13 | M1 sim | Rotation between waves uses the real tick dt (the sim clock is frozen in an intermission, the planet still turns at full speed, whatever the time scale) | `core/systems/planet.cpp` |
+| 2026-11-13 | M1 sim | Unit k of n of a spawn entry appears at `spawnSeconds · k / n` into the wave; the forecast uses the same formula | `core/systems/waves.h` |
+| 2026-11-13 | M1 sim | Splash hits every enemy disc it touches at full damage (no falloff inside the splash radius) | `core/systems/combat.cpp` |
+| 2026-11-13 | M1 sim | `SetAim` is free in M1 (M2.11 prices re-aiming) | `core/systems/buildings.cpp` |
+| 2026-11-13 | M1 sim | Shadows lag one tick: `sunlight` runs before `enemyMovement`, so shade is computed from the casters' positions of the previous tick | `core/sim/pipeline.cpp` |
+| 2026-11-13 | M1 sim | `StardustChanged` from panel income is emitted once per whole unit earned, not every tick | `core/systems/sun.cpp` |
+| 2026-11-13 | M1 sim | The disc is shape id 6 (after circle, triangle, square, hexagon, star, diamond); the client's `BatchRenderer.Shape` uses the same ids | `core/content/content.h`, `game/render/batch_renderer.gd` |
+| 2026-11-13 | M1 sim | Live tuning mutates the `ContentDB` between ticks (the World reads it every tick); tuned runs do not replay from their log | `gdextension/src/sim_server.cpp` |
+| 2026-11-13 | M1 integration | One render convention: instance basis = entity radius, batch shape of radius 1 (shape size 2), the shape's "up" along the velocity; the Dart's triangle is drawn narrowed so its heading reads | `core/sim/render_snapshot.h`, `game/view/entity_view.gd`, `game/render/shaders/sdf_shapes.gdshader` |
+| 2026-11-13 | M1 integration | `get_forecast` during a wave lists the wave in flight first (exact, no ghost arcs), then the upcoming ones from core `forecast()` | `gdextension/src/sim_server.cpp` |
+| 2026-11-13 | M1 integration | Slow-time numbers (`surfaceTimeScale`, `surfaceTimeEaseSeconds`) are read from content through `SimServer.get_surface_time_scale()` / `get_surface_time_ease_seconds()`; removed from `client_config.json` | `game/app/band_controller.gd` |
+| 2026-11-13 | M1 integration | `load_content` ends the run in progress (a World points into its `ContentDB`); call `new_run` after it | `gdextension/src/sim_server.cpp` |
 
 ## 4. Entry template
 

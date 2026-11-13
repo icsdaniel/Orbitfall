@@ -14,13 +14,13 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 ## M1 First playable
 - [x] M1.1 Planet rotation
 - [x] M1.2 Input → commands
-- [ ] M1.3 Slots, placement, sell (sim and slot view done; wiring to the real sim remains)
+- [x] M1.3 Slots, placement, sell
 - [x] M1.4 Build menu and ghost
 - [x] M1.5 Enemies, lanes, landing
 - [x] M1.6 Targeting, projectiles, splash
-- [ ] M1.7 Sun, beam, income (sim and client done; wiring remains)
-- [ ] M1.8 Shadows and Eclipser (sim and client done; wiring remains)
-- [ ] M1.9 Waves, flow, forecast (sim and client done; wiring remains)
+- [x] M1.7 Sun, beam, income
+- [x] M1.8 Shadows and Eclipser
+- [x] M1.9 Waves, flow, forecast
 - [x] M1.10 Bands and slow time (client; sim honours set_time_scale)
 - [x] M1.11 Debug overlay and tuning (client; tunables applied by SimServer)
 
@@ -29,4 +29,4 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [ ] D2 rotation toy
 - [ ] D3 sun/shadow toy
 
-M1 client note: the client parts of M1.3/M1.7/M1.8/M1.9 (slot ring, beam cone, slot tint, shadow wedges, HUD, forecast strip, end screens) are in `game/view/` and `game/ui/`; those tasks get ticked when their sim halves land. `--mock` runs the client on `MockSimServer`.
+M1 integration (branch `m1-integration`): the game runs on the real `SimServer` by default (sim thread on desktop and Android, stepped on the main thread on web); `--mock` still runs the client on `MockSimServer`. First balance pass done (data only, see DECISIONS §3); the strategy bots in `core/tests/test_balance.cpp` are the balance regression suite (`./build/core_tests --no-skip -tc="balance report"` prints the outcome table). Playtested headless: screenshots in `docs/screenshots/m1-integration/` (taken with the playtest bot, `--play=sensible --ff-wave=N --screenshot PATH`), web export smoke test passes in headless Chromium. Open for the M1 feel gate: Daniele plays `/m1/` and the APK (BRIEF §8.4).

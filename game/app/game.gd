@@ -5,7 +5,11 @@ extends Node2D
 ## OrbitCamera, PlanetView, EntityView (BatchRenderer), InputRouter, BandController
 ## and the HUD, and turns UI intents into SimServer commands.
 ## User args (after `--`): --mock, --seed=N, --band=surface|orbit, --demo (scripted
-## mid-wave state), --select=SLOT, --debug, --end=won|lost (mock), --screenshot PATH.
+## mid-wave state on the mock), --select=SLOT, --debug, --end=won|lost (mock),
+## --screenshot PATH. Playtest bot (see autoplay.gd): --play=sensible|towers|none keeps
+## playing live; with --ff-wave=N [--ff-seconds=S], --ff-shadow or --ff-end the run is
+## first fast-forwarded to that moment (wave N running for S seconds, or its
+## intermission when S < 0; the first enemy shadow on the planet; the end screen).
 
 const PHASE_INTERMISSION: int = 0
 const PHASE_WAVE: int = 1
@@ -39,6 +43,12 @@ var _debug_arg: bool = false
 var _end_arg: String = ""
 var _screenshot_path: String = ""
 var _slot_pick_px: float = 44.0
+var _play: String = ""
+var _autoplay: Autoplay
+var _ff_wave: int = 0
+var _ff_seconds: float = 0.0
+var _ff_shadow: bool = false
+var _ff_end: bool = false
 
 
 func _ready() -> void:
@@ -52,6 +62,10 @@ func _ready() -> void:
 	bands.snap_to(BandController.Band.ORBIT if start_band == "orbit" else BandController.Band.SURFACE)
 	if _demo:
 		_setup_demo()
+	if _play != "":
+		_autoplay = Autoplay.new()
+		_autoplay.setup(sim, _play)
+		_fast_forward()
 	if _select_arg >= 0:
 		planet_view.sync()
 		_select_slot(_select_arg)
@@ -61,6 +75,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_frame += 1
+	if _autoplay != null and _screenshot_path == "":
+		_autoplay.act()
 	var zoom: float = camera.get_zoom_value()
 	planet_view.view_zoom = zoom
 	planet_view.surface_weight = bands.surface_weight
@@ -121,7 +137,7 @@ func _create_sim() -> void:
 		sim.set_palette(Palette.NAMED)
 	# Screenshots and scripted demos step the sim by hand, so keep it on this thread.
 	var threaded: bool = config.flag("sim", "threaded", true) and not OS.has_feature("web")
-	sim.set_threaded(threaded and not _demo and _screenshot_path == "")
+	sim.set_threaded(threaded and not _demo and _screenshot_path == "" and _play == "")
 
 
 func _build_scene() -> void:
@@ -319,6 +335,16 @@ func _parse_args() -> void:
 			_start_band = arg.get_slice("=", 1)
 		elif arg.begins_with("--select="):
 			_select_arg = arg.get_slice("=", 1).to_int()
+		elif arg.begins_with("--play="):
+			_play = arg.get_slice("=", 1)
+		elif arg.begins_with("--ff-wave="):
+			_ff_wave = arg.get_slice("=", 1).to_int()
+		elif arg.begins_with("--ff-seconds="):
+			_ff_seconds = arg.get_slice("=", 1).to_float()
+		elif arg == "--ff-shadow":
+			_ff_shadow = true
+		elif arg == "--ff-end":
+			_ff_end = true
 		elif arg.begins_with("--end="):
 			_end_arg = arg.get_slice("=", 1)
 		elif arg == "--screenshot" and i + 1 < args.size():
@@ -361,6 +387,29 @@ func _setup_demo() -> void:
 		elif _end_arg == "lost":
 			mock.debug_set_planet_hp(0.0)
 			mock.debug_set_phase(PHASE_LOST)
+	bands.update()
+
+
+## Plays the run with the playtest bot, as fast as the sim steps, up to the moment
+## the --ff-* arguments ask for. Uses contract calls only.
+func _fast_forward() -> void:
+	if _ff_wave <= 0 and not _ff_shadow and not _ff_end:
+		return
+	for i: int in 40000:
+		var phase: int = sim.get_phase()
+		if phase >= PHASE_WON:
+			break
+		if _ff_shadow and sim.get_shade_intervals().size() > 0:
+			break
+		if _ff_wave > 0 and int(sim.get_wave_index()) == _ff_wave - 1:
+			if phase == PHASE_INTERMISSION and _ff_seconds < 0.0:
+				break
+			if phase == PHASE_WAVE and _ff_seconds >= 0.0 \
+					and float(sim.get_debug_stats().get("wave_time", 0.0)) >= _ff_seconds:
+				break
+		_autoplay.act()
+		sim.step_ticks(3)
+	sim.drain_events()
 	bands.update()
 
 
