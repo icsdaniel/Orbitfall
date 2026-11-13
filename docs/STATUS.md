@@ -14,7 +14,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 ## M1 First playable
 - [x] M1.1 Planet rotation
 - [ ] M1.2 Input → commands
-- [ ] M1.3 Slots, placement, sell
+- [ ] M1.3 Slots, placement, sell (sim part done: slot ring, place/sell commands, refund, rejections; slot view remains)
 - [ ] M1.4 Build menu and ghost
 - [ ] M1.5 Enemies, lanes, landing
 - [ ] M1.6 Targeting, projectiles, splash
