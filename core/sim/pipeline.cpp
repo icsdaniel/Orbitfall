@@ -24,6 +24,10 @@ Pipeline defaultPipeline() {
   Pipeline p;
   p.add("applyCommands", applyCommands);
   p.add("planetRotation", planetRotation);
+  p.add("enemyMovement", enemyMovement);
+  p.add("spatialRebuild", spatialRebuild);
+  p.add("landing", landing);
+  p.add("cleanup", cleanup);
   p.add("advanceClock", advanceClock);
   return p;
 }
