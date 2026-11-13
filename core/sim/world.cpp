@@ -1,6 +1,8 @@
 #include "sim/world.h"
 
 #include "sim/hash.h"
+#include "sim/mathx.h"
+#include "systems/sun.h"
 
 namespace orbitfall {
 namespace {
@@ -32,13 +34,24 @@ void initWorld(World& world, const SimConfig& config) {
   world.rotateInput = 0.0f;
   world.content = config.content;
   world.planet = nullptr;
+  world.sun = nullptr;
+  world.sunPath = nullptr;
   if (const ContentDB* db = config.content) {
     const bool hasSet = config.waveSet >= 0 && config.waveSet < static_cast<int>(db->waveSets.size());
     const int planet = hasSet ? db->waveSets[static_cast<size_t>(config.waveSet)].planet : config.planet;
     if (planet >= 0 && planet < static_cast<int>(db->planets.size())) {
       world.planet = &db->planets[static_cast<size_t>(planet)];
     }
+    const int sun = hasSet ? db->waveSets[static_cast<size_t>(config.waveSet)].sun : config.sun;
+    if (sun >= 0 && sun < static_cast<int>(db->suns.size())) {
+      world.sun = &db->suns[static_cast<size_t>(sun)];
+      world.sunPath = &sunPathFor(world.sun->type);
+    }
   }
+  world.sunBearing = world.sun ? wrapTau(world.sun->start) : 0.0f;
+  world.lightMult = 1.0f;
+  world.beamStrength = world.sun ? world.sun->baseStrength : 0.0f;
+  world.incomePerSecond = 0.0f;
   world.planetRotation = 0.0f;
   world.planetAngVel = 0.0f;
   world.planetHp = world.planet ? world.planet->hp : 0.0f;
@@ -106,6 +119,8 @@ uint64_t hashWorld(const World& world) {
   h.add(world.rotateInput);
   h.add(world.planetRotation);
   h.add(world.planetAngVel);
+  h.add(world.sunBearing);
+  h.add(world.lightMult);
   h.add(world.planetHp);
   h.add(world.phase);
   h.add(world.waveIndex);

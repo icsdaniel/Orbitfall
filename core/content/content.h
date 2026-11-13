@@ -25,7 +25,7 @@ enum class BuildingLayer : uint8_t { Ground, Elevated };
 enum class ProjectileKind : uint8_t { Dot, Shell };
 enum class DamageType : uint8_t { Kinetic, Explosive, Energy, Cryo, Emp, Pierce, Count };
 enum class TargetingMode : uint8_t { First, Strong, Close };
-enum class SunPathType : uint8_t { ConstantDrift };
+enum class SunPathType : uint8_t { ConstantDrift, Fixed };
 enum class EnemyBehavior : uint8_t { Lane, Eclipser };
 
 inline constexpr int kDamageTypeCount = static_cast<int>(DamageType::Count);
