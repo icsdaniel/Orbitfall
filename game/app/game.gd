@@ -116,6 +116,9 @@ func _create_sim() -> void:
 	var errors: PackedStringArray = sim.load_content("res://content")
 	for message: String in errors:
 		push_warning("content: " + message)
+	if sim.has_method(&"set_palette"):
+		# Instance colours for palette keys that are not colour tiers.
+		sim.set_palette(Palette.NAMED)
 	# Screenshots and scripted demos step the sim by hand, so keep it on this thread.
 	var threaded: bool = config.flag("sim", "threaded", true) and not OS.has_feature("web")
 	sim.set_threaded(threaded and not _demo and _screenshot_path == "")
@@ -136,7 +139,6 @@ func _build_scene() -> void:
 	entity_view = EntityView.new()
 	entity_view.name = "EntityView"
 	entity_view.sim = sim
-	entity_view.projectile_size = config.num("sim", "projectileSize", 4.0)
 	add_child(entity_view)
 	entity_view.renderer.camera = camera
 

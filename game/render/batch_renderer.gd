@@ -16,7 +16,8 @@ const MIN_CAPACITY: int = 64
 ## Must match QUAD_PAD in sdf_shapes.gdshader.
 const QUAD_PAD: float = 1.5
 
-enum Shape { CIRCLE, TRIANGLE, SQUARE, HEXAGON, STAR, DIAMOND, RING }
+## Same ids as core's Shape enum (content "shape" names); 6 is the Eclipser's disc.
+enum Shape { CIRCLE, TRIANGLE, SQUARE, HEXAGON, STAR, DIAMOND, DISC }
 enum Tier { RED, BLUE, GREEN, YELLOW, PINK, BLACK, WHITE, CERAMIC }
 const SHAPE_COUNT: int = 7
 const TRAIT_CAMO: int = 1

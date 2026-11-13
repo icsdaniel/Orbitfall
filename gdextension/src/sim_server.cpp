@@ -13,6 +13,8 @@
 #include <godot_cpp/variant/vector2.hpp>
 
 #include "content/content_loader.h"
+#include "sim/mathx.h"
+#include "systems/waves.h"
 #include "sim/version.h"
 
 using namespace godot;
@@ -27,57 +29,19 @@ constexpr uint32_t kMaxTicksPerAdvance = 8;
 constexpr uint32_t kLogMagic = 0x31474C4Fu;  // "OLG1"
 constexpr size_t kLogHeaderBytes = 20;       // magic, seed, wave set, end tick, count
 
-// Indexed by orbitfall::EventType. The last three are in CONTRACT.md but not in
-// core yet; they resolve by themselves if core appends them in this order.
-// TODO(M1.3): confirm the order once core adds BuildingPlaced/BuildingSold/CommandRejected.
+// Indexed by orbitfall::EventType.
 const char* const kEventNames[] = {
     "None",        "LayerPopped",   "EnemyKilled",  "PlanetHit",     "StardustChanged",
     "WaveStarted", "WaveCleared",   "ShadowChanged", "GameOver",     "Victory",
     "BuildingPlaced", "BuildingSold", "CommandRejected"};
 constexpr int kEventNameCount = static_cast<int>(sizeof(kEventNames) / sizeof(kEventNames[0]));
-static_assert(static_cast<int>(orbitfall::EventType::Victory) == 9, "event name table out of date");
-
-// Palette order of BatchRenderer.Tier; "tier.<name>" colour keys map to these.
-const char* const kTierNames[] = {"red", "blue", "green", "yellow", "pink", "black", "white", "ceramic"};
-
-float tier_of(const std::string& colorKey) {
-  if (colorKey.compare(0, 5, "tier.") != 0) return -1.0f;
-  for (int i = 0; i < 8; ++i)
-    if (colorKey.compare(5, std::string::npos, kTierNames[i]) == 0) return static_cast<float>(i);
-  return -1.0f;
-}
+static_assert(kEventNameCount == static_cast<int>(orbitfall::EventType::Count), "event name table out of date");
+static_assert(static_cast<int>(orbitfall::EventType::CommandRejected) == 12, "event name table out of date");
 
 String to_gd(const std::string& s) { return String::utf8(s.c_str(), static_cast<int64_t>(s.size())); }
 
-// Writes one 2D multimesh instance: rotated + scaled transform, colour, custom.
-inline void write_instance(float* f, float x, float y, float dirX, float dirY, float scale,
-                           const Color& c, float c0, float c1, float c2, float c3) {
-  float len = std::sqrt(dirX * dirX + dirY * dirY);
-  float cs = 1.0f, sn = 0.0f;
-  if (len > 1e-6f) {
-    cs = dirX / len;
-    sn = dirY / len;
-  }
-  f[0] = cs * scale;   // x.x
-  f[1] = -sn * scale;  // y.x
-  f[2] = 0.0f;
-  f[3] = x;
-  f[4] = sn * scale;   // x.y
-  f[5] = cs * scale;   // y.y
-  f[6] = 0.0f;
-  f[7] = y;
-  f[8] = c.r;
-  f[9] = c.g;
-  f[10] = c.b;
-  f[11] = c.a;
-  f[12] = c0;
-  f[13] = c1;
-  f[14] = c2;
-  f[15] = c3;
-}
-
-// Debug system (set_debug_scenario): exercises events and the render buffers
-// before the M1 systems exist. Deterministic; changes the state hash.
+// Debug system (set_debug_scenario): exercises events and the snapshot path on
+// a world without content. Deterministic; changes the state hash.
 void debugScenario(orbitfall::World& w, float dt) {
   if (w.tick == 0) {
     for (int i = 0; i < 3; ++i) {
@@ -196,6 +160,8 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_debug_stats"), &SimServer::get_debug_stats);
   ClassDB::bind_method(D_METHOD("set_tunable", "path", "value"), &SimServer::set_tunable);
   ClassDB::bind_method(D_METHOD("drain_events"), &SimServer::drain_events);
+  ClassDB::bind_method(D_METHOD("get_surface_time_scale"), &SimServer::get_surface_time_scale);
+  ClassDB::bind_method(D_METHOD("get_surface_time_ease_seconds"), &SimServer::get_surface_time_ease_seconds);
 
   ClassDB::bind_method(D_METHOD("set_palette", "colors"), &SimServer::set_palette);
   ClassDB::bind_method(D_METHOD("set_debug_scenario", "on"), &SimServer::set_debug_scenario);
@@ -243,51 +209,39 @@ PackedStringArray SimServer::load_content(const String& dir) {
   if (!ok && out.is_empty()) out.push_back(String("content failed to load"));
   if (!out.is_empty()) return out;
 
-  wait_idle();
+  // A world points into its ContentDB, so the run in progress ends here: the
+  // server goes back to an empty world until new_run builds one from the new content.
+  stop_thread();
+  sim_ = std::make_unique<orbitfall::Sim>(orbitfall::SimConfig());
   content_ = std::move(db);
   contentLoaded_ = true;
-  rebuild_visuals();
-  // The run in progress keeps its world; call new_run to build one from the new content.
+  autoAdvance_ = false;
+  rebuild_colors();
+  rebuild_statics();
+  reset_run_state();
   return out;
 }
 
+// Static copies for the cheap getters, taken from the world of the current run.
 void SimServer::rebuild_statics() {
   statics_ = orbitfall_binding::RunStatics();
-  if (!contentLoaded_ || waveSet_ < 0 || waveSet_ >= static_cast<int>(content_.waveSets.size())) return;
-  const orbitfall::WaveSetDef& ws = content_.waveSets[static_cast<size_t>(waveSet_)];
-  statics_.waveCount = static_cast<int32_t>(ws.waves.size());
-  if (ws.planet >= 0 && ws.planet < static_cast<int>(content_.planets.size())) {
-    const orbitfall::PlanetDef& p = content_.planets[static_cast<size_t>(ws.planet)];
-    statics_.planetRadius = p.radius;
-    statics_.planetHpMax = p.hp;
-    statics_.slotCount = p.slots;
-    statics_.startStardust = p.startStardust;
-  }
-  if (ws.sun >= 0 && ws.sun < static_cast<int>(content_.suns.size())) {
-    const orbitfall::SunDef& s = content_.suns[static_cast<size_t>(ws.sun)];
-    statics_.sunStart = s.start;
-    statics_.beamWidth = s.beamWidth;
-    statics_.beamStrength = s.baseStrength;
+  const orbitfall::World& w = sim_->world();
+  statics_.waveCount = static_cast<int32_t>(w.waveCount());
+  statics_.planetRadius = w.planet ? w.planet->radius : 0.0f;
+  statics_.planetHpMax = w.planetHpMax;
+  statics_.slotCount = static_cast<int32_t>(w.slotCount());
+  statics_.enemyColors = enemyColors_.empty() ? nullptr : enemyColors_.data();
+  const auto shot = palette_.find("projectile");
+  if (shot != palette_.end()) {
+    statics_.projectileColor[0] = shot->second.r;
+    statics_.projectileColor[1] = shot->second.g;
+    statics_.projectileColor[2] = shot->second.b;
+    statics_.projectileColor[3] = shot->second.a;
   }
 }
 
-void SimServer::new_run(int64_t seed, int64_t wave_set) {
-  if (contentLoaded_) {
-    ERR_FAIL_COND_MSG(wave_set < 0 || wave_set >= static_cast<int64_t>(content_.waveSets.size()),
-                      "SimServer.new_run: wave_set out of range");
-  }
-  stop_thread();
-  seed_ = static_cast<uint32_t>(seed);
-  waveSet_ = static_cast<int>(wave_set);
-  rebuild_statics();
-
-  orbitfall::SimConfig config;
-  config.seed = seed_;
-  // TODO(M1.x): build the World from content_ (planet, sun, waves of waveSet_)
-  // once core has a content-aware init; today the World only takes a seed.
-  sim_ = std::make_unique<orbitfall::Sim>(config);
-  if (debugScenario_) sim_->pipeline().add("debugScenario", debugScenario);
-
+// Clears everything that belongs to the previous run (sim thread stopped).
+void SimServer::reset_run_state() {
   pending_.clear();
   events_.clear();
   readyFresh_ = false;
@@ -300,6 +254,32 @@ void SimServer::new_run(int64_t seed, int64_t wave_set) {
   hashCacheTick_ = 0xFFFFFFFFu;
   orbitfall_binding::fill_snapshot(sim_->world(), statics_, *curr_);
   orbitfall_binding::fill_snapshot(sim_->world(), statics_, *prev_);
+}
+
+void SimServer::new_run(int64_t seed, int64_t wave_set) {
+  if (contentLoaded_) {
+    ERR_FAIL_COND_MSG(wave_set < 0 || wave_set >= static_cast<int64_t>(content_.waveSets.size()),
+                      "SimServer.new_run: wave_set out of range");
+  }
+  stop_thread();
+  // The same fold as core's content-aware initWorld, so the logged seed replays.
+  const uint64_t wide = static_cast<uint64_t>(seed);
+  seed_ = static_cast<uint32_t>(wide ^ (wide >> 32));
+  waveSet_ = static_cast<int>(wave_set);
+
+  orbitfall::SimConfig config;
+  config.seed = seed_;
+  sim_ = std::make_unique<orbitfall::Sim>(config);
+  if (contentLoaded_) {
+    // The real game: planet, sun and waves of the wave set (starts in an intermission).
+    orbitfall::initWorld(sim_->world(), content_, static_cast<uint32_t>(waveSet_), wide);
+    // The binding keeps the replay log itself (get_command_log).
+    sim_->world().recordCommands = false;
+  }
+  if (debugScenario_) sim_->pipeline().add("debugScenario", debugScenario);
+
+  rebuild_statics();
+  reset_run_state();
   autoAdvance_ = true;
   if (threadedWanted_) start_thread();
 }
@@ -529,9 +509,13 @@ int64_t SimServer::get_state_hash() {
 
 float SimServer::get_planet_rotation() const {
   if (curr_->tick == prev_->tick + 1) {
-    return prev_->planetRotation + (curr_->planetRotation - prev_->planetRotation) * alpha_;
+    // Rotation is kept in [0, 2*pi): interpolate along the short way round.
+    float d = curr_->planetRotation - prev_->planetRotation;
+    if (d > orbitfall::kPi) d -= orbitfall::kTau;
+    if (d < -orbitfall::kPi) d += orbitfall::kTau;
+    return curr_->planetRotation - d * (1.0f - alpha_);
   }
-  return curr_->planetRotation - curr_->planetAngVel * back_seconds();
+  return curr_->planetRotation;
 }
 
 PackedInt32Array SimServer::get_slot_buildings() const { return to_packed_int32(curr_->slotBuildings); }
@@ -545,94 +529,93 @@ PackedFloat32Array SimServer::get_shade_intervals() const {
   return out;
 }
 
+namespace {
 // Entities are swap-removed, so indices do not match between two snapshots.
-// Positions are therefore interpolated inside the latest tick: its position
-// moved back along its velocity by the part of the tick not yet shown.
-PackedFloat32Array SimServer::get_enemy_buffer() {
-  const Snapshot& s = *curr_;
+// Positions are therefore interpolated inside the latest tick: the buffer core
+// filled for that tick, with each origin moved back along its velocity by the
+// part of the tick not yet shown.
+PackedFloat32Array interpolated(const std::vector<float>& render, const std::vector<float>& velX,
+                                const std::vector<float>& velY, uint32_t count, float back) {
   PackedFloat32Array out;
-  out.resize(static_cast<int64_t>(s.enemyCount) * kFloatsPerInstance);
+  out.resize(static_cast<int64_t>(count) * kFloatsPerInstance);
+  if (count == 0) return out;
   float* f = out.ptrw();
-  const float back = back_seconds();
-  const EnemyVisual fallback;
-  const size_t defs = enemyVisuals_.size();
-  for (uint32_t i = 0; i < s.enemyCount; ++i, f += kFloatsPerInstance) {
-    const EnemyVisual& v = s.enemyType[i] < defs ? enemyVisuals_[s.enemyType[i]] : fallback;
-    const float vx = s.enemyVelX[i], vy = s.enemyVelY[i];
-    // Scale = diameter in world units: define the archetype with shape_mesh_size 1.
-    write_instance(f, s.enemyPosX[i] - vx * back, s.enemyPosY[i] - vy * back, vx, vy, v.diameter,
-                   v.color, v.shape, v.tier, static_cast<float>(s.enemyTraits[i]), 0.0f);
+  std::memcpy(f, render.data(), static_cast<size_t>(count) * kFloatsPerInstance * sizeof(float));
+  if (back > 0.0f) {
+    for (uint32_t i = 0; i < count; ++i, f += kFloatsPerInstance) {
+      f[3] -= velX[i] * back;
+      f[7] -= velY[i] * back;
+    }
   }
   return out;
+}
+}  // namespace
+
+PackedFloat32Array SimServer::get_enemy_buffer() {
+  const Snapshot& s = *curr_;
+  return interpolated(s.enemyRender, s.enemyVelX, s.enemyVelY, s.enemyCount, back_seconds());
 }
 
 PackedFloat32Array SimServer::get_projectile_buffer() {
   const Snapshot& s = *curr_;
-  PackedFloat32Array out;
-  out.resize(static_cast<int64_t>(s.projectileCount) * kFloatsPerInstance);
-  float* f = out.ptrw();
-  const float back = back_seconds();
-  const Color white(1, 1, 1, 1);
-  for (uint32_t i = 0; i < s.projectileCount; ++i, f += kFloatsPerInstance) {
-    const float vx = s.projVelX[i], vy = s.projVelY[i];
-    // Scale 1: the archetype's shape_mesh_size is the projectile size. Custom: circle,
-    // instance colour, no traits, extra = projectile type index.
-    // TODO(M1.6): per-type size/colour once projectile types carry visuals.
-    write_instance(f, s.projPosX[i] - vx * back, s.projPosY[i] - vy * back, vx, vy, 1.0f, white,
-                   0.0f, -1.0f, 0.0f, static_cast<float>(s.projType[i]));
-  }
-  return out;
+  return interpolated(s.projRender, s.projVelX, s.projVelY, s.projectileCount, back_seconds());
 }
 
 TypedArray<Dictionary> SimServer::get_large_units() const {
   TypedArray<Dictionary> out;
-  const Snapshot& s = *curr_;
   const float back = back_seconds();
-  const size_t defs = enemyVisuals_.size();
-  for (uint32_t i = 0; i < s.enemyCount; ++i) {
-    if (s.enemyType[i] >= defs) continue;
-    const EnemyVisual& v = enemyVisuals_[s.enemyType[i]];
-    if (!v.hpBar) continue;
+  for (const orbitfall_binding::LargeUnit& u : curr_->largeUnits) {
     Dictionary d;
-    d["pos"] = Vector2(s.enemyPosX[i] - s.enemyVelX[i] * back, s.enemyPosY[i] - s.enemyVelY[i] * back);
-    d["radius"] = v.diameter * 0.5f;
-    const float frac = v.hpMax > 0.0f ? s.enemyHp[i] / v.hpMax : 0.0f;
-    d["hp_frac"] = frac < 0.0f ? 0.0f : (frac > 1.0f ? 1.0f : frac);
-    d["shadow"] = v.shadow;  // TODO(M1.8): true only while it actually casts (dot(p, s) > R)
+    d["pos"] = Vector2(u.x - u.vx * back, u.y - u.vy * back);
+    d["radius"] = u.radius;
+    d["hp_frac"] = u.hpFrac;
+    d["shadow"] = u.shadow;
     out.push_back(d);
   }
   return out;
+}
+
+float SimServer::get_surface_time_scale() const {
+  const orbitfall::PlanetDef* planet = sim_->world().planet;  // fixed for the run
+  return planet ? planet->surfaceTimeScale : 1.0f;
+}
+
+float SimServer::get_surface_time_ease_seconds() const {
+  return contentLoaded_ ? content_.rules.surfaceTimeEaseSeconds : 0.0f;
 }
 
 // ----------------------------------------------------------------------------
 // Content info
 // ----------------------------------------------------------------------------
 
-void SimServer::rebuild_visuals() {
-  enemyVisuals_.clear();
-  enemyVisuals_.reserve(content_.enemies.size());
-  for (const orbitfall::EnemyDef& e : content_.enemies) {
-    EnemyVisual v;
-    v.shape = static_cast<float>(static_cast<int>(e.shape));
-    v.tier = tier_of(e.visual.color);
+// Instance colours per enemy definition from the client palette: white for
+// colour tiers (the shader tints those from its palette texture).
+void SimServer::rebuild_colors() {
+  enemyColors_.assign(content_.enemies.size() * 4, 1.0f);
+  for (size_t i = 0; i < content_.enemies.size(); ++i) {
+    const orbitfall::EnemyDef& e = content_.enemies[i];
+    if (e.visual.colorTier >= 0) continue;
     const auto it = palette_.find(e.visual.color);
-    if (it != palette_.end()) v.color = it->second;
-    v.diameter = e.size * 2.0f;
-    v.hpMax = e.hp;
-    v.hpBar = e.hpBar;
-    v.shadow = e.shadowCaster;
-    enemyVisuals_.push_back(v);
+    if (it == palette_.end()) continue;
+    enemyColors_[i * 4 + 0] = it->second.r;
+    enemyColors_[i * 4 + 1] = it->second.g;
+    enemyColors_[i * 4 + 2] = it->second.b;
+    enemyColors_[i * 4 + 3] = it->second.a;
   }
 }
 
 void SimServer::set_palette(const Dictionary& colors) {
+  wait_idle();  // the sim thread reads the colours while it fills snapshots
   palette_.clear();
   const Array keys = colors.keys();
   for (int64_t i = 0; i < keys.size(); ++i) {
     const String key = keys[i];
     palette_[std::string(key.utf8().get_data())] = colors[keys[i]];
   }
-  rebuild_visuals();
+  rebuild_colors();
+  rebuild_statics();
+  // Show the new colours without waiting for the next tick.
+  orbitfall_binding::fill_snapshot(sim_->world(), statics_, *curr_);
 }
 
 void SimServer::set_debug_scenario(bool on) { debugScenario_ = on; }
@@ -669,9 +652,9 @@ TypedArray<Dictionary> SimServer::get_enemy_defs() const {
     d["index"] = static_cast<int64_t>(i);
     d["id"] = to_gd(e.id);
     d["name"] = to_gd(e.id).capitalize();
-    d["shape"] = static_cast<int64_t>(e.shape);
+    d["shape"] = static_cast<int64_t>(e.visual.shape);
     d["color"] = to_gd(e.visual.color);  // palette key
-    d["tier"] = static_cast<int64_t>(tier_of(e.visual.color));  // -1 when not a colour tier
+    d["tier"] = static_cast<int64_t>(e.visual.colorTier);  // -1 when not a colour tier
     d["layers"] = e.layers;
     d["hp"] = e.hp;
     d["speed"] = e.speed;
@@ -686,60 +669,63 @@ TypedArray<Dictionary> SimServer::get_enemy_defs() const {
   return out;
 }
 
-// Reads the same WaveDef data the spawner will read (the forecast never lies).
-TypedArray<Dictionary> SimServer::get_forecast(int64_t count) const {
-  TypedArray<Dictionary> out;
-  if (!contentLoaded_ || waveSet_ < 0 || waveSet_ >= static_cast<int>(content_.waveSets.size())) return out;
-  const orbitfall::WaveSetDef& ws = content_.waveSets[static_cast<size_t>(waveSet_)];
-  const orbitfall::PlanetDef* planet =
-      ws.planet >= 0 && ws.planet < static_cast<int>(content_.planets.size())
-          ? &content_.planets[static_cast<size_t>(ws.planet)]
-          : nullptr;
-  const int64_t first = curr_->waveIndex;
-  const int64_t total = static_cast<int64_t>(ws.waves.size());
-  if (first < 0 || first >= total) return out;
-  // The wave the player is looking from decides how far ahead is exact / icons.
-  const orbitfall::ForecastDef& range = ws.waves[static_cast<size_t>(first)].forecast;
-  for (int64_t i = first; i < total && i < first + count; ++i) {
-    const orbitfall::WaveDef& wave = ws.waves[static_cast<size_t>(i)];
-    const int64_t ahead = i - first + 1;  // 1 = next (or current) wave
-    const bool exact = ahead <= range.exactAhead;
-    const bool icons = ahead <= range.iconsAhead;
-    Dictionary d;
-    d["wave"] = wave.wave;
-    d["light_mult"] = wave.lightMult;
-    d["exact"] = exact;
-    Array entries;
-    PackedFloat32Array ghosts;
-    if (exact || icons) {
-      for (const orbitfall::SpawnDef& sp : wave.spawns) {
-        if (sp.enemy < 0 || sp.enemy >= static_cast<int>(content_.enemies.size())) continue;
-        const orbitfall::EnemyDef& enemy = content_.enemies[static_cast<size_t>(sp.enemy)];
-        float bearing = 0.0f;
-        if (planet && sp.lane >= 0 && sp.lane < static_cast<int>(planet->lanes.size())) {
-          bearing = planet->lanes[static_cast<size_t>(sp.lane)].bearing;
-        }
-        Dictionary e;
-        e["lane_bearing"] = bearing;
-        e["enemy"] = sp.enemy;
-        e["count"] = exact ? sp.count : -1;
-        e["shadow_caster"] = enemy.shadowCaster;
-        entries.push_back(e);
-        if (exact && enemy.shadowCaster && enemy.hasHover && planet && planet->radius > 0.0f) {
-          // Where it is expected to park: its lane bearing +- spawn jitter, widened by
-          // the disc's own angular size seen on the surface.
-          // TODO(M1.8/M1.9): replace with the shadow system's projected arc if it differs.
-          const float ratio = enemy.size / planet->radius;
-          const float half = enemy.hover.spawnJitter + std::asin(ratio > 1.0f ? 1.0f : ratio);
-          ghosts.push_back(bearing - half);
-          ghosts.push_back(bearing + half);
-        }
-      }
-    }
-    d["entries"] = entries;
-    d["eclipser_ghost_arcs"] = ghosts;
-    out.push_back(d);
+namespace {
+Dictionary forecast_to_dict(const orbitfall::WaveForecast& f) {
+  Dictionary d;
+  d["wave"] = f.wave;
+  d["light_mult"] = f.lightMult;
+  d["exact"] = f.exact;
+  Array entries;
+  for (const orbitfall::ForecastEntry& e : f.entries) {
+    Dictionary entry;
+    entry["lane"] = e.lane;
+    entry["lane_bearing"] = e.laneBearing;
+    entry["enemy"] = e.enemy;
+    entry["count"] = e.count;
+    entry["shadow_caster"] = e.shadowCaster;
+    entries.push_back(entry);
   }
+  d["entries"] = entries;
+  PackedFloat32Array ghosts;
+  ghosts.resize(static_cast<int64_t>(f.eclipserGhostArcs.size()));
+  if (!f.eclipserGhostArcs.empty()) {
+    std::memcpy(ghosts.ptrw(), f.eclipserGhostArcs.data(), f.eclipserGhostArcs.size() * sizeof(float));
+  }
+  d["eclipser_ghost_arcs"] = ghosts;
+  return d;
+}
+}  // namespace
+
+// Core's forecast(): the same WaveDef data the spawner reads (the forecast
+// never lies). During a wave the wave in flight comes first (exact, straight
+// from its WaveDef, no ghost arcs: its shadow casters are live), then the
+// upcoming ones.
+TypedArray<Dictionary> SimServer::get_forecast(int64_t count) {
+  TypedArray<Dictionary> out;
+  if (!contentLoaded_ || count <= 0) return out;
+  wait_idle();  // reads the World
+  const orbitfall::World& w = sim_->world();
+  if (w.waveSet == nullptr || w.planet == nullptr) return out;
+  int upcoming = static_cast<int>(count > 64 ? 64 : count);
+  if (w.phase == orbitfall::Phase::Wave && w.waveIndex < w.waveCount()) {
+    const orbitfall::WaveDef& wave = w.waveSet->waves[w.waveIndex];
+    orbitfall::WaveForecast now;
+    now.wave = wave.wave;
+    now.lightMult = wave.lightMult;
+    now.exact = true;
+    for (const orbitfall::SpawnDef& sp : wave.spawns) {
+      orbitfall::ForecastEntry e;
+      e.lane = sp.lane;
+      e.laneBearing = w.planet->lanes[static_cast<size_t>(sp.lane)].bearing;
+      e.enemy = sp.enemy;
+      e.count = sp.count;
+      e.shadowCaster = w.content->enemies[static_cast<size_t>(sp.enemy)].shadowCaster;
+      now.entries.push_back(e);
+    }
+    out.push_back(forecast_to_dict(now));
+    --upcoming;
+  }
+  for (const orbitfall::WaveForecast& f : orbitfall::forecast(w, upcoming)) out.push_back(forecast_to_dict(f));
   return out;
 }
 
@@ -757,6 +743,8 @@ Dictionary SimServer::get_debug_stats() const {
   d["enemy_overflow"] = static_cast<int64_t>(curr_->enemyOverflow);
   d["projectile_overflow"] = static_cast<int64_t>(curr_->projectileOverflow);
   d["lit_fraction"] = curr_->litFraction;
+  d["shade_intervals"] = static_cast<int64_t>(curr_->shadeIntervals.size() / 2);
+  d["wave_time"] = curr_->waveTime;
   d["time_scale"] = curr_->timeScale;
   d["sim_time"] = curr_->simTime;
   d["threaded"] = threadRunning_;
@@ -766,7 +754,9 @@ Dictionary SimServer::get_debug_stats() const {
 
 // Live tuning (debug panel). Paths are "<group>.<json key>" for the current
 // run's sun and planet and for rules; values use the JSON units (degrees).
-// Tuned runs do not replay from their log: the log does not record tunables.
+// The World reads its ContentDB every tick, so mutating the ContentDB between
+// ticks (sim idle) is all it takes. Tuned runs do not replay from their log:
+// the log does not record tunables.
 bool SimServer::set_tunable(const String& path, float value) {
   if (!contentLoaded_ || waveSet_ < 0 || waveSet_ >= static_cast<int>(content_.waveSets.size())) return false;
   if (!(value - value == 0.0f)) return false;  // NaN or infinity
@@ -797,6 +787,8 @@ bool SimServer::set_tunable(const String& path, float value) {
       {"rules.killBounty", &rules.killBounty, 1.0f},
       {"rules.lightChargeMult", &rules.lightChargeMult, 1.0f},
       {"rules.spawnRadius", &rules.spawnRadius, 1.0f},
+      {"rules.spawnJitterDeg", &rules.spawnJitter, kDegToRad},
+      {"rules.surfaceTimeEaseSeconds", &rules.surfaceTimeEaseSeconds, 1.0f},
   };
   const CharString key = path.utf8();
   for (const Entry& e : table) {
@@ -804,13 +796,6 @@ bool SimServer::set_tunable(const String& path, float value) {
     if (e.field == nullptr) return false;
     wait_idle();  // the sim may read content and statics while it runs ticks
     *e.field = value * e.scale;
-    // Keep the binding's static copies in step (planet size and HP are not tunable).
-    if (sun) {
-      statics_.sunStart = sun->start;
-      statics_.beamWidth = sun->beamWidth;
-      statics_.beamStrength = sun->baseStrength;
-    }
-    // TODO(M1.11): if the World copies these values at new_run, forward the change to it here.
     return true;
   }
   return false;

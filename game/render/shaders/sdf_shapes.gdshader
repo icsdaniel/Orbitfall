@@ -90,9 +90,9 @@ float shape_sdf(int shape, vec2 p) {
 		return sd_star5(up, 1.0, 0.5);
 	} else if (shape == 5) {
 		return sd_rhombus(p, vec2(0.68, 1.0));
-	} else if (shape == 6) {
-		return abs(length(p) - 0.74) - 0.26;
 	}
+	// 6 = disc: a full circle; fragment() adds an inner rim so it reads as a
+	// saucer, not as a big Drifter.
 	return length(p) - 1.0;
 }
 
@@ -122,9 +122,6 @@ void fragment() {
 		ow = max(ow, armored_outline_width);
 		line_col = armored_color.rgb;
 	}
-	if (shape == 6) {
-		ow = min(ow, 0.12); // keep some fill visible in the thin ring band
-	}
 	// Tiny shapes are fill only so they stay readable as dots.
 	float detail = smoothstep(5.0, 12.0, v_px);
 	ow *= detail;
@@ -139,10 +136,14 @@ void fragment() {
 		line_alpha = mix(0.0, 1.0, smoothstep(0.4, 0.5, dash) * (1.0 - smoothstep(0.9, 1.0, dash)));
 	}
 	vec3 col = mix(line_col, fill, inner);
+	if (shape == 6) {
+		float rim = 1.0 - smoothstep(0.0, px_unit, abs(length(p) - 0.58) - 0.04);
+		col = mix(col, line_col, rim * detail);
+	}
 	float alpha = cover * mix(line_alpha, fill_alpha, inner);
 
 	if (shielded) {
-		float od = shape == 6 ? length(p) - 1.0 : d; // glow only outside the ring
+		float od = d;
 		float g = (od - 0.26) / 0.085;
 		float glow = exp(-g * g) * 0.95 + 0.25 * exp(-max(od, 0.0) * 6.0) * step(0.0, od);
 		glow *= detail;

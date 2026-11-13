@@ -103,10 +103,14 @@ class SimServer : public Node {
   TypedArray<Dictionary> get_large_units() const;
   TypedArray<Dictionary> get_building_defs() const;
   TypedArray<Dictionary> get_enemy_defs() const;
-  TypedArray<Dictionary> get_forecast(int64_t count) const;
+  TypedArray<Dictionary> get_forecast(int64_t count);
   Dictionary get_debug_stats() const;
   bool set_tunable(const String& path, float value);
   TypedArray<Dictionary> drain_events();
+  // Slow time in the Surface band (planet surfaceTimeScale, rules
+  // surfaceTimeEaseSeconds): the client sends them back as set_time_scale.
+  float get_surface_time_scale() const;
+  float get_surface_time_ease_seconds() const;
 
   // --- extras (not in CONTRACT.md) ---
   // Colours for palette keys that are not colour tiers ("enemy.eclipser"); default white.
@@ -120,16 +124,6 @@ class SimServer : public Node {
   void _notification(int what);
 
  private:
-  struct EnemyVisual {
-    float shape = 0.0f;
-    float tier = -1.0f;
-    Color color = Color(1, 1, 1, 1);
-    float diameter = 1.0f;
-    float hpMax = 1.0f;
-    bool hpBar = false;
-    bool shadow = false;
-  };
-
   void queue(orbitfall::Command c);
   void schedule(uint32_t ticks, bool wait);
   void run_to(uint32_t target);  // sim thread, or main thread when not threaded
@@ -138,9 +132,11 @@ class SimServer : public Node {
   void start_thread();
   void stop_thread();
   void thread_main();
-  void rebuild_visuals();
+  void rebuild_colors();
+  void reset_run_state();
   void rebuild_statics();
-  float back_seconds() const { return curr_->dt * (1.0f - alpha_); }
+  // Seconds the drawn frame lies behind the latest tick; 0 while the sim is frozen.
+  float back_seconds() const { return curr_->running ? curr_->dt * (1.0f - alpha_) : 0.0f; }
 
   // --- main thread only ---
   orbitfall::ContentDB content_;
@@ -156,7 +152,7 @@ class SimServer : public Node {
   orbitfall_binding::Snapshot buffers_[4];
   orbitfall_binding::Snapshot* prev_ = &buffers_[0];
   orbitfall_binding::Snapshot* curr_ = &buffers_[1];
-  std::vector<EnemyVisual> enemyVisuals_;
+  std::vector<float> enemyColors_;  // RGBA per enemy def; read by the sim thread, written while idle
   std::unordered_map<std::string, Color> palette_;
   uint64_t hashCache_ = 0;
   uint32_t hashCacheTick_ = 0xFFFFFFFFu;

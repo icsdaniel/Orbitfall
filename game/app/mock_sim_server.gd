@@ -16,8 +16,8 @@ const FLAG_LIT: int = 1
 const FLAG_SHADED: int = 2
 const FLAG_TARGET: int = 4
 const SHAPES: Dictionary[String, int] = {
-	"circle": 0, "disc": 0, "triangle": 1, "square": 2, "hexagon": 3, "star": 4,
-	"diamond": 5, "ring": 6,
+	"circle": 0, "triangle": 1, "square": 2, "hexagon": 3, "star": 4,
+	"diamond": 5, "disc": 6,
 }
 const TIERS: Dictionary[String, int] = {
 	"tier.red": 0, "tier.blue": 1, "tier.green": 2, "tier.yellow": 3, "tier.pink": 4,
@@ -68,6 +68,8 @@ var _income: float = 0.0
 var _shade: PackedFloat32Array = PackedFloat32Array()
 var _shade_offsets: PackedFloat32Array = PackedFloat32Array()
 var _spawn_radius: float = 900.0
+var _surface_time_scale: float = 0.75
+var _surface_ease: float = 0.3
 
 var _buildings: Array[Dictionary] = []
 var _enemies: Array[Dictionary] = []
@@ -324,7 +326,7 @@ func get_enemy_buffer() -> PackedFloat32Array:
 	for i: int in n:
 		var def: Dictionary = _enemies[_e_def[i]]
 		var pos: Vector2 = _e_prev[i].lerp(_e_pos[i], alpha)
-		var size: float = float(def["size"]) * 2.0
+		var size: float = float(def["size"])  # instance scale = radius
 		var tier: int = int(def["tier"])
 		if int(def["layers"]) > 1 or not bool(def["hp_bar"]):
 			tier = clampi(int(ceilf(_e_hp[i] / float(def["hp_per_layer"]))) - 1, 0, 7)
@@ -446,6 +448,14 @@ func set_tunable(path: String, value: float) -> void:
 		"planet.rotDamping":
 			_rot_damping = value
 	_update_light()
+
+
+func get_surface_time_scale() -> float:
+	return _surface_time_scale
+
+
+func get_surface_time_ease_seconds() -> float:
+	return _surface_ease
 
 
 func drain_events() -> Array[Dictionary]:
@@ -770,7 +780,7 @@ func _step_towers() -> void:
 		_p_to.append(target)
 		_p_t.append(0.0)
 		_p_dur.append(maxf(origin.distance_to(target) / float(def["shot_speed"]), TICK))
-		_p_size.append(1.8 if splash > 0.0 else 1.0)
+		_p_size.append(4.0 if splash > 0.0 else 2.0)  # radius, as core
 
 
 func _damage(i: int, amount: float) -> void:
@@ -934,6 +944,7 @@ func _load_json_content(errors: PackedStringArray) -> void:
 		_content_dir.path_join("sun/%s.json" % str(wave_set.get("sun", "default"))))
 	var rules: Dictionary = _read_json(_content_dir.path_join("rules.json"))
 	_spawn_radius = float(rules.get("spawnRadius", 900.0))
+	_surface_ease = float(rules.get("surfaceTimeEaseSeconds", 0.3))
 	if not planet.is_empty():
 		_radius = float(planet.get("radius", 100.0))
 		_slot_count = int(planet.get("slots", 36))
@@ -943,6 +954,7 @@ func _load_json_content(errors: PackedStringArray) -> void:
 		_rot_damping = float(planet.get("rotDamping", 4.0))
 		_start_stardust = float(planet.get("startStardust", 150.0))
 		_sell_refund = float(planet.get("sellRefund", 0.7))
+		_surface_time_scale = float(planet.get("surfaceTimeScale", 0.75))
 		_lanes = {}
 		var lanes: Array = planet.get("lanes", [])
 		for lane: Dictionary in lanes:

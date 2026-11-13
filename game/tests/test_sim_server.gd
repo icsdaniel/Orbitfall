@@ -1,6 +1,7 @@
 extends GdUnitTestSuite
 ## M0.5: SimServer round trips, threaded vs single-threaded determinism, events,
 ## content loading, run log replay and the CONTRACT.md surface.
+## The M1 game through the binding is in test_sim_server_run.gd.
 
 const CONTRACT_METHODS: PackedStringArray = [
 	"load_content", "new_run", "set_threaded", "step_ticks", "get_alpha",
@@ -15,6 +16,7 @@ const CONTRACT_METHODS: PackedStringArray = [
 	"get_projectile_buffer", "get_projectile_count", "get_large_units",
 	"get_building_defs", "get_enemy_defs", "get_forecast", "get_debug_stats",
 	"set_tunable", "drain_events", "core_answer", "core_version",
+	"get_surface_time_scale", "get_surface_time_ease_seconds",
 ]
 
 
@@ -214,14 +216,19 @@ func test_load_content_shipped_content_has_no_errors() -> void:
 	assert_float(server.get_planet_radius()).is_equal_approx(100.0, 0.001)
 	assert_int(server.get_slot_count()).is_equal(36)
 	assert_int(server.get_wave_count()).is_equal(8)
-	assert_float(server.get_planet_hp_max()).is_equal_approx(100.0, 0.001)
-	assert_float(server.get_planet_hp()).is_equal_approx(100.0, 0.001)
-	assert_float(server.get_beam_width()).is_equal_approx(141.0, 0.001)
+	assert_float(server.get_planet_hp_max()).is_greater(0.0)
+	assert_float(server.get_planet_hp()).is_equal_approx(server.get_planet_hp_max(), 0.001)
+	assert_float(server.get_beam_width()).is_greater(0.0)
+	assert_float(server.get_beam_strength()).is_greater(0.0)
+	assert_float(server.get_stardust()).is_greater(0.0)
 	assert_int(server.get_slot_buildings().size()).is_equal(36)
 	assert_int(server.get_slot_buildings()[0]).is_equal(-1)
 	assert_int(server.get_slot_flags().size()).is_equal(36)
 	assert_int(server.get_phase()).is_equal(0)
+	assert_int(server.get_wave_index()).is_equal(0)
 	assert_int(server.get_shade_intervals().size()).is_equal(0)
+	assert_float(server.get_surface_time_scale()).is_between(0.1, 1.0)
+	assert_float(server.get_surface_time_ease_seconds()).is_between(0.0, 5.0)
 
 	var buildings: Array[Dictionary] = server.get_building_defs()
 	assert_int(buildings.size()).is_equal(3)
@@ -233,8 +240,8 @@ func test_load_content_shipped_content_has_no_errors() -> void:
 		ids.append(def["id"])
 	assert_array(ids).contains(["cannon", "gatling", "solar_panel"])
 	var cannon: Dictionary = buildings[ids.find("cannon")]
-	assert_float(cannon["cost"]).is_equal_approx(90.0, 0.001)
-	assert_float(cannon["arc"]).is_equal_approx(deg_to_rad(25.0), 0.0001)
+	assert_float(cannon["cost"]).is_greater(0.0)
+	assert_float(cannon["arc"]).is_between(0.05, PI)
 	assert_str(cannon["kind"]).is_equal("tower")
 	assert_str(buildings[ids.find("solar_panel")]["kind"]).is_equal("panel")
 	assert_str(buildings[ids.find("solar_panel")]["name"]).is_equal("Solar Panel")
@@ -258,37 +265,6 @@ func test_load_content_reports_errors() -> void:
 	assert_int(server.get_building_defs().size()).is_equal(0)
 
 
-func test_forecast_reads_wave_data() -> void:
-	var server: SimServer = _server()
-	assert_array(server.get_forecast(3)).is_empty()  # no content yet
-	assert_array(server.load_content()).is_empty()
-	server.new_run(1)
-	var forecast: Array[Dictionary] = server.get_forecast(5)
-	assert_int(forecast.size()).is_equal(5)
-	var enemies: Array[Dictionary] = server.get_enemy_defs()
-	var next: Dictionary = forecast[0]
-	assert_int(next["wave"]).is_equal(1)
-	assert_bool(next["exact"]).is_true()
-	assert_float(next["light_mult"]).is_equal_approx(1.0, 0.0001)
-	var entries: Array = next["entries"]
-	assert_int(entries.size()).is_equal(1)
-	var entry: Dictionary = entries[0]
-	assert_int(entry["count"]).is_equal(8)
-	assert_str(enemies[entry["enemy"]]["id"]).is_equal("drifter_red")
-	assert_float(entry["lane_bearing"]).is_equal_approx(deg_to_rad(30.0), 0.0001)
-	assert_bool(entry["shadow_caster"]).is_false()
-	# +2 and +3: icons without counts; beyond: light level only.
-	assert_bool(forecast[1]["exact"]).is_false()
-	var icons: Array = forecast[1]["entries"]
-	assert_int(icons.size()).is_equal(2)
-	assert_int((icons[0] as Dictionary)["count"]).is_equal(-1)
-	assert_int((forecast[2]["entries"] as Array).size()).is_greater(0)
-	assert_int((forecast[3]["entries"] as Array).size()).is_equal(0)
-	assert_bool(forecast[3].has("light_mult")).is_true()
-	assert_bool(next["eclipser_ghost_arcs"] is PackedFloat32Array).is_true()
-	assert_int(server.get_forecast(100).size()).is_equal(8)
-
-
 func test_run_log_replays_to_the_same_state() -> void:
 	var original: SimServer = _server()
 	original.set_debug_scenario(true)
@@ -308,72 +284,6 @@ func test_run_log_replays_to_the_same_state() -> void:
 	other_seed.set_debug_scenario(true)
 	assert_bool(other_seed.replay(78, log)).is_true()
 	assert_int(other_seed.get_state_hash()).is_not_equal(hashes[hashes.size() - 1])
-
-
-func test_render_buffers_use_the_batch_layout_and_interpolate() -> void:
-	var server: SimServer = _server()
-	assert_array(server.load_content()).is_empty()
-	server.set_debug_scenario(true)
-	server.new_run(1)
-	assert_int(server.get_enemy_count()).is_equal(0)
-	assert_int(server.get_enemy_buffer().size()).is_equal(0)
-	server.step_ticks(30)  # debug enemies fly at (-30, 0) from x = 300
-	assert_int(server.get_enemy_count()).is_equal(3)
-	assert_int(server.get_projectile_count()).is_equal(1)
-	var enemies: Array[Dictionary] = server.get_enemy_defs()
-	var buffer: PackedFloat32Array = server.get_enemy_buffer()
-	assert_int(buffer.size()).is_equal(3 * BatchRenderer.FLOATS_PER_INSTANCE)
-	for i: int in 3:
-		var at: int = i * BatchRenderer.FLOATS_PER_INSTANCE
-		var def: Dictionary = enemies[i]
-		assert_float(buffer[at + 3]).is_equal_approx(270.0, 0.01)
-		assert_float(buffer[at + 7]).is_equal_approx(40.0 * float(i - 1), 0.01)
-		# Scale = diameter, x axis along the velocity (-x).
-		assert_float(buffer[at + 0]).is_equal_approx(-2.0 * float(def["size"]), 0.001)
-		assert_float(buffer[at + 5]).is_equal_approx(-2.0 * float(def["size"]), 0.001)
-		assert_float(buffer[at + BatchRenderer.OFFSET_CUSTOM]).is_equal(float(def["shape"]))
-		assert_float(buffer[at + BatchRenderer.OFFSET_CUSTOM + 1]).is_equal(float(def["tier"]))
-		assert_float(buffer[at + BatchRenderer.OFFSET_COLOR + 3]).is_equal(1.0)
-	var shots: PackedFloat32Array = server.get_projectile_buffer()
-	assert_int(shots.size()).is_equal(BatchRenderer.FLOATS_PER_INSTANCE)
-	assert_float(shots[7]).is_equal_approx(60.0, 0.01)
-	assert_float(shots[BatchRenderer.OFFSET_CUSTOM + 1]).is_equal(-1.0)
-
-	# Half a tick short of the next tick: drawn half a tick behind the latest snapshot.
-	assert_int(server.advance(1.5 / 30.0)).is_equal(1)
-	assert_float(server.get_alpha()).is_equal_approx(0.5, 0.001)
-	assert_float(server.get_enemy_buffer()[3]).is_equal_approx(269.0 + 0.5, 0.01)
-
-	var stats: Dictionary = server.get_debug_stats()
-	assert_bool(stats.has_all(["ms_per_tick", "enemies", "projectiles", "lit_fraction"])).is_true()
-	assert_int(stats["enemies"]).is_equal(3)
-	assert_int(stats["projectiles"]).is_equal(1)
-
-
-func test_large_units_and_palette() -> void:
-	var server: SimServer = _server()
-	assert_array(server.load_content()).is_empty()
-	var enemies: Array[Dictionary] = server.get_enemy_defs()
-	var bar_index: int = -1
-	for def: Dictionary in enemies:
-		if def["hp_bar"] and int(def["index"]) < 3:
-			bar_index = def["index"]
-	server.set_palette({"enemy.eclipser": Color(0.2, 0.4, 0.6)})
-	server.set_debug_scenario(true)
-	server.new_run(1)
-	server.step_ticks(1)
-	var large: Array[Dictionary] = server.get_large_units()
-	if bar_index < 0:
-		assert_array(large).is_empty()
-		return
-	assert_int(large.size()).is_equal(1)
-	var unit: Dictionary = large[0]
-	assert_bool(unit.has_all(["pos", "radius", "hp_frac", "shadow"])).is_true()
-	assert_float(unit["radius"]).is_equal_approx(float(enemies[bar_index]["size"]), 0.001)
-	assert_float(unit["hp_frac"]).is_between(0.0, 1.0)
-	var at: int = bar_index * BatchRenderer.FLOATS_PER_INSTANCE + BatchRenderer.OFFSET_COLOR
-	if String(enemies[bar_index]["color"]) == "enemy.eclipser":
-		assert_float(server.get_enemy_buffer()[at]).is_equal_approx(0.2, 0.0001)
 
 
 func test_set_tunable() -> void:

@@ -41,7 +41,7 @@ func test_layout_matches_rendering_server() -> void:
 	data.resize(capacity * F)
 	var xform: Transform2D = Transform2D(0.5, Vector2(2.0, 3.0), 0.0, Vector2(70.0, -40.0))
 	var color: Color = Color(0.25, 0.5, 0.75, 1.0)
-	var custom: Color = BatchRenderer.make_custom(BatchRenderer.Shape.RING, 3, 2, 0.5)
+	var custom: Color = BatchRenderer.make_custom(BatchRenderer.Shape.DISC, 3, 2, 0.5)
 	BatchRenderer.write_instance(data, 5, xform, color, custom)
 	renderer.set_batch(0, data, 6)
 	var mm: RID = renderer.get_multimesh_rid(0)
