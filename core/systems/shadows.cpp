@@ -67,6 +67,10 @@ uint32_t shadeIntervalAngles(const World& world, float* out, uint32_t maxPairs) 
 }
 
 float eclipserOffset(const World& world, float casterRadius) {
+  return eclipserOffsetAt(world, casterRadius, world.sunBearing);
+}
+
+float eclipserOffsetAt(const World& world, float casterRadius, float sunBearing) {
   if (world.content == nullptr || world.planet == nullptr || world.sun == nullptr) return 0.0f;
   const float radius = world.planet->radius, width = world.sun->beamWidth;
   const uint32_t n = world.slotCount();
@@ -78,8 +82,8 @@ float eclipserOffset(const World& world, float casterRadius) {
     if (b.type < 0) return false;
     if (world.content->buildings[static_cast<size_t>(b.type)].kind != BuildingKind::Panel) return false;
     const float angle = world.slotAngle(s) + world.planetRotation;
-    if (!inBeam(radius, width, world.sunBearing, angle)) return false;
-    y = radius * std::sin(angle - world.sunBearing);
+    if (!inBeam(radius, width, sunBearing, angle)) return false;
+    y = radius * std::sin(angle - sunBearing);
     return true;
   };
 

@@ -9,8 +9,12 @@ namespace orbitfall {
 
 void planetRotation(World& world, float dt) {
   const PlanetDef* planet = world.planet;
-  if (planet == nullptr || dt <= 0.0f) return;
+  if (planet == nullptr) return;
   if (world.phase == Phase::Won || world.phase == Phase::Lost) return;  // the run is over
+  // Between waves the sim clock is frozen but the player still turns the
+  // planet to build, at real speed whatever the time scale.
+  if (world.phase == Phase::Intermission) dt = kFixedDt;
+  if (dt <= 0.0f) return;
 
   float vel = world.planetAngVel;
   const float input = world.rotateInput;

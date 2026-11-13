@@ -3,6 +3,7 @@
 #include "sim/pipeline.h"
 #include "sim/world.h"
 #include "systems/buildings.h"
+#include "systems/waves.h"
 
 namespace orbitfall {
 namespace {
@@ -23,6 +24,16 @@ void digest(World& world, const Command& c) {
   ++world.commandsApplied;
 }
 
+// Build commands are refused once the run has ended.
+bool runOver(World& world, const Command& c) {
+  if (world.phase != Phase::Won && world.phase != Phase::Lost) return false;
+  if (world.content != nullptr) {
+    world.emit(EventType::CommandRejected, c.slot, static_cast<int32_t>(RejectReason::WrongPhase),
+               static_cast<float>(static_cast<int>(c.type)));
+  }
+  return true;
+}
+
 void apply(World& world, const Command& c) {
   switch (c.type) {
     case CommandType::RotateInput:
@@ -39,19 +50,23 @@ void apply(World& world, const Command& c) {
       break;
     }
     case CommandType::PlaceBuilding:
-      placeBuilding(world, c.slot, c.id, c.value);
+      if (!runOver(world, c)) placeBuilding(world, c.slot, c.id, c.value);
       break;
     case CommandType::SellBuilding:
-      sellBuilding(world, c.slot);
+      if (!runOver(world, c)) sellBuilding(world, c.slot);
       break;
     case CommandType::SetAim:
-      setAim(world, c.slot, c.value);
+      if (!runOver(world, c)) setAim(world, c.slot, c.value);
       break;
     case CommandType::SetTargeting:
-      setTargeting(world, c.slot, c.mode);
+      if (!runOver(world, c)) setTargeting(world, c.slot, c.mode);
       break;
-    // Recorded in the digest now; the wave flow arrives with M1.9.
     case CommandType::StartWave:
+      if (world.content != nullptr && !startWave(world)) {
+        world.emit(EventType::CommandRejected, -1, static_cast<int32_t>(RejectReason::WrongPhase),
+                   static_cast<float>(static_cast<int>(c.type)));
+      }
+      break;
     case CommandType::None:
     case CommandType::Count:
       break;
@@ -65,6 +80,10 @@ void applyCommands(World& world, float /*dt*/) {
   while (world.commands.popDue(world.tick, c)) {
     apply(world, c);
     digest(world, c);
+    if (world.recordCommands) {
+      c.tick = world.tick;  // the tick it really applied on
+      world.commandLog.push_back(c);
+    }
   }
 
   // Ease the time scale in real ticks (so it also works from and to pause), smoothstep.
