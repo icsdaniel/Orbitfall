@@ -1,0 +1,17 @@
+{
+  "id": "medium",
+  "radius": 100,
+  "slots": 36,
+  "hp": 100,
+  "rotMaxSpeed": 90,
+  "rotAccel": 360,
+  "rotDamping": 4,
+  "startStardust": 150,
+  "lanes": [
+    { "id": "A", "bearingDeg": 30 },
+    { "id": "B", "bearingDeg": 170 }
+  ],
+  "surfaceTimeScale": 0.75,
+  "sellRefund": 0.7,
+  "visual": { "shape": "circle", "color": "planet.medium" }
+}

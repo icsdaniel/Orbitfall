@@ -1,0 +1,7 @@
+{
+  "id": "eclipser", "behavior": "eclipser", "layers": 1, "hp": 40,
+  "speed": 25, "size": 28, "landDamage": 15, "bounty": 15,
+  "traits": [], "shadowCaster": true, "hpBar": true, "popsInto": null,
+  "hover": { "hoverRadius": 260, "hoverSeconds": 15, "descendSpeed": 10, "spawnRadius": 900, "spawnJitterDeg": 6 },
+  "shape": "disc", "visual": { "color": "enemy.eclipser" }
+}
