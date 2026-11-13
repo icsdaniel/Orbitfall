@@ -17,10 +17,11 @@ const NAMED: Dictionary[String, Color] = {
 	"building.solar_panel": Color(0.35, 0.55, 1.0),
 	"planet.medium": Color(0.17, 0.22, 0.33),
 	"enemy.eclipser": Color(0.10, 0.10, 0.12),
+	"projectile": Color(1.0, 0.92, 0.55),
 }
 const SHAPE_NAMES: Dictionary[String, int] = {
-	"circle": 0, "disc": 0, "triangle": 1, "square": 2, "hexagon": 3, "star": 4,
-	"diamond": 5, "ring": 6,
+	"circle": 0, "triangle": 1, "square": 2, "hexagon": 3, "star": 4,
+	"diamond": 5, "disc": 6,
 }
 
 const SKY: Color = Color(0.02, 0.02, 0.05)

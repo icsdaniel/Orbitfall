@@ -37,8 +37,12 @@ static func draw(
 		item: CanvasItem, shape: int, centre: Vector2, radius: float, rotation: float,
 		color: Color, outline_width: float = 1.0
 ) -> void:
-	if shape == BatchRenderer.Shape.RING:
-		item.draw_arc(centre, radius * 0.74, 0.0, TAU, 24, color, radius * 0.5, true)
+	if shape == BatchRenderer.Shape.DISC:
+		item.draw_circle(centre, radius, color)
+		var rim: Color = color.lightened(0.55) if color.get_luminance() < 0.3 else color.darkened(0.6)
+		rim.a = color.a
+		item.draw_arc(centre, radius, 0.0, TAU, 24, rim, maxf(outline_width, 1.0), true)
+		item.draw_arc(centre, radius * 0.58, 0.0, TAU, 24, rim, maxf(outline_width, 1.0), true)
 		return
 	var pts: PackedVector2Array = Transform2D(rotation, centre) * points(shape, radius)
 	item.draw_colored_polygon(pts, color)

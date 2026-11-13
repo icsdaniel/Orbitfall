@@ -3,7 +3,8 @@ extends Node
 ## M1.10: Surface and Orbit zoom bands on the continuous OrbitCamera zoom, the
 ## cross-fade weight for surface-only detail, the double-tap toggle, and slow time:
 ## while a wave runs and the view is in the Surface band the sim is asked (as a
-## command) for `surfaceTimeScale`, eased; otherwise normal speed.
+## command) for the planet's `surfaceTimeScale`, eased over the rules'
+## `surfaceTimeEaseSeconds` (both read from the sim's content); otherwise normal speed.
 
 signal band_changed(band: int)
 
@@ -36,9 +37,15 @@ func configure(config: ClientConfig) -> void:
 	orbit_view_radius = config.num("bands", "orbitViewRadius", orbit_view_radius)
 	fade_width = config.num("bands", "fadeWidth", fade_width)
 	surface_offset_px = config.num("bands", "surfaceOffsetPx", surface_offset_px)
-	surface_time_scale = config.num("time", "surfaceTimeScale", surface_time_scale)
 	normal_time_scale = config.num("time", "normalTimeScale", normal_time_scale)
-	ease_seconds = config.num("time", "easeSeconds", ease_seconds)
+	refresh_time_settings()
+
+
+## Slow-time numbers live in content/ and come through the sim (after new_run).
+func refresh_time_settings() -> void:
+	if sim != null and sim.has_method(&"get_surface_time_scale"):
+		surface_time_scale = float(sim.get_surface_time_scale())
+		ease_seconds = float(sim.get_surface_time_ease_seconds())
 
 
 func _ready() -> void:
@@ -120,6 +127,7 @@ func update() -> void:
 ## Forget what was sent (after new_run the sim is back at scale 1).
 func reset_time_scale() -> void:
 	_sent_scale = -1.0
+	refresh_time_settings()
 
 
 func _apply_limits() -> void:
