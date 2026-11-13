@@ -1,0 +1,336 @@
+# Playtest pipeline (BRIEF §5.8). Publishes web builds to the gh-pages branch:
+#   push to main            -> /latest/
+#   pull request (same repo)-> /pr-<n>/  + one PR comment with link and QR code
+#   tag m<digits>…          -> /<tag>/   + debug APK on a GitHub Release
+#   push touching toys/     -> /toys/<name>/   (any branch)
+# Repo settings needed: Pages source = "Deploy from a branch", branch gh-pages, folder / (root);
+# Actions > General > Workflow permissions = "Read and write permissions".
+name: Playtest
+
+on:
+  push:
+    branches: ['**', '!gh-pages']
+    tags: ['m[0-9]*']
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: Export debug web builds (larger, with debug checks)
+        type: boolean
+        default: false
+      apk:
+        description: Also build the Android debug APK (kept as a workflow artifact)
+        type: boolean
+        default: false
+
+concurrency:
+  group: playtest-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: 4.5.1
+  EMSDK_VERSION: 4.0.10
+  TOOLS_DIR: /home/runner/tools
+  SCONS_CACHE: /home/runner/.scons-cache
+  PAGES_URL: ${{ vars.PAGES_BASE_URL || format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
+
+jobs:
+  plan:
+    name: Plan builds
+    runs-on: ubuntu-24.04
+    outputs:
+      builds: ${{ steps.plan.outputs.builds }}
+      has_builds: ${{ steps.plan.outputs.has_builds }}
+      android: ${{ steps.plan.outputs.android }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          WANT_APK: ${{ inputs.apk }}
+        run: |
+          builds="$(python3 tools/plan_builds.py)"
+          echo "builds=$builds" >> "$GITHUB_OUTPUT"
+          echo "$builds" | python3 -m json.tool
+          if [ "$builds" = "[]" ]; then echo "has_builds=false" >> "$GITHUB_OUTPUT"; else echo "has_builds=true" >> "$GITHUB_OUTPUT"; fi
+          android=false; version="dev"
+          if [ "$REF_TYPE" = "tag" ] && [[ "$REF_NAME" =~ ^m[0-9]+[a-z0-9.-]*$ ]]; then android=true; version="$REF_NAME"; fi
+          if [ "$WANT_APK" = "true" ]; then android=true; fi
+          echo "android=$android" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  web:
+    name: Web builds
+    needs: plan
+    if: needs.plan.outputs.has_builds == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: cpp
+        run: echo "sha=$(git -C gdextension/godot-cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cache Godot + web export templates
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.TOOLS_DIR }}/Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-templates-web-v1
+      - name: Cache Emscripten
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TOOLS_DIR }}/emsdk
+          key: emsdk-${{ env.EMSDK_VERSION }}-v1
+      - name: Cache SCons objects (godot-cpp, web)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-web-${{ inputs.debug && 'debug' || 'release' }}-${{ env.EMSDK_VERSION }}-${{ steps.cpp.outputs.sha }}
+      - name: Install toolchain
+        env:
+          EMSDK: '1'
+          TEMPLATES: web
+          SKIP_SUBMODULE: '1'
+        run: |
+          tools/setup_env.sh
+          echo "$TOOLS_DIR/emsdk" >> "$GITHUB_PATH"
+          echo "$TOOLS_DIR/emsdk/upstream/emscripten" >> "$GITHUB_PATH"
+      - name: Build and export
+        env:
+          BUILDS: ${{ needs.plan.outputs.builds }}
+          DEBUG: ${{ inputs.debug }}
+        run: |
+          emcc --version | head -1
+          flags=()
+          if [ "$DEBUG" = "true" ]; then flags+=(--debug); fi
+          first=1
+          while IFS=$'\t' read -r dest version kind pr scene; do
+            args=(--out "site/$dest" --version "$version" --kind "$kind" --pr "$pr" "${flags[@]}")
+            if [ -n "$scene" ]; then args+=(--main-scene "$scene"); fi
+            if [ "$first" = "0" ]; then args+=(--skip-extension); fi
+            echo "::group::export $dest"
+            tools/export_web.sh "${args[@]}"
+            echo "::endgroup::"
+            first=0
+          done < <(echo "$BUILDS" | jq -r '.[] | [.dest, .version, .kind, (.pr|tostring), .main_scene] | join("\t")')
+      - name: Smoke test in headless Chromium
+        continue-on-error: true
+        env:
+          BUILDS: ${{ needs.plan.outputs.builds }}
+        run: |
+          mkdir -p smoke && cd smoke
+          npm init -y >/dev/null && npm install --no-audit --no-fund playwright@1 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+          first="$(echo "$BUILDS" | jq -r '.[0].dest')"
+          NODE_PATH="$PWD/node_modules" node ../tools/web_smoke.js "../site/$first" "$PWD/web_smoke.png"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-smoke-screenshot
+          path: smoke/web_smoke.png
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: site
+          retention-days: 3
+          if-no-files-found: error
+
+  deploy:
+    name: Publish to gh-pages
+    needs: [plan, web]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: site
+      - name: Push to gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILDS: ${{ needs.plan.outputs.builds }}
+        run: |
+          names="$(echo "$BUILDS" | jq -r '[.[].dest] | join(", ")')"
+          tools/pages_deploy.sh --site site \
+            --remote "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            --message "Publish ${names} from ${GITHUB_SHA::7}"
+      - name: Wait for GitHub Pages
+        id: live
+        env:
+          BUILDS: ${{ needs.plan.outputs.builds }}
+        run: |
+          dest="$(echo "$BUILDS" | jq -r '.[0].dest')"
+          want="$(jq -r .commit "site/$dest/build_info.json")"
+          url="$PAGES_URL/$dest/"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          live=false
+          for i in $(seq 1 40); do
+            got="$(curl -fsSL "${url}build_info.json?t=$RANDOM$i" 2>/dev/null | jq -r .commit 2>/dev/null || true)"
+            if [ "$got" = "$want" ]; then live=true; break; fi
+            sleep 10
+          done
+          echo "live=$live" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Playtest builds"
+            echo "$BUILDS" | jq -r --arg base "$PAGES_URL" '.[] | "- [\(.dest)](\($base)/\(.dest)/)"'
+            echo
+            echo "All builds: $PAGES_URL/"
+            if [ "$live" != "true" ]; then
+              echo
+              echo "> Pages did not serve this commit within 7 minutes. Check Settings > Pages (source: branch gh-pages, folder /)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Comment on the pull request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.live.outputs.url }}
+          LIVE: ${{ steps.live.outputs.live }}
+        with:
+          script: |
+            const marker = '<!-- orbitfall-preview -->';
+            const url = process.env.PREVIEW_URL;
+            const sha = context.payload.pull_request.head.sha.slice(0, 7);
+            const qr = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=' + encodeURIComponent(url);
+            const when = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+            const lines = [
+              marker,
+              '### Playtest preview',
+              '',
+              `**[Open the preview](${url})** for \`${sha}\` (updated ${when})`,
+              '',
+              `<img src="${qr}" width="180" height="180" alt="QR code for the preview link">`,
+              '',
+              `Scan with a phone. All builds: ${process.env.PAGES_URL}/`,
+            ];
+            if (process.env.LIVE !== 'true') {
+              lines.push('', '> GitHub Pages had not served this commit yet when this was posted. If the link shows an older build or a 404, wait a minute and reload.');
+            }
+            const body = lines.join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const mine = comments.find((c) => c.body && c.body.includes(marker));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+  cleanup:
+    name: Remove closed PR preview
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if ! git ls-remote --exit-code --heads origin gh-pages >/dev/null; then exit 0; fi
+          tools/pages_deploy.sh --remove "pr-${PR_NUMBER}" \
+            --remote "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            --message "Remove pr-${PR_NUMBER} preview (closed)"
+
+  android:
+    name: Android debug APK
+    needs: plan
+    if: needs.plan.outputs.android == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      ANDROID_NDK_VERSION: 28.1.13356709
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - id: cpp
+        run: echo "sha=$(git -C gdextension/godot-cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cache Godot + Android export templates
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.TOOLS_DIR }}/Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-templates-android-v1
+      - name: Cache SCons objects (godot-cpp, android)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-android-arm64-debug-${{ env.ANDROID_NDK_VERSION }}-${{ steps.cpp.outputs.sha }}
+      - name: Install toolchain
+        env:
+          ANDROID: '1'
+          TEMPLATES: android
+          SKIP_SUBMODULE: '1'
+        run: tools/setup_env.sh
+      - name: Build and export APK
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          # Optional secret: base64 of a debug keystore (alias androiddebugkey, password android)
+          # so that successive APKs install over each other. Without it a throwaway key is generated.
+          KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/debug.keystore"
+            export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$RUNNER_TEMP/debug.keystore"
+            export GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey
+            export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android
+          fi
+          kind=local; if [ "$GITHUB_REF_TYPE" = "tag" ]; then kind=milestone; fi
+          tools/export_android.sh --out "build/android/orbitfall-${VERSION}-debug.apk" --version "$VERSION" --kind "$kind"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: build/android/*.apk
+          if-no-files-found: error
+      - name: Attach to GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          apk="build/android/orbitfall-${VERSION}-debug.apk"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" "$apk" --clobber
+          else
+            gh release create "$VERSION" "$apk" --title "$VERSION" --verify-tag --prerelease \
+              --notes "Milestone ${VERSION}. Web build: ${PAGES_URL}/${VERSION}/ . The APK is a debug build signed with a throwaway key: uninstall the previous one before installing."
+          fi
