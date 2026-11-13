@@ -26,6 +26,10 @@ Pipeline defaultPipeline() {
   p.add("planetRotation", planetRotation);
   p.add("enemyMovement", enemyMovement);
   p.add("spatialRebuild", spatialRebuild);
+  p.add("towerTargeting", towerTargeting);
+  p.add("towerFire", towerFire);
+  p.add("projectileMovement", projectileMovement);
+  p.add("collisions", collisions);
   p.add("landing", landing);
   p.add("cleanup", cleanup);
   p.add("advanceClock", advanceClock);

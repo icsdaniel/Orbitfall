@@ -112,6 +112,7 @@ struct World {
   // --- derived each tick (not hashed) ---
   SpatialGrid grid;              // enemies by position, rebuilt by spatialRebuild
   float maxEnemyRadius = 0.0f;   // largest EnemyDef::size, pads grid queries
+  std::vector<uint32_t> slotTargets;  // per slot: enemy index picked by towerTargeting
 
   // --- queues (not hashed: pending input and undrained output) ---
   CommandQueue commands;
@@ -124,6 +125,11 @@ struct World {
 
 // Resets `world` to the start state for `config` and reserves all storage.
 void initWorld(World& world, const SimConfig& config);
+
+// Content-aware start of a run (what the binding's new_run calls): a world on
+// wave set `waveSet` of `content` with default capacities. `content` must
+// outlive the world. The 64-bit seed is folded to the sim's 32 bits.
+void initWorld(World& world, const ContentDB& content, uint32_t waveSet, uint64_t seed);
 
 // 64-bit hash of the deterministic state. Equal seed + command log => equal hash.
 uint64_t hashWorld(const World& world);
