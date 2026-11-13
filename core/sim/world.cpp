@@ -30,6 +30,15 @@ void initWorld(World& world, const SimConfig& config) {
   world.rng.seed(config.seed);
   world.commandsApplied = 0;
   world.commandDigest = 0;
+  // Re-reserve only when the capacity changes, so a restart does not allocate.
+  if (world.enemies.capacity != config.enemyCapacity) world.enemies.reserve(config.enemyCapacity);
+  world.enemies.clear();
+  world.enemies.overflowCount = 0;
+  if (world.projectiles.capacity != config.projectileCapacity) {
+    world.projectiles.reserve(config.projectileCapacity);
+  }
+  world.projectiles.clear();
+  world.projectiles.overflowCount = 0;
   world.commands.clear();
   world.commands.reserve(config.commandCapacity);
   world.events.clear();
@@ -53,6 +62,8 @@ uint64_t hashWorld(const World& world) {
   h.add(world.commandsApplied);
   h.add(world.commandDigest);
   h.add(world.events.totalEmitted);
+  world.enemies.hashInto(h);
+  world.projectiles.hashInto(h);
   return h.state;
 }
 
