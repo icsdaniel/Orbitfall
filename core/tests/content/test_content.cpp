@@ -354,6 +354,25 @@ TEST_CASE("rejects unknown references") {
   }
 }
 
+TEST_CASE("a second sun path type loads: fixed") {
+  Files files = shipped_files();
+  edit(files, "sun/default.json", "constant_drift", "fixed");
+  ContentDB db;
+  std::vector<std::string> errors;
+  REQUIRE_MESSAGE(load_content_from_strings(files, db, errors), joined(errors));
+  CHECK(db.suns[0].type == SunPathType::Fixed);
+}
+
+TEST_CASE("tier colours resolve to a colour tier index, other palette keys to -1") {
+  const ContentDB db = shipped_db();
+  CHECK(db.enemies[static_cast<size_t>(db.enemy_index("drifter_red"))].visual.colorTier == 0);
+  CHECK(db.enemies[static_cast<size_t>(db.enemy_index("drifter_blue"))].visual.colorTier == 1);
+  CHECK(db.enemies[static_cast<size_t>(db.enemy_index("drifter_green"))].visual.colorTier == 2);
+  CHECK(db.enemies[static_cast<size_t>(db.enemy_index("dart"))].visual.colorTier == 0);
+  CHECK(db.enemies[static_cast<size_t>(db.enemy_index("eclipser"))].visual.colorTier == -1);
+  CHECK(db.buildings[static_cast<size_t>(db.building_index("cannon"))].visual.colorTier == -1);
+}
+
 TEST_CASE("rejects unknown enum values") {
   expect_rejected("buildings/cannon.json", "\"kind\": \"tower\"", "\"kind\": \"castle\"",
                   "unknown value 'castle'");

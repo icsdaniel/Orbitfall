@@ -1,8 +1,13 @@
 #include "sim/world.h"
 
 #include "sim/hash.h"
+#include "sim/mathx.h"
+#include "systems/sun.h"
 
 namespace orbitfall {
+namespace {
+constexpr uint32_t kGridCellsPerSide = 64;
+}
 
 void World::emit(EventType type, int32_t a, int32_t b, float x, float y, float value) {
   Event e;
@@ -27,6 +32,53 @@ void initWorld(World& world, const SimConfig& config) {
   world.easeTicksLeft = 0;
   world.easeTicksTotal = 0;
   world.rotateInput = 0.0f;
+  world.content = config.content;
+  world.planet = nullptr;
+  world.sun = nullptr;
+  world.sunPath = nullptr;
+  world.waveSet = nullptr;
+  if (const ContentDB* db = config.content) {
+    const bool hasSet = config.waveSet >= 0 && config.waveSet < static_cast<int>(db->waveSets.size());
+    const int planet = hasSet ? db->waveSets[static_cast<size_t>(config.waveSet)].planet : config.planet;
+    if (planet >= 0 && planet < static_cast<int>(db->planets.size())) {
+      world.planet = &db->planets[static_cast<size_t>(planet)];
+    }
+    if (hasSet) world.waveSet = &db->waveSets[static_cast<size_t>(config.waveSet)];
+    const int sun = hasSet ? db->waveSets[static_cast<size_t>(config.waveSet)].sun : config.sun;
+    if (sun >= 0 && sun < static_cast<int>(db->suns.size())) {
+      world.sun = &db->suns[static_cast<size_t>(sun)];
+      world.sunPath = &sunPathFor(world.sun->type);
+    }
+  }
+  world.sunBearing = world.sun ? wrapTau(world.sun->start) : 0.0f;
+  world.lightMult = 1.0f;
+  size_t maxSpawns = 0;
+  if (world.waveSet != nullptr) {
+    for (const WaveDef& wave : world.waveSet->waves) {
+      if (wave.spawns.size() > maxSpawns) maxSpawns = wave.spawns.size();
+    }
+    if (!world.waveSet->waves.empty()) world.lightMult = world.waveSet->waves[0].lightMult;
+  }
+  world.spawned.assign(maxSpawns, 0);
+  world.waveTime = 0.0f;
+  world.intermissionTime = 0.0f;
+  world.commandLog.clear();
+  // The log grows with the player's actions, never per entity; reserving here
+  // keeps a normal run free of allocations.
+  world.commandLog.reserve(config.commandLogCapacity);
+  world.beamStrength = world.sun ? world.sun->baseStrength : 0.0f;
+  world.incomePerSecond = 0.0f;
+  world.planetRotation = 0.0f;
+  world.planetAngVel = 0.0f;
+  world.planetHp = world.planet ? world.planet->hp : 0.0f;
+  world.planetHpMax = world.planetHp;
+  // A wave set starts between waves; a sandbox world just runs.
+  world.phase = world.waveSet != nullptr ? Phase::Intermission : Phase::Wave;
+  world.waveIndex = 0;
+  world.enemiesSpawned = 0;
+  world.stardust = world.planet ? world.planet->startStardust : 0.0f;
+  world.slots.assign(world.planet ? static_cast<size_t>(world.planet->slots) : 0, BuildingSlot());
+  world.slotTargets.assign(world.slots.size(), kInvalidIndex);
   world.rng.seed(config.seed);
   world.commandsApplied = 0;
   world.commandDigest = 0;
@@ -39,11 +91,37 @@ void initWorld(World& world, const SimConfig& config) {
   }
   world.projectiles.clear();
   world.projectiles.overflowCount = 0;
+  // The grid covers the furthest spawn point; cells are a fixed fraction of it.
+  world.maxEnemyRadius = 0.0f;
+  float extent = world.planet ? world.planet->radius * 2.0f : 1.0f;
+  if (const ContentDB* db = config.content) {
+    if (db->rules.spawnRadius > extent) extent = db->rules.spawnRadius;
+    for (const EnemyDef& def : db->enemies) {
+      if (def.size > world.maxEnemyRadius) world.maxEnemyRadius = def.size;
+      if (def.hasHover && def.hover.spawnRadius > extent) extent = def.hover.spawnRadius;
+    }
+  }
+  const float halfExtent = extent * 1.05f;
+  if (world.grid.items.size() != config.enemyCapacity || world.grid.cols != kGridCellsPerSide ||
+      world.grid.minX != -halfExtent) {
+    world.grid.configure(halfExtent, kGridCellsPerSide, config.enemyCapacity);
+  }
+  world.grid.count = 0;
+  if (world.shade.size() != config.enemyCapacity) world.shade.assign(config.enemyCapacity, ShadeInterval());
+  world.shadeCount = 0;
   world.commands.clear();
   world.commands.reserve(config.commandCapacity);
   world.events.clear();
   world.events.totalEmitted = 0;
   world.events.reserve(config.eventCapacity);
+}
+
+void initWorld(World& world, const ContentDB& content, uint32_t waveSet, uint64_t seed) {
+  SimConfig config;
+  config.seed = static_cast<uint32_t>(seed ^ (seed >> 32));
+  config.content = &content;
+  config.waveSet = static_cast<int>(waveSet);
+  initWorld(world, config);
 }
 
 uint64_t hashWorld(const World& world) {
@@ -58,6 +136,25 @@ uint64_t hashWorld(const World& world) {
   h.add(world.easeTicksLeft);
   h.add(world.easeTicksTotal);
   h.add(world.rotateInput);
+  h.add(world.planetRotation);
+  h.add(world.planetAngVel);
+  h.add(world.sunBearing);
+  h.add(world.lightMult);
+  h.add(world.planetHp);
+  h.add(world.phase);
+  h.add(world.waveIndex);
+  h.add(world.enemiesSpawned);
+  h.add(world.waveTime);
+  h.add(world.intermissionTime);
+  h.array(world.spawned.data(), world.spawned.size());
+  h.add(world.stardust);
+  for (const BuildingSlot& b : world.slots) {
+    h.add(b.type);
+    h.add(b.mode);
+    h.add(b.flags);
+    h.add(b.aimOffset);
+    h.add(b.cooldown);
+  }
   h.array(world.rng.s, 4);
   h.add(world.commandsApplied);
   h.add(world.commandDigest);

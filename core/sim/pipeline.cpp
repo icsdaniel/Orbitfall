@@ -1,6 +1,7 @@
 #include "sim/pipeline.h"
 
 #include "sim/world.h"
+#include "systems/systems.h"
 
 namespace orbitfall {
 
@@ -22,6 +23,19 @@ void Pipeline::run(World& world) const {
 Pipeline defaultPipeline() {
   Pipeline p;
   p.add("applyCommands", applyCommands);
+  p.add("planetRotation", planetRotation);
+  p.add("sunlight", sunlight);
+  p.add("spawners", spawners);
+  p.add("enemyMovement", enemyMovement);
+  p.add("spatialRebuild", spatialRebuild);
+  p.add("towerTargeting", towerTargeting);
+  p.add("towerFire", towerFire);
+  p.add("projectileMovement", projectileMovement);
+  p.add("collisions", collisions);
+  p.add("landing", landing);
+  p.add("income", income);
+  p.add("cleanup", cleanup);
+  p.add("waveFlow", waveFlow);
   p.add("advanceClock", advanceClock);
   return p;
 }

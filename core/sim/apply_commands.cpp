@@ -1,11 +1,13 @@
 #include "sim/hash.h"
+#include "sim/mathx.h"
 #include "sim/pipeline.h"
 #include "sim/world.h"
+#include "systems/buildings.h"
+#include "systems/waves.h"
 
 namespace orbitfall {
 namespace {
 
-float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 bool isFinite(float v) { return v - v == 0.0f; }  // false for NaN and infinities
 
 void digest(World& world, const Command& c) {
@@ -20,6 +22,16 @@ void digest(World& world, const Command& c) {
   h.add(c.value2);
   world.commandDigest = h.state;
   ++world.commandsApplied;
+}
+
+// Build commands are refused once the run has ended.
+bool runOver(World& world, const Command& c) {
+  if (world.phase != Phase::Won && world.phase != Phase::Lost) return false;
+  if (world.content != nullptr) {
+    world.emit(EventType::CommandRejected, c.slot, static_cast<int32_t>(RejectReason::WrongPhase),
+               static_cast<float>(static_cast<int>(c.type)));
+  }
+  return true;
 }
 
 void apply(World& world, const Command& c) {
@@ -37,12 +49,24 @@ void apply(World& world, const Command& c) {
       if (world.easeTicksTotal == 0) world.timeScale = world.timeScaleTarget;
       break;
     }
-    // Recorded in the digest now; their systems arrive in M1 (slots, waves).
     case CommandType::PlaceBuilding:
+      if (!runOver(world, c)) placeBuilding(world, c.slot, c.id, c.value);
+      break;
     case CommandType::SellBuilding:
+      if (!runOver(world, c)) sellBuilding(world, c.slot);
+      break;
     case CommandType::SetAim:
+      if (!runOver(world, c)) setAim(world, c.slot, c.value);
+      break;
     case CommandType::SetTargeting:
+      if (!runOver(world, c)) setTargeting(world, c.slot, c.mode);
+      break;
     case CommandType::StartWave:
+      if (world.content != nullptr && !startWave(world)) {
+        world.emit(EventType::CommandRejected, -1, static_cast<int32_t>(RejectReason::WrongPhase),
+                   static_cast<float>(static_cast<int>(c.type)));
+      }
+      break;
     case CommandType::None:
     case CommandType::Count:
       break;
@@ -56,6 +80,10 @@ void applyCommands(World& world, float /*dt*/) {
   while (world.commands.popDue(world.tick, c)) {
     apply(world, c);
     digest(world, c);
+    if (world.recordCommands) {
+      c.tick = world.tick;  // the tick it really applied on
+      world.commandLog.push_back(c);
+    }
   }
 
   // Ease the time scale in real ticks (so it also works from and to pause), smoothstep.

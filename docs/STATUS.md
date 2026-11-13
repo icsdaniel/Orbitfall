@@ -12,15 +12,15 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [x] M0.7 Camera
 
 ## M1 First playable
-- [ ] M1.1 Planet rotation
+- [x] M1.1 Planet rotation
 - [x] M1.2 Input → commands
-- [ ] M1.3 Slots, placement, sell
+- [ ] M1.3 Slots, placement, sell (sim and slot view done; wiring to the real sim remains)
 - [x] M1.4 Build menu and ghost
-- [ ] M1.5 Enemies, lanes, landing
-- [ ] M1.6 Targeting, projectiles, splash
-- [ ] M1.7 Sun, beam, income
-- [ ] M1.8 Shadows and Eclipser
-- [ ] M1.9 Waves, flow, forecast
+- [x] M1.5 Enemies, lanes, landing
+- [x] M1.6 Targeting, projectiles, splash
+- [ ] M1.7 Sun, beam, income (sim and client done; wiring remains)
+- [ ] M1.8 Shadows and Eclipser (sim and client done; wiring remains)
+- [ ] M1.9 Waves, flow, forecast (sim and client done; wiring remains)
 - [x] M1.10 Bands and slow time (client; sim honours set_time_scale)
 - [x] M1.11 Debug overlay and tuning (client; tunables applied by SimServer)
 

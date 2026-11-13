@@ -25,7 +25,7 @@ enum class BuildingLayer : uint8_t { Ground, Elevated };
 enum class ProjectileKind : uint8_t { Dot, Shell };
 enum class DamageType : uint8_t { Kinetic, Explosive, Energy, Cryo, Emp, Pierce, Count };
 enum class TargetingMode : uint8_t { First, Strong, Close };
-enum class SunPathType : uint8_t { ConstantDrift };
+enum class SunPathType : uint8_t { ConstantDrift, Fixed };
 enum class EnemyBehavior : uint8_t { Lane, Eclipser };
 
 inline constexpr int kDamageTypeCount = static_cast<int>(DamageType::Count);
@@ -49,6 +49,9 @@ enum Trait : uint32_t {
 struct VisualDef {
   Shape shape = Shape::Circle;
   std::string color;  // palette key, e.g. "tower.cannon", "tier.red"
+  // Health colour tier for "tier.<name>" keys (0 red, 1 blue, 2 green, 3 yellow,
+  // 4 pink, 5 black, 6 white, 7 ceramic; BRIEF §4.6), -1 for any other key.
+  int colorTier = -1;
   bool trail = false;
 };
 

@@ -51,7 +51,8 @@ constexpr Named<DamageType> kDamageTypes[] = {
 constexpr Named<TargetingMode> kTargetingModes[] = {{"first", TargetingMode::First},
                                                     {"strong", TargetingMode::Strong},
                                                     {"close", TargetingMode::Close}};
-constexpr Named<SunPathType> kSunPathTypes[] = {{"constant_drift", SunPathType::ConstantDrift}};
+constexpr Named<SunPathType> kSunPathTypes[] = {{"constant_drift", SunPathType::ConstantDrift},
+                                                {"fixed", SunPathType::Fixed}};
 constexpr Named<EnemyBehavior> kEnemyBehaviors[] = {{"lane", EnemyBehavior::Lane},
                                                     {"eclipser", EnemyBehavior::Eclipser}};
 constexpr Named<uint32_t> kTraits[] = {
@@ -81,6 +82,15 @@ std::string names_of(const Named<E> (&table)[N]) {
     s += e.name;
   }
   return s;
+}
+
+// "tier.<name>" palette keys are the health colour tiers, in BRIEF §4.6 order.
+int color_tier(const std::string& key) {
+  static const char* const kTiers[] = {"red", "blue", "green", "yellow", "pink", "black", "white", "ceramic"};
+  if (key.compare(0, 5, "tier.") != 0) return -1;
+  for (int i = 0; i < 8; ++i)
+    if (key.compare(5, std::string::npos, kTiers[i]) == 0) return i;
+  return -1;
 }
 
 std::string fmt(double v) {
@@ -268,6 +278,7 @@ struct Loader {
     if (!v.valid()) return;
     if (needShape) v.named("shape", kShapes, out.shape);
     v.str("color", out.color);
+    out.colorTier = color_tier(out.color);
     if (v.has("trail")) v.boolean("trail", out.trail);
   }
 
