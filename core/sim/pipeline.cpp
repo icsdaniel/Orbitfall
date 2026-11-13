@@ -1,6 +1,7 @@
 #include "sim/pipeline.h"
 
 #include "sim/world.h"
+#include "systems/systems.h"
 
 namespace orbitfall {
 
@@ -22,6 +23,7 @@ void Pipeline::run(World& world) const {
 Pipeline defaultPipeline() {
   Pipeline p;
   p.add("applyCommands", applyCommands);
+  p.add("planetRotation", planetRotation);
   p.add("advanceClock", advanceClock);
   return p;
 }

@@ -27,6 +27,17 @@ void initWorld(World& world, const SimConfig& config) {
   world.easeTicksLeft = 0;
   world.easeTicksTotal = 0;
   world.rotateInput = 0.0f;
+  world.content = config.content;
+  world.planet = nullptr;
+  if (const ContentDB* db = config.content) {
+    const bool hasSet = config.waveSet >= 0 && config.waveSet < static_cast<int>(db->waveSets.size());
+    const int planet = hasSet ? db->waveSets[static_cast<size_t>(config.waveSet)].planet : config.planet;
+    if (planet >= 0 && planet < static_cast<int>(db->planets.size())) {
+      world.planet = &db->planets[static_cast<size_t>(planet)];
+    }
+  }
+  world.planetRotation = 0.0f;
+  world.planetAngVel = 0.0f;
   world.rng.seed(config.seed);
   world.commandsApplied = 0;
   world.commandDigest = 0;
@@ -58,6 +69,8 @@ uint64_t hashWorld(const World& world) {
   h.add(world.easeTicksLeft);
   h.add(world.easeTicksTotal);
   h.add(world.rotateInput);
+  h.add(world.planetRotation);
+  h.add(world.planetAngVel);
   h.array(world.rng.s, 4);
   h.add(world.commandsApplied);
   h.add(world.commandDigest);
