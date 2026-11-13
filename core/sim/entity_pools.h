@@ -13,10 +13,12 @@ namespace orbitfall {
   F(float, posY)                                               \
   F(float, velX)                                               \
   F(float, velY)                                               \
-  F(float, hp)        /* remaining layers or hit points */     \
+  F(float, hp)        /* hit points left on this layer */      \
+  F(float, timer)     /* behaviour timer, seconds */           \
   F(uint32_t, traits) /* trait bits */                         \
   F(uint16_t, type)   /* enemy definition index */             \
-  F(uint16_t, flags)  /* per-entity state bits */
+  F(uint16_t, flags)  /* EnemyFlag bits and behaviour state */ \
+  F(uint16_t, lane)   /* planet lane it spawned on */
 ORBITFALL_DECLARE_POOL(EnemyPool, ORBITFALL_ENEMY_FIELDS)
 
 // Projectiles, in world space.

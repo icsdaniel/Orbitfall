@@ -10,6 +10,7 @@ namespace orbitfall {
 void planetRotation(World& world, float dt) {
   const PlanetDef* planet = world.planet;
   if (planet == nullptr || dt <= 0.0f) return;
+  if (world.phase == Phase::Won || world.phase == Phase::Lost) return;  // the run is over
 
   float vel = world.planetAngVel;
   const float input = world.rotateInput;

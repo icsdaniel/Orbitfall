@@ -9,6 +9,7 @@
 #include "sim/entity_pools.h"
 #include "sim/events.h"
 #include "sim/rng.h"
+#include "spatial/grid.h"
 
 namespace orbitfall {
 
@@ -31,6 +32,9 @@ struct SimConfig {
   int planet = 0;
   int sun = 0;
 };
+
+// Run phase; the values are the binding's get_phase().
+enum class Phase : uint8_t { Intermission = 0, Wave = 1, Won = 2, Lost = 3 };
 
 // Slot flag bits (BuildingSlot::flags), also the binding's get_slot_flags().
 enum SlotFlag : uint8_t {
@@ -75,6 +79,17 @@ struct World {
   float planetRotation = 0.0f;  // rad in [0, 2*pi); world angle = local + this
   float planetAngVel = 0.0f;    // rad/s
 
+  float planetHp = 0.0f;
+  float planetHpMax = 0.0f;
+
+  // --- run flow ---
+  Phase phase = Phase::Wave;
+  uint32_t waveIndex = 0;       // 0-based: the wave being played, or the next one
+  uint32_t enemiesSpawned = 0;  // total over the run
+
+  // True while the wave clock runs: enemies, shots, sun and income advance.
+  bool running() const { return content != nullptr && planet != nullptr && phase == Phase::Wave; }
+
   // --- economy and buildings ---
   float stardust = 0.0f;
   std::vector<BuildingSlot> slots;  // sized to the planet's slot count in initWorld
@@ -93,6 +108,10 @@ struct World {
   // --- entity pools (fixed capacity from SimConfig, reserved in initWorld) ---
   EnemyPool enemies;
   ProjectilePool projectiles;
+
+  // --- derived each tick (not hashed) ---
+  SpatialGrid grid;              // enemies by position, rebuilt by spatialRebuild
+  float maxEnemyRadius = 0.0f;   // largest EnemyDef::size, pads grid queries
 
   // --- queues (not hashed: pending input and undrained output) ---
   CommandQueue commands;
