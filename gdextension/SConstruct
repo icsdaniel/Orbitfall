@@ -3,6 +3,10 @@
 import os
 # GODOT_CPP_PATH lets worktrees share one prebuilt godot-cpp checkout.
 godot_cpp = os.environ.get("GODOT_CPP_PATH", "godot-cpp")
+# Web builds are always no-threads (BRIEF §5.8): matches the web_dlink_nothreads export
+# template and the .nothreads names in bin/orbitfall.gdextension.
+if ARGUMENTS.get("platform") == "web":
+    ARGUMENTS.setdefault("threads", "no")
 env = SConscript(os.path.join(godot_cpp, "SConstruct"))
 env.Append(CPPPATH=["src/", "../core/"])
 core_dirs = ["sim", "pools", "systems", "spatial", "content"]
