@@ -354,6 +354,15 @@ TEST_CASE("rejects unknown references") {
   }
 }
 
+TEST_CASE("a second sun path type loads: fixed") {
+  Files files = shipped_files();
+  edit(files, "sun/default.json", "constant_drift", "fixed");
+  ContentDB db;
+  std::vector<std::string> errors;
+  REQUIRE_MESSAGE(load_content_from_strings(files, db, errors), joined(errors));
+  CHECK(db.suns[0].type == SunPathType::Fixed);
+}
+
 TEST_CASE("rejects unknown enum values") {
   expect_rejected("buildings/cannon.json", "\"kind\": \"tower\"", "\"kind\": \"castle\"",
                   "unknown value 'castle'");

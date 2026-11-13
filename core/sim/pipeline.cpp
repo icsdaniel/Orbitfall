@@ -24,6 +24,7 @@ Pipeline defaultPipeline() {
   Pipeline p;
   p.add("applyCommands", applyCommands);
   p.add("planetRotation", planetRotation);
+  p.add("sunlight", sunlight);
   p.add("enemyMovement", enemyMovement);
   p.add("spatialRebuild", spatialRebuild);
   p.add("towerTargeting", towerTargeting);
@@ -31,6 +32,7 @@ Pipeline defaultPipeline() {
   p.add("projectileMovement", projectileMovement);
   p.add("collisions", collisions);
   p.add("landing", landing);
+  p.add("income", income);
   p.add("cleanup", cleanup);
   p.add("advanceClock", advanceClock);
   return p;

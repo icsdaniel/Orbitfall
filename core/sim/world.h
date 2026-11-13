@@ -54,6 +54,8 @@ struct BuildingSlot {
   float cooldown = 0.0f;   // seconds until the next shot
 };
 
+struct SunPath;
+
 struct World {
   // --- clock ---
   uint32_t seed = 0;
@@ -74,6 +76,14 @@ struct World {
   // --- content (not hashed: fixed for the run) ---
   const ContentDB* content = nullptr;
   const PlanetDef* planet = nullptr;
+  const SunDef* sun = nullptr;
+  const SunPath* sunPath = nullptr;  // how the bearing moves (systems/sun.h)
+
+  // --- sun ---
+  float sunBearing = 0.0f;       // rad in [0, 2*pi), world angle the light comes from
+  float lightMult = 1.0f;        // the wave's light level
+  float beamStrength = 0.0f;     // sun baseStrength * lightMult, set by sunlight
+  float incomePerSecond = 0.0f;  // stardust/s from lit unshaded panels right now
 
   // --- planet ---
   float planetRotation = 0.0f;  // rad in [0, 2*pi); world angle = local + this

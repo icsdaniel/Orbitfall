@@ -51,7 +51,8 @@ constexpr Named<DamageType> kDamageTypes[] = {
 constexpr Named<TargetingMode> kTargetingModes[] = {{"first", TargetingMode::First},
                                                     {"strong", TargetingMode::Strong},
                                                     {"close", TargetingMode::Close}};
-constexpr Named<SunPathType> kSunPathTypes[] = {{"constant_drift", SunPathType::ConstantDrift}};
+constexpr Named<SunPathType> kSunPathTypes[] = {{"constant_drift", SunPathType::ConstantDrift},
+                                                {"fixed", SunPathType::Fixed}};
 constexpr Named<EnemyBehavior> kEnemyBehaviors[] = {{"lane", EnemyBehavior::Lane},
                                                     {"eclipser", EnemyBehavior::Eclipser}};
 constexpr Named<uint32_t> kTraits[] = {

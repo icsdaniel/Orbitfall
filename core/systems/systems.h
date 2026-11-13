@@ -10,6 +10,12 @@ struct World;
 // M1.1: turns the planet from world.rotateInput using the PlanetDef numbers.
 void planetRotation(World& world, float dt);
 
+// M1.7: advances the sun along its SunPath (wave time only), sets beamStrength
+// and the lit flag of every slot.
+void sunlight(World& world, float dt);
+// M1.7: lit, unshaded panels earn panelRate * beamStrength per second.
+// Sets world.incomePerSecond; emits StardustChanged per whole unit earned.
+void income(World& world, float dt);
 // M1.5: moves enemies along their velocity.
 void enemyMovement(World& world, float dt);
 // M1.5: re-sorts the enemies into world.grid (counting sort).
