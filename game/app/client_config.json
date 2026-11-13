@@ -1,0 +1,35 @@
+{
+  "_comment": "Client-only tunables (camera bands, gestures, HUD). Sim numbers live in content/.",
+  "bands": {
+    "surfacePlanetFrac": 0.32,
+    "surfaceOffsetPx": 22,
+    "orbitViewRadius": 400,
+    "fadeWidth": 0.35,
+    "startBand": "surface"
+  },
+  "time": {
+    "surfaceTimeScale": 0.75,
+    "normalTimeScale": 1.0,
+    "easeSeconds": 0.3
+  },
+  "input": {
+    "dragRangePx": 90,
+    "dragDeadPx": 10,
+    "tapMaxPx": 18,
+    "tapMaxSeconds": 0.35,
+    "doubleTapSeconds": 0.3,
+    "doubleTapPx": 56,
+    "longPressSeconds": 0.5,
+    "wheelStep": 1.2,
+    "slotPickPx": 44
+  },
+  "sim": { "threaded": true, "forecastCount": 5, "projectileSize": 4 },
+  "tunables": [
+    { "path": "sun.speedDegPerSec", "label": "Sun speed (deg/s)", "min": 0, "max": 12, "step": 0.1, "default": 1.5 },
+    { "path": "sun.beamWidth", "label": "Beam width", "min": 20, "max": 200, "step": 1, "default": 141 },
+    { "path": "sun.baseStrength", "label": "Beam strength", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+    { "path": "planet.rotMaxSpeed", "label": "Rot max (deg/s)", "min": 10, "max": 360, "step": 5, "default": 90 },
+    { "path": "planet.rotAccel", "label": "Rot accel (deg/s2)", "min": 30, "max": 1440, "step": 10, "default": 360 },
+    { "path": "planet.rotDamping", "label": "Rot damping (1/s)", "min": 0, "max": 12, "step": 0.25, "default": 4 }
+  ]
+}

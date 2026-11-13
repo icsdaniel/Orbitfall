@@ -13,18 +13,20 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 
 ## M1 First playable
 - [ ] M1.1 Planet rotation
-- [ ] M1.2 Input → commands
+- [x] M1.2 Input → commands
 - [ ] M1.3 Slots, placement, sell
-- [ ] M1.4 Build menu and ghost
+- [x] M1.4 Build menu and ghost
 - [ ] M1.5 Enemies, lanes, landing
 - [ ] M1.6 Targeting, projectiles, splash
 - [ ] M1.7 Sun, beam, income
 - [ ] M1.8 Shadows and Eclipser
 - [ ] M1.9 Waves, flow, forecast
-- [ ] M1.10 Bands and slow time
-- [ ] M1.11 Debug overlay and tuning
+- [x] M1.10 Bands and slow time (client; sim honours set_time_scale)
+- [x] M1.11 Debug overlay and tuning (client; tunables applied by SimServer)
 
 ## Design track
 - [ ] D1 DECISIONS.md
 - [ ] D2 rotation toy
 - [ ] D3 sun/shadow toy
+
+M1 client note: the client parts of M1.3/M1.7/M1.8/M1.9 (slot ring, beam cone, slot tint, shadow wedges, HUD, forecast strip, end screens) are in `game/view/` and `game/ui/`; those tasks get ticked when their sim halves land. `--mock` runs the client on `MockSimServer`.
