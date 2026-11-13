@@ -12,7 +12,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [x] M0.7 Camera
 
 ## M1 First playable
-- [ ] M1.1 Planet rotation
+- [x] M1.1 Planet rotation
 - [ ] M1.2 Input → commands
 - [ ] M1.3 Slots, placement, sell
 - [ ] M1.4 Build menu and ghost

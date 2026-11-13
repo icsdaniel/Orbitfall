@@ -3,6 +3,7 @@
 // Anything that affects future ticks must be included in hashWorld().
 #include <cstdint>
 
+#include "content/content.h"
 #include "sim/commands.h"
 #include "sim/entity_pools.h"
 #include "sim/events.h"
@@ -21,6 +22,13 @@ struct SimConfig {
   uint32_t eventCapacity = 1024;    // undrained events before the queue grows
   uint32_t enemyCapacity = 16384;       // fixed; spawns beyond it are refused
   uint32_t projectileCapacity = 32768;  // fixed; shots beyond it are refused
+  // Loaded content; must outlive the world. nullptr gives the bare M0 sim.
+  const ContentDB* content = nullptr;
+  // Wave set to play (index into content->waveSets); it names the planet and
+  // the sun. kNoIndex (or no wave sets) gives a sandbox run on `planet`/`sun`.
+  int waveSet = 0;
+  int planet = 0;
+  int sun = 0;
 };
 
 struct World {
@@ -39,6 +47,14 @@ struct World {
 
   // --- latest player input ---
   float rotateInput = 0.0f;  // [-1, 1], consumed by planet rotation (M1.1)
+
+  // --- content (not hashed: fixed for the run) ---
+  const ContentDB* content = nullptr;
+  const PlanetDef* planet = nullptr;
+
+  // --- planet ---
+  float planetRotation = 0.0f;  // rad in [0, 2*pi); world angle = local + this
+  float planetAngVel = 0.0f;    // rad/s
 
   // --- determinism bookkeeping ---
   Rng rng;
