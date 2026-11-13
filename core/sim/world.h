@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "sim/commands.h"
+#include "sim/entity_pools.h"
 #include "sim/events.h"
 #include "sim/rng.h"
 
@@ -18,6 +19,8 @@ struct SimConfig {
   uint32_t seed = 1;
   uint32_t commandCapacity = 1024;  // pending commands before the queue grows
   uint32_t eventCapacity = 1024;    // undrained events before the queue grows
+  uint32_t enemyCapacity = 16384;       // fixed; spawns beyond it are refused
+  uint32_t projectileCapacity = 32768;  // fixed; shots beyond it are refused
 };
 
 struct World {
@@ -41,6 +44,10 @@ struct World {
   Rng rng;
   uint64_t commandsApplied = 0;
   uint64_t commandDigest = 0;  // running hash of every applied command
+
+  // --- entity pools (fixed capacity from SimConfig, reserved in initWorld) ---
+  EnemyPool enemies;
+  ProjectilePool projectiles;
 
   // --- queues (not hashed: pending input and undrained output) ---
   CommandQueue commands;

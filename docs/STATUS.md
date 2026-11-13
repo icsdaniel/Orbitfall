@@ -6,7 +6,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [x] M0.1 Scaffold (Godot 4.5.1, core + doctest, gdextension + godot-cpp, GdUnit4, CI, setup script)
 - [ ] M0.6 Playtest pipeline (Pages /latest/, PR previews)
 - [x] M0.2 Sim core (World, fixed step, RNG, commands/events, hash)
-- [ ] M0.3 SoA pools
+- [x] M0.3 SoA pools
 - [x] M0.4 MultiMesh renderer
 - [ ] M0.5 SimServer
 - [x] M0.7 Camera
