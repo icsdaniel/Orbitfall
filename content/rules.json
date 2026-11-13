@@ -1,0 +1,9 @@
+{
+  "tickRate": 30,
+  "killBounty": 1,
+  "minDamageMult": 0.25,
+  "lightChargeMult": 2,
+  "spawnRadius": 900,
+  "spawnJitterDeg": 0,
+  "surfaceTimeEaseSeconds": 0.3
+}

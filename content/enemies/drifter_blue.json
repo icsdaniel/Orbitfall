@@ -1,0 +1,6 @@
+{
+  "id": "drifter_blue", "behavior": "lane", "layers": 2, "hpPerLayer": 1,
+  "speed": 40, "size": 8, "landDamagePerLayer": 1, "bounty": 1,
+  "traits": [], "shadowCaster": false, "hpBar": false, "popsInto": "drifter_red",
+  "shape": "circle", "visual": { "color": "tier.blue" }
+}

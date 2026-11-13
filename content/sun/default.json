@@ -1,0 +1,8 @@
+{
+  "id": "default",
+  "type": "constant_drift",
+  "startDeg": 0,
+  "speedDegPerSec": 1.5,
+  "beamWidth": 141,
+  "baseStrength": 1.0
+}
