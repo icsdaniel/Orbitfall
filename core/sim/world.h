@@ -23,6 +23,7 @@ struct SimConfig {
   uint32_t seed = 1;
   uint32_t commandCapacity = 1024;  // pending commands before the queue grows
   uint32_t eventCapacity = 1024;    // undrained events before the queue grows
+  uint32_t commandLogCapacity = 16384;  // logged commands before the replay log grows
   uint32_t enemyCapacity = 16384;       // fixed; spawns beyond it are refused
   uint32_t projectileCapacity = 32768;  // fixed; shots beyond it are refused
   // Loaded content; must outlive the world. nullptr gives the bare M0 sim.
@@ -79,6 +80,7 @@ struct World {
   const PlanetDef* planet = nullptr;
   const SunDef* sun = nullptr;
   const SunPath* sunPath = nullptr;  // how the bearing moves (systems/sun.h)
+  const WaveSetDef* waveSet = nullptr;  // nullptr = sandbox: always in Phase::Wave, no spawner
 
   // --- sun ---
   float sunBearing = 0.0f;       // rad in [0, 2*pi), world angle the light comes from
@@ -97,6 +99,11 @@ struct World {
   Phase phase = Phase::Wave;
   uint32_t waveIndex = 0;       // 0-based: the wave being played, or the next one
   uint32_t enemiesSpawned = 0;  // total over the run
+  float waveTime = 0.0f;          // sim seconds since the wave started
+  float intermissionTime = 0.0f;  // real seconds in this intermission (auto-start)
+  std::vector<uint16_t> spawned;  // per spawn entry of the current wave: units out so far
+
+  uint32_t waveCount() const { return waveSet ? static_cast<uint32_t>(waveSet->waves.size()) : 0u; }
 
   // True while the wave clock runs: enemies, shots, sun and income advance.
   bool running() const { return content != nullptr && planet != nullptr && phase == Phase::Wave; }
@@ -126,6 +133,11 @@ struct World {
   std::vector<ShadeInterval> shade;   // merged shadows in beam space, sorted
   uint32_t shadeCount = 0;
   std::vector<uint32_t> slotTargets;  // per slot: enemy index picked by towerTargeting
+
+  // --- replay log (not hashed): every applied command, stamped with the tick
+  // it applied on. seed + this log reproduces the run (systems/waves.h). ---
+  bool recordCommands = true;
+  std::vector<Command> commandLog;
 
   // --- queues (not hashed: pending input and undrained output) ---
   CommandQueue commands;

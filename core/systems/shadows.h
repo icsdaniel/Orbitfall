@@ -36,5 +36,7 @@ uint32_t shadeIntervalAngles(const World& world, float* out, uint32_t maxPairs);
 // covers; 0 when no panel is lit. Used by the Eclipser's movement and by the
 // forecast's ghost arc, so the two cannot disagree.
 float eclipserOffset(const World& world, float casterRadius);
+// Same, for a sun at `sunBearing` instead of where it is now.
+float eclipserOffsetAt(const World& world, float casterRadius, float sunBearing);
 
 }  // namespace orbitfall

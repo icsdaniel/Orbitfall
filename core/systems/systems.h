@@ -18,6 +18,11 @@ void sunlight(World& world, float dt);
 // M1.7: lit, unshaded panels earn panelRate * beamStrength per second.
 // Sets world.incomePerSecond; emits StardustChanged per whole unit earned.
 void income(World& world, float dt);
+// M1.9: releases the current wave's spawns, spread over its spawnSeconds.
+void spawners(World& world, float dt);
+// M1.9: ends a wave once everything has spawned and nothing is left
+// (WaveCleared, then Intermission or Victory); runs the optional auto-start.
+void waveFlow(World& world, float dt);
 // M1.5: moves enemies along their velocity. M1.8: Eclipsers fly to their hover
 // point on the sun line, track the sun, hover, then descend.
 void enemyMovement(World& world, float dt);

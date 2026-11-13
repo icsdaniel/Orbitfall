@@ -36,12 +36,14 @@ void initWorld(World& world, const SimConfig& config) {
   world.planet = nullptr;
   world.sun = nullptr;
   world.sunPath = nullptr;
+  world.waveSet = nullptr;
   if (const ContentDB* db = config.content) {
     const bool hasSet = config.waveSet >= 0 && config.waveSet < static_cast<int>(db->waveSets.size());
     const int planet = hasSet ? db->waveSets[static_cast<size_t>(config.waveSet)].planet : config.planet;
     if (planet >= 0 && planet < static_cast<int>(db->planets.size())) {
       world.planet = &db->planets[static_cast<size_t>(planet)];
     }
+    if (hasSet) world.waveSet = &db->waveSets[static_cast<size_t>(config.waveSet)];
     const int sun = hasSet ? db->waveSets[static_cast<size_t>(config.waveSet)].sun : config.sun;
     if (sun >= 0 && sun < static_cast<int>(db->suns.size())) {
       world.sun = &db->suns[static_cast<size_t>(sun)];
@@ -50,13 +52,28 @@ void initWorld(World& world, const SimConfig& config) {
   }
   world.sunBearing = world.sun ? wrapTau(world.sun->start) : 0.0f;
   world.lightMult = 1.0f;
+  size_t maxSpawns = 0;
+  if (world.waveSet != nullptr) {
+    for (const WaveDef& wave : world.waveSet->waves) {
+      if (wave.spawns.size() > maxSpawns) maxSpawns = wave.spawns.size();
+    }
+    if (!world.waveSet->waves.empty()) world.lightMult = world.waveSet->waves[0].lightMult;
+  }
+  world.spawned.assign(maxSpawns, 0);
+  world.waveTime = 0.0f;
+  world.intermissionTime = 0.0f;
+  world.commandLog.clear();
+  // The log grows with the player's actions, never per entity; reserving here
+  // keeps a normal run free of allocations.
+  world.commandLog.reserve(config.commandLogCapacity);
   world.beamStrength = world.sun ? world.sun->baseStrength : 0.0f;
   world.incomePerSecond = 0.0f;
   world.planetRotation = 0.0f;
   world.planetAngVel = 0.0f;
   world.planetHp = world.planet ? world.planet->hp : 0.0f;
   world.planetHpMax = world.planetHp;
-  world.phase = Phase::Wave;
+  // A wave set starts between waves; a sandbox world just runs.
+  world.phase = world.waveSet != nullptr ? Phase::Intermission : Phase::Wave;
   world.waveIndex = 0;
   world.enemiesSpawned = 0;
   world.stardust = world.planet ? world.planet->startStardust : 0.0f;
@@ -127,6 +144,9 @@ uint64_t hashWorld(const World& world) {
   h.add(world.phase);
   h.add(world.waveIndex);
   h.add(world.enemiesSpawned);
+  h.add(world.waveTime);
+  h.add(world.intermissionTime);
+  h.array(world.spawned.data(), world.spawned.size());
   h.add(world.stardust);
   for (const BuildingSlot& b : world.slots) {
     h.add(b.type);

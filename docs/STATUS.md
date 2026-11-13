@@ -20,7 +20,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [x] M1.6 Targeting, projectiles, splash
 - [ ] M1.7 Sun, beam, income (sim part done: SunPath, beam test, lit flags, panel income; cone, slot tint and HUD remain)
 - [ ] M1.8 Shadows and Eclipser (sim part done: shade intervals, shaded flags, Eclipser behaviour, core_bench shadows; wedge and tint remain)
-- [ ] M1.9 Waves, flow, forecast
+- [ ] M1.9 Waves, flow, forecast (sim part done: waves from content, intermission, StartWave, WaveCleared/Victory, forecast data, replay; HUD strip and end screens remain)
 - [ ] M1.10 Bands and slow time
 - [ ] M1.11 Debug overlay and tuning
 
