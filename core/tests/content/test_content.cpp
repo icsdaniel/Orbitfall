@@ -363,6 +363,16 @@ TEST_CASE("a second sun path type loads: fixed") {
   CHECK(db.suns[0].type == SunPathType::Fixed);
 }
 
+TEST_CASE("tier colours resolve to a colour tier index, other palette keys to -1") {
+  const ContentDB db = shipped_db();
+  CHECK(db.enemies[static_cast<size_t>(db.enemy_index("drifter_red"))].visual.colorTier == 0);
+  CHECK(db.enemies[static_cast<size_t>(db.enemy_index("drifter_blue"))].visual.colorTier == 1);
+  CHECK(db.enemies[static_cast<size_t>(db.enemy_index("drifter_green"))].visual.colorTier == 2);
+  CHECK(db.enemies[static_cast<size_t>(db.enemy_index("dart"))].visual.colorTier == 0);
+  CHECK(db.enemies[static_cast<size_t>(db.enemy_index("eclipser"))].visual.colorTier == -1);
+  CHECK(db.buildings[static_cast<size_t>(db.building_index("cannon"))].visual.colorTier == -1);
+}
+
 TEST_CASE("rejects unknown enum values") {
   expect_rejected("buildings/cannon.json", "\"kind\": \"tower\"", "\"kind\": \"castle\"",
                   "unknown value 'castle'");
