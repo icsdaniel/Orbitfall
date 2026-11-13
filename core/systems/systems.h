@@ -14,6 +14,17 @@ void planetRotation(World& world, float dt);
 void enemyMovement(World& world, float dt);
 // M1.5: re-sorts the enemies into world.grid (counting sort).
 void spatialRebuild(World& world, float dt);
+// M1.6: picks a target per tower (axis incl. aimOffset, arc, range, mode) into
+// world.slotTargets and sets kSlotHasTarget.
+void towerTargeting(World& world, float dt);
+// M1.6: towers with a target and a ready cooldown fire a led shot.
+void towerFire(World& world, float dt);
+// M1.6: moves projectiles and ages them.
+void projectileMovement(World& world, float dt);
+// M1.6: swept projectile-vs-enemy test through the grid; applies damage
+// (falloff, type multiplier, floor), splash and layer popping; removes spent
+// and expired projectiles.
+void collisions(World& world, float dt);
 // M1.5: enemies that reached the surface are removed and subtract planet HP
 // (landDamagePerLayer * remaining layers, or the flat landDamage). Emits
 // PlanetHit (a = enemy type, b = lane, x/y, value = damage) and, at HP 0,
