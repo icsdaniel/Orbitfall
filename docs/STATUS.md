@@ -7,7 +7,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [ ] M0.6 Playtest pipeline (Pages /latest/, PR previews)
 - [ ] M0.2 Sim core (World, fixed step, RNG, commands/events, hash)
 - [ ] M0.3 SoA pools
-- [ ] M0.4 MultiMesh renderer
+- [x] M0.4 MultiMesh renderer
 - [ ] M0.5 SimServer
 - [ ] M0.7 Camera
 
