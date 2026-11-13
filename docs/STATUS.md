@@ -8,7 +8,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [x] M0.2 Sim core (World, fixed step, RNG, commands/events, hash)
 - [x] M0.3 SoA pools
 - [x] M0.4 MultiMesh renderer
-- [ ] M0.5 SimServer
+- [x] M0.5 SimServer (sim thread, snapshots, command API; M1 getters stubbed with TODO(M1.x) in gdextension/src/snapshot.h)
 - [x] M0.7 Camera
 
 ## M1 First playable
