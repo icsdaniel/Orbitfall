@@ -9,7 +9,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [ ] M0.3 SoA pools
 - [x] M0.4 MultiMesh renderer
 - [ ] M0.5 SimServer
-- [ ] M0.7 Camera
+- [x] M0.7 Camera
 
 ## M1 First playable
 - [ ] M1.1 Planet rotation

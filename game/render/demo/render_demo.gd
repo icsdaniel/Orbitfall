@@ -1,5 +1,6 @@
 extends Node2D
 ## M0.4 demo: animates N instances through BatchRenderer with an FPS label.
+## M0.7: OrbitCamera zoom with mouse wheel or pinch; +/- keys step the zoom target.
 ## User args (after `--`): --count=N (default 20000), --zoom=Z, --grid (static legend
 ## of every shape, tier and trait), --screenshot <path> (save a PNG after a few
 ## frames and quit), --frames=N (quit after N frames and print timings).
@@ -13,7 +14,7 @@ const SCREENSHOT_FRAME: int = 12
 const F: int = BatchRenderer.FLOATS_PER_INSTANCE
 
 var _renderer: BatchRenderer
-var _camera: Camera2D
+var _camera: OrbitCamera
 var _label: Label
 var _count: int = 20000
 var _grid: bool = false
@@ -59,11 +60,21 @@ func _ready() -> void:
 
 
 func _setup_camera() -> void:
-	_camera = Camera2D.new()
-	_camera.zoom = Vector2(_start_zoom, _start_zoom)
+	_camera = OrbitCamera.new()
 	add_child(_camera)
 	_camera.make_current()
+	_camera.snap_zoom(_start_zoom)
 	_renderer.camera = _camera
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key: InputEventKey = event as InputEventKey
+	if key == null or not key.pressed:
+		return
+	if key.keycode == KEY_EQUAL or key.keycode == KEY_KP_ADD:
+		_camera.set_zoom_target(_camera.get_zoom_target() * 2.0)
+	elif key.keycode == KEY_MINUS or key.keycode == KEY_KP_SUBTRACT:
+		_camera.set_zoom_target(_camera.get_zoom_target() * 0.5)
 
 
 func _parse_args() -> void:
