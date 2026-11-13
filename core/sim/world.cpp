@@ -3,6 +3,9 @@
 #include "sim/hash.h"
 
 namespace orbitfall {
+namespace {
+constexpr uint32_t kGridCellsPerSide = 64;
+}
 
 void World::emit(EventType type, int32_t a, int32_t b, float x, float y, float value) {
   Event e;
@@ -38,6 +41,11 @@ void initWorld(World& world, const SimConfig& config) {
   }
   world.planetRotation = 0.0f;
   world.planetAngVel = 0.0f;
+  world.planetHp = world.planet ? world.planet->hp : 0.0f;
+  world.planetHpMax = world.planetHp;
+  world.phase = Phase::Wave;
+  world.waveIndex = 0;
+  world.enemiesSpawned = 0;
   world.stardust = world.planet ? world.planet->startStardust : 0.0f;
   world.slots.assign(world.planet ? static_cast<size_t>(world.planet->slots) : 0, BuildingSlot());
   world.rng.seed(config.seed);
@@ -52,6 +60,22 @@ void initWorld(World& world, const SimConfig& config) {
   }
   world.projectiles.clear();
   world.projectiles.overflowCount = 0;
+  // The grid covers the furthest spawn point; cells are a fixed fraction of it.
+  world.maxEnemyRadius = 0.0f;
+  float extent = world.planet ? world.planet->radius * 2.0f : 1.0f;
+  if (const ContentDB* db = config.content) {
+    if (db->rules.spawnRadius > extent) extent = db->rules.spawnRadius;
+    for (const EnemyDef& def : db->enemies) {
+      if (def.size > world.maxEnemyRadius) world.maxEnemyRadius = def.size;
+      if (def.hasHover && def.hover.spawnRadius > extent) extent = def.hover.spawnRadius;
+    }
+  }
+  const float halfExtent = extent * 1.05f;
+  if (world.grid.items.size() != config.enemyCapacity || world.grid.cols != kGridCellsPerSide ||
+      world.grid.minX != -halfExtent) {
+    world.grid.configure(halfExtent, kGridCellsPerSide, config.enemyCapacity);
+  }
+  world.grid.count = 0;
   world.commands.clear();
   world.commands.reserve(config.commandCapacity);
   world.events.clear();
@@ -73,6 +97,10 @@ uint64_t hashWorld(const World& world) {
   h.add(world.rotateInput);
   h.add(world.planetRotation);
   h.add(world.planetAngVel);
+  h.add(world.planetHp);
+  h.add(world.phase);
+  h.add(world.waveIndex);
+  h.add(world.enemiesSpawned);
   h.add(world.stardust);
   for (const BuildingSlot& b : world.slots) {
     h.add(b.type);
