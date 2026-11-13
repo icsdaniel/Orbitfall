@@ -84,6 +84,15 @@ std::string names_of(const Named<E> (&table)[N]) {
   return s;
 }
 
+// "tier.<name>" palette keys are the health colour tiers, in BRIEF §4.6 order.
+int color_tier(const std::string& key) {
+  static const char* const kTiers[] = {"red", "blue", "green", "yellow", "pink", "black", "white", "ceramic"};
+  if (key.compare(0, 5, "tier.") != 0) return -1;
+  for (int i = 0; i < 8; ++i)
+    if (key.compare(5, std::string::npos, kTiers[i]) == 0) return i;
+  return -1;
+}
+
 std::string fmt(double v) {
   std::string s = std::to_string(v);
   while (s.size() > 1 && s.back() == '0') s.pop_back();
@@ -269,6 +278,7 @@ struct Loader {
     if (!v.valid()) return;
     if (needShape) v.named("shape", kShapes, out.shape);
     v.str("color", out.color);
+    out.colorTier = color_tier(out.color);
     if (v.has("trail")) v.boolean("trail", out.trail);
   }
 

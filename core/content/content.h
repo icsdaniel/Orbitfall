@@ -49,6 +49,9 @@ enum Trait : uint32_t {
 struct VisualDef {
   Shape shape = Shape::Circle;
   std::string color;  // palette key, e.g. "tower.cannon", "tier.red"
+  // Health colour tier for "tier.<name>" keys (0 red, 1 blue, 2 green, 3 yellow,
+  // 4 pink, 5 black, 6 white, 7 ceramic; BRIEF §4.6), -1 for any other key.
+  int colorTier = -1;
   bool trail = false;
 };
 
