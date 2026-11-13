@@ -15,3 +15,7 @@ gdextension/godot-cpp/bin/
 gdextension/godot-cpp/gen/
 reports/
 export_presets.cfg.bak
+build_info.json
+/site/
+*.keystore
+project.godot.orig

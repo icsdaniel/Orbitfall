@@ -6,6 +6,7 @@ on:
 
 env:
   GODOT_VERSION: 4.5.1
+  SCONS_CACHE: /home/runner/.scons-cache
 
 jobs:
   core:
@@ -25,10 +26,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - id: cpp
+        run: echo "sha=$(git -C gdextension/godot-cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # godot-cpp's SConstruct uses SCONS_CACHE as an object cache, so a restored
+      # cache skips recompiling the bindings (caching bin/ alone does not).
       - uses: actions/cache@v4
         with:
-          path: gdextension/godot-cpp/bin
-          key: godot-cpp-linux-debug-${{ hashFiles('.gitmodules', 'gdextension/godot-cpp/**/*.hpp') }}
+          path: ${{ env.SCONS_CACHE }}
+          key: scons-linux-debug-${{ steps.cpp.outputs.sha }}
       - name: Install toolchain
         run: |
           python3 -m pip install scons
