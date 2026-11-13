@@ -180,6 +180,8 @@ func _make_card(wave: Dictionary, is_next: bool, in_wave: bool) -> Control:
 		icon.compact = not bool(wave.get("exact", is_next))
 		if icon.compact:
 			icon.custom_minimum_size = Vector2(38.0, 56.0)
+		elif icon.count >= 100:
+			icon.custom_minimum_size = Vector2(84.0, 56.0)  # room for three digits
 		icons.add_child(icon)
 		_entries += 1
 	return card
