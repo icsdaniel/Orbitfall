@@ -1,11 +1,12 @@
 #include "sim/hash.h"
+#include "sim/mathx.h"
 #include "sim/pipeline.h"
 #include "sim/world.h"
+#include "systems/buildings.h"
 
 namespace orbitfall {
 namespace {
 
-float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 bool isFinite(float v) { return v - v == 0.0f; }  // false for NaN and infinities
 
 void digest(World& world, const Command& c) {
@@ -37,11 +38,19 @@ void apply(World& world, const Command& c) {
       if (world.easeTicksTotal == 0) world.timeScale = world.timeScaleTarget;
       break;
     }
-    // Recorded in the digest now; their systems arrive in M1 (slots, waves).
     case CommandType::PlaceBuilding:
+      placeBuilding(world, c.slot, c.id, c.value);
+      break;
     case CommandType::SellBuilding:
+      sellBuilding(world, c.slot);
+      break;
     case CommandType::SetAim:
+      setAim(world, c.slot, c.value);
+      break;
     case CommandType::SetTargeting:
+      setTargeting(world, c.slot, c.mode);
+      break;
+    // Recorded in the digest now; the wave flow arrives with M1.9.
     case CommandType::StartWave:
     case CommandType::None:
     case CommandType::Count:

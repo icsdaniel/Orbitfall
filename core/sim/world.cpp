@@ -38,6 +38,8 @@ void initWorld(World& world, const SimConfig& config) {
   }
   world.planetRotation = 0.0f;
   world.planetAngVel = 0.0f;
+  world.stardust = world.planet ? world.planet->startStardust : 0.0f;
+  world.slots.assign(world.planet ? static_cast<size_t>(world.planet->slots) : 0, BuildingSlot());
   world.rng.seed(config.seed);
   world.commandsApplied = 0;
   world.commandDigest = 0;
@@ -71,6 +73,14 @@ uint64_t hashWorld(const World& world) {
   h.add(world.rotateInput);
   h.add(world.planetRotation);
   h.add(world.planetAngVel);
+  h.add(world.stardust);
+  for (const BuildingSlot& b : world.slots) {
+    h.add(b.type);
+    h.add(b.mode);
+    h.add(b.flags);
+    h.add(b.aimOffset);
+    h.add(b.cooldown);
+  }
   h.array(world.rng.s, 4);
   h.add(world.commandsApplied);
   h.add(world.commandDigest);

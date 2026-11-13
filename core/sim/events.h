@@ -19,7 +19,22 @@ enum class EventType : uint8_t {
   ShadowChanged,
   GameOver,
   Victory,
+  BuildingPlaced,   // a = slot, b = building index, value = cost paid
+  BuildingSold,     // a = slot, b = building index, value = refund
+  CommandRejected,  // a = slot, b = RejectReason, x = CommandType, value = cost (Unaffordable)
   Count
+};
+
+// Why a command was refused (Event::b of CommandRejected).
+enum class RejectReason : int32_t {
+  None = 0,
+  InvalidSlot,      // slot outside the ring
+  InvalidBuilding,  // unknown building index
+  Occupied,         // PlaceBuilding on a used slot
+  Unaffordable,     // not enough stardust
+  EmptySlot,        // sell / aim / targeting on an empty slot
+  NotAllowed,       // the building has no aim mount or lacks that targeting mode
+  WrongPhase,       // not accepted in the current phase (e.g. after the run ended)
 };
 
 // Generic payload; each emitting system documents which fields it fills.

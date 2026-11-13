@@ -2,6 +2,7 @@
 // World: all simulation state. Systems are free functions over World.
 // Anything that affects future ticks must be included in hashWorld().
 #include <cstdint>
+#include <vector>
 
 #include "content/content.h"
 #include "sim/commands.h"
@@ -31,6 +32,24 @@ struct SimConfig {
   int sun = 0;
 };
 
+// Slot flag bits (BuildingSlot::flags), also the binding's get_slot_flags().
+enum SlotFlag : uint8_t {
+  kSlotLit = 1u << 0,        // inside the sun beam
+  kSlotShaded = 1u << 1,     // inside the beam but in an enemy's shadow
+  kSlotHasTarget = 1u << 2,  // a tower with an enemy in arc and range
+};
+
+// One entry per slot of the planet's ring. Buildings are few, so this is a
+// plain array indexed by slot (BRIEF §5.3), in planet-local order: slot i sits
+// at local angle 2*pi*i/N.
+struct BuildingSlot {
+  int16_t type = -1;       // index into ContentDB::buildings, -1 = empty
+  uint8_t mode = 0;        // TargetingMode
+  uint8_t flags = 0;       // SlotFlag bits, refreshed every tick
+  float aimOffset = 0.0f;  // rad, added to the slot normal to get the aim axis
+  float cooldown = 0.0f;   // seconds until the next shot
+};
+
 struct World {
   // --- clock ---
   uint32_t seed = 0;
@@ -55,6 +74,16 @@ struct World {
   // --- planet ---
   float planetRotation = 0.0f;  // rad in [0, 2*pi); world angle = local + this
   float planetAngVel = 0.0f;    // rad/s
+
+  // --- economy and buildings ---
+  float stardust = 0.0f;
+  std::vector<BuildingSlot> slots;  // sized to the planet's slot count in initWorld
+
+  uint32_t slotCount() const { return static_cast<uint32_t>(slots.size()); }
+  // Local angle of a slot's centre.
+  float slotAngle(uint32_t slot) const {
+    return 6.28318530717958647692f * static_cast<float>(slot) / static_cast<float>(slots.size());
+  }
 
   // --- determinism bookkeeping ---
   Rng rng;
