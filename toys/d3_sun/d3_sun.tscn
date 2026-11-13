@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://toys/d3_sun/d3_sun.gd" id="1"]
+
+[node name="D3Sun" type="Node2D"]
+script = ExtResource("1")
