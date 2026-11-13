@@ -1,0 +1,42 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  GODOT_VERSION: 4.5.1
+
+jobs:
+  core:
+    name: Core tests (C++)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure and build
+        run: cmake -S core -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build -j4
+      - name: Run core tests
+        run: ./build/core_tests
+
+  godot:
+    name: Extension + Godot tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/cache@v4
+        with:
+          path: gdextension/godot-cpp/bin
+          key: godot-cpp-linux-debug-${{ hashFiles('.gitmodules', 'gdextension/godot-cpp/**/*.hpp') }}
+      - name: Install toolchain
+        run: |
+          python3 -m pip install scons
+          curl -sSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip && sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+      - name: Build extension (debug)
+        run: scons -C gdextension -j4
+      - name: Import project
+        run: godot --headless --path . --import || true
+      - name: Godot tests (GdUnit4)
+        run: godot --headless --path . -s res://addons/gdUnit4/bin/GdUnitCmdTool.gd -a res://game/tests --ignoreHeadlessMode -c
