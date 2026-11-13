@@ -1,0 +1,29 @@
+[
+  {
+    "path": "latest/",
+    "kind": "latest",
+    "version": "latest",
+    "commit_short": "93f9c8b",
+    "ref": "main",
+    "date": "2026-11-13T20:57:14Z",
+    "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/43506129199"
+  },
+  {
+    "path": "toys/d2_rotation/",
+    "kind": "toy",
+    "version": "toy-d2_rotation",
+    "commit_short": "6b52dfb",
+    "ref": "m1-integration",
+    "date": "2026-11-13T20:44:58Z",
+    "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/43504264087"
+  },
+  {
+    "path": "toys/d3_sun/",
+    "kind": "toy",
+    "version": "toy-d3_sun",
+    "commit_short": "6b52dfb",
+    "ref": "m1-integration",
+    "date": "2026-11-13T20:45:12Z",
+    "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/43504264087"
+  }
+]

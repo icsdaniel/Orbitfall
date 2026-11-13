@@ -1,0 +1,11 @@
+{
+  "version": "toy-d3_sun",
+  "kind": "toy",
+  "commit": "6b52dfb73f9aae40ac386aaddc3714e89b4e7452",
+  "commit_short": "6b52dfb",
+  "ref": "m1-integration",
+  "pr": 0,
+  "target": "template_release",
+  "date": "2026-11-13T20:45:12Z",
+  "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/43504264087"
+}
