@@ -120,7 +120,9 @@ TEST_CASE("landing: damage is landDamagePerLayer x remaining layers, flat for no
     const float bearing = db.planets[0].lanes[0].bearing;
     w.enemies.posX[i] = 105.0f * std::cos(bearing);
     w.enemies.posY[i] = 105.0f * std::sin(bearing);
-    CHECK(runUntilEmpty(sim, 60) < 60);
+    // A hovering unit is on its way down at this point.
+    w.enemies.flags[i] |= static_cast<uint16_t>(EclipserState::Descend) << kEnemyStateShift;
+    CHECK(runUntilEmpty(sim, 90) < 90);
     const auto hits = eventsOf(sim, EventType::PlanetHit);
     REQUIRE(hits.size() == 1);
     CHECK(hits[0].a == c.type);
@@ -152,9 +154,10 @@ TEST_CASE("landing: planet HP 0 emits GameOver once and freezes the run") {
     w.enemies.posY[i] = 0.0f;
     w.enemies.velX[i] = -25.0f;
     w.enemies.velY[i] = 0.0f;
+    w.enemies.flags[i] |= static_cast<uint16_t>(EclipserState::Descend) << kEnemyStateShift;
   }
   const uint32_t far = spawnEnemy(w, kRed, 1);
-  for (int i = 0; i < 10 && w.phase == Phase::Wave; ++i) sim.step();
+  for (int i = 0; i < 20 && w.phase == Phase::Wave; ++i) sim.step();
   CHECK(w.phase == Phase::Lost);
   CHECK(w.planetHp == 0.0f);
   CHECK(eventsOf(sim, EventType::GameOver).size() == 1);

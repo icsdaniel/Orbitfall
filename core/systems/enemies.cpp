@@ -43,12 +43,68 @@ uint32_t spawnEnemy(World& world, int enemyType, int lane) {
   return i;
 }
 
+namespace {
+
+// One tick of an Eclipser: fly to the hover point on the sun line over the
+// most lit panels, keep tracking it while the hover timer runs, then descend
+// straight down. Velocity is kept up to date for shot leading and rendering.
+void moveEclipser(World& world, uint32_t i, const EnemyDef& def, float dt) {
+  EnemyPool& e = world.enemies;
+  EclipserState state = eclipserState(e.flags[i]);
+  float x = e.posX[i], y = e.posY[i];
+  float nx = x, ny = y;
+  if (state == EclipserState::Descend) {
+    const float len = std::sqrt(x * x + y * y);
+    if (len > 0.0f) {
+      nx = x - x / len * def.hover.descendSpeed * dt;
+      ny = y - y / len * def.hover.descendSpeed * dt;
+    }
+  } else {
+    const float sx = std::cos(world.sunBearing), sy = std::sin(world.sunBearing);
+    const float offset = eclipserOffset(world, def.size);
+    const float hx = sx * def.hover.hoverRadius - sy * offset;
+    const float hy = sy * def.hover.hoverRadius + sx * offset;
+    const float dx = hx - x, dy = hy - y;
+    const float dist = std::sqrt(dx * dx + dy * dy);
+    const float step = def.speed * dt;
+    if (dist <= step) {
+      nx = hx;
+      ny = hy;
+      if (state == EclipserState::Approach) {
+        state = EclipserState::Hover;
+        e.timer[i] = def.hover.hoverSeconds;
+      }
+    } else {
+      nx = x + dx / dist * step;
+      ny = y + dy / dist * step;
+    }
+    if (state == EclipserState::Hover) {
+      e.timer[i] -= dt;
+      if (e.timer[i] <= 0.0f) state = EclipserState::Descend;
+    }
+  }
+  e.velX[i] = (nx - x) / dt;
+  e.velY[i] = (ny - y) / dt;
+  e.posX[i] = nx;
+  e.posY[i] = ny;
+  e.flags[i] = static_cast<uint16_t>((e.flags[i] & ~kEnemyStateMask) |
+                                     (static_cast<uint16_t>(state) << kEnemyStateShift));
+}
+
+}  // namespace
+
 void enemyMovement(World& world, float dt) {
-  if (!world.running()) return;
+  if (!world.running() || !(dt > 0.0f)) return;
+  const ContentDB& db = *world.content;
   EnemyPool& e = world.enemies;
   for (uint32_t i = 0; i < e.count; ++i) {
-    e.posX[i] += e.velX[i] * dt;
-    e.posY[i] += e.velY[i] * dt;
+    const EnemyDef& def = db.enemies[e.type[i]];
+    if (def.behavior == EnemyBehavior::Eclipser && def.hasHover) {
+      moveEclipser(world, i, def, dt);
+    } else {
+      e.posX[i] += e.velX[i] * dt;
+      e.posY[i] += e.velY[i] * dt;
+    }
   }
 }
 

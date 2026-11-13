@@ -11,12 +11,15 @@ struct World;
 void planetRotation(World& world, float dt);
 
 // M1.7: advances the sun along its SunPath (wave time only), sets beamStrength
-// and the lit flag of every slot.
+// and the lit flag of every slot. M1.8: merges the shadow casters' intervals
+// into world.shade and sets the shaded flags; emits ShadowChanged (a = shaded
+// slots, b = merged intervals) when the set of shaded slots changes.
 void sunlight(World& world, float dt);
 // M1.7: lit, unshaded panels earn panelRate * beamStrength per second.
 // Sets world.incomePerSecond; emits StardustChanged per whole unit earned.
 void income(World& world, float dt);
-// M1.5: moves enemies along their velocity.
+// M1.5: moves enemies along their velocity. M1.8: Eclipsers fly to their hover
+// point on the sun line, track the sun, hover, then descend.
 void enemyMovement(World& world, float dt);
 // M1.5: re-sorts the enemies into world.grid (counting sort).
 void spatialRebuild(World& world, float dt);

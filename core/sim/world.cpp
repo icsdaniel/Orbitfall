@@ -90,6 +90,8 @@ void initWorld(World& world, const SimConfig& config) {
     world.grid.configure(halfExtent, kGridCellsPerSide, config.enemyCapacity);
   }
   world.grid.count = 0;
+  if (world.shade.size() != config.enemyCapacity) world.shade.assign(config.enemyCapacity, ShadeInterval());
+  world.shadeCount = 0;
   world.commands.clear();
   world.commands.reserve(config.commandCapacity);
   world.events.clear();
