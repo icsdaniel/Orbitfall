@@ -16,7 +16,7 @@ const NAMED: Dictionary[String, Color] = {
 	"tower.gatling": Color(0.45, 0.85, 0.95),
 	"building.solar_panel": Color(0.35, 0.55, 1.0),
 	"planet.medium": Color(0.17, 0.22, 0.33),
-	"enemy.eclipser": Color(0.10, 0.10, 0.12),
+	"enemy.eclipser": Color(0.24, 0.13, 0.34),  # dark violet: reads against the night sky
 	"projectile": Color(1.0, 0.92, 0.55),
 }
 const SHAPE_NAMES: Dictionary[String, int] = {
