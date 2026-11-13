@@ -17,7 +17,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [ ] M1.3 Slots, placement, sell (sim part done: slot ring, place/sell commands, refund, rejections; slot view remains)
 - [ ] M1.4 Build menu and ghost
 - [x] M1.5 Enemies, lanes, landing
-- [ ] M1.6 Targeting, projectiles, splash
+- [x] M1.6 Targeting, projectiles, splash
 - [ ] M1.7 Sun, beam, income
 - [ ] M1.8 Shadows and Eclipser
 - [ ] M1.9 Waves, flow, forecast

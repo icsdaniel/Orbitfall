@@ -48,6 +48,7 @@ void initWorld(World& world, const SimConfig& config) {
   world.enemiesSpawned = 0;
   world.stardust = world.planet ? world.planet->startStardust : 0.0f;
   world.slots.assign(world.planet ? static_cast<size_t>(world.planet->slots) : 0, BuildingSlot());
+  world.slotTargets.assign(world.slots.size(), kInvalidIndex);
   world.rng.seed(config.seed);
   world.commandsApplied = 0;
   world.commandDigest = 0;
@@ -81,6 +82,14 @@ void initWorld(World& world, const SimConfig& config) {
   world.events.clear();
   world.events.totalEmitted = 0;
   world.events.reserve(config.eventCapacity);
+}
+
+void initWorld(World& world, const ContentDB& content, uint32_t waveSet, uint64_t seed) {
+  SimConfig config;
+  config.seed = static_cast<uint32_t>(seed ^ (seed >> 32));
+  config.content = &content;
+  config.waveSet = static_cast<int>(waveSet);
+  initWorld(world, config);
 }
 
 uint64_t hashWorld(const World& world) {
