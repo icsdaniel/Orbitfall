@@ -26,6 +26,8 @@ file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tes
 add_executable(core_tests ${TEST_SOURCES})
 target_include_directories(core_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 target_link_libraries(core_tests PRIVATE orbitfall_core)
+# Lets tests scan the core/ sources (banned-call determinism check).
+target_compile_definitions(core_tests PRIVATE ORBITFALL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 file(GLOB BENCH_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bench/*.cpp)
 if(BENCH_SOURCES)

@@ -1,0 +1,29 @@
+#include "sim/pipeline.h"
+
+#include "sim/world.h"
+
+namespace orbitfall {
+
+bool Pipeline::add(const char* name, SystemFn fn) {
+  if (count >= kMaxSystems || fn == nullptr) return false;
+  systems[count++] = SystemEntry{name, fn};
+  return true;
+}
+
+void Pipeline::run(World& world) const {
+  for (uint32_t i = 0; i < count; ++i) systems[i].fn(world, world.dt);
+}
+
+// Systems in tick order. Full order (BRIEF 5.3): applyCommands, planetRotation,
+// sunlight, spawners, clusterLOD, enemyMovement, fallingObjects, spatialRebuild,
+// towerTargeting, towerFire, projectileMovement, collisions, shields, damageResolve,
+// landing, income, satelliteEffects, abilities, statusEffects, xp, cleanup, snapshot.
+// Register each new system at its place in that order.
+Pipeline defaultPipeline() {
+  Pipeline p;
+  p.add("applyCommands", applyCommands);
+  p.add("advanceClock", advanceClock);
+  return p;
+}
+
+}  // namespace orbitfall
