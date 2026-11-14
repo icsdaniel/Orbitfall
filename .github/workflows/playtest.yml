@@ -280,7 +280,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      # The runner image already ships an SDK; tools/setup_env.sh installs the exact
+      # platform, build-tools and NDK. Only ask for platform-tools here: the action's
+      # default list includes the obsolete "tools" package, which sdkmanager now rejects.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - id: cpp
         run: echo "sha=$(git -C gdextension/godot-cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Cache Godot + Android export templates
