@@ -1,10 +1,13 @@
 class_name InputRouter
 extends Node
-## M1.2: turns touches, mouse and keys into SimServer commands and UI intents
-## (BRIEF §4.1, landscape, two thumbs).
-##  - left half: hold and drag horizontally -> rotate_input(v), released -> 0
+## M1.2 / M1.12: turns touches, mouse and keys into SimServer commands and UI
+## intents (BRIEF §4.1, landscape, two thumbs).
+##  - drag anywhere (not on HUD): grab the planet. The finger's angular speed around
+##    the planet centre becomes rotate_input(v); released -> 0 and the spin coasts.
 ##  - tap (anywhere, no drag) -> `tapped`; long-press -> `long_pressed`
-##  - double-tap -> `double_tapped` (band toggle); pinch / wheel -> `zoom_requested`
+##  - double-tap -> `double_tapped` (view toggle)
+##  - pinch -> `zoom_requested` live, then `pinch_ended`; wheel notch or trackpad
+##    magnify -> `view_step_requested(+1 closer / -1 wider)`
 ##  - keys: A/Q and D/E rotate, Space start_wave, backtick -> `debug_toggled`
 ## Commands go straight to the sim; everything else is a signal for Game.
 
@@ -12,6 +15,8 @@ signal tapped(screen_pos: Vector2)
 signal long_pressed(screen_pos: Vector2)
 signal double_tapped(screen_pos: Vector2)
 signal zoom_requested(factor: float, screen_pos: Vector2)
+signal pinch_ended
+signal view_step_requested(direction: int)
 signal debug_toggled
 
 const PHASE_INTERMISSION: int = 0
@@ -22,8 +27,16 @@ var ui_blocker: Callable = Callable()
 ## Used instead of the viewport size when set (tests).
 var viewport_size_override: Vector2 = Vector2.ZERO
 
-var drag_range_px: float = 90.0
-var drag_dead_px: float = 10.0
+## Planet centre and radius on screen, kept up to date by Game every frame.
+var planet_centre: Vector2 = Vector2(640.0, 360.0)
+var planet_radius_px: float = 200.0
+## Finger angular speed (deg/s) that maps to full rotate input, and the input gain.
+var grab_full_speed_deg: float = 90.0
+var grab_gain: float = 1.0
+## Smoothing rate (1/s) of the finger angular speed estimate.
+var grab_smoothing: float = 30.0
+## Trackpad magnify: accumulated factor that counts as one view step.
+var magnify_step: float = 1.15
 var tap_max_px: float = 18.0
 var double_tap_seconds: float = 0.3
 var double_tap_px: float = 56.0
@@ -39,7 +52,11 @@ var _primary: int = -1
 var _start: Vector2 = Vector2.ZERO
 var _start_time: float = 0.0
 var _moved: bool = false
-var _left_zone: bool = false
+var _grabbing: bool = false
+var _grab_last: Vector2 = Vector2.ZERO
+var _grab_accum: float = 0.0
+var _grab_rate: float = 0.0
+var _magnify_accum: float = 1.0
 var _long_fired: bool = false
 var _pinch_distance: float = 0.0
 var _last_tap_time: float = -100.0
@@ -51,8 +68,10 @@ var _sent_rotate: float = 0.0
 
 
 func configure(config: ClientConfig) -> void:
-	drag_range_px = config.num("input", "dragRangePx", drag_range_px)
-	drag_dead_px = config.num("input", "dragDeadPx", drag_dead_px)
+	grab_full_speed_deg = config.num("input", "grabFullSpeedDegPerSec", grab_full_speed_deg)
+	grab_gain = config.num("input", "grabGain", grab_gain)
+	grab_smoothing = config.num("input", "grabSmoothing", grab_smoothing)
+	magnify_step = config.num("input", "magnifyStep", magnify_step)
 	tap_max_px = config.num("input", "tapMaxPx", tap_max_px)
 	double_tap_seconds = config.num("input", "doubleTapSeconds", double_tap_seconds)
 	double_tap_px = config.num("input", "doubleTapPx", double_tap_px)
@@ -75,6 +94,12 @@ func advance(delta: float) -> void:
 			and _time - _start_time >= long_press_seconds):
 		_long_fired = true
 		long_pressed.emit(_start)
+	if _grabbing and delta > 0.0:
+		var raw: float = _grab_accum / delta
+		_grab_accum = 0.0
+		_grab_rate = lerpf(_grab_rate, raw, 1.0 - exp(-grab_smoothing * delta))
+		var full: float = deg_to_rad(maxf(grab_full_speed_deg, 1.0))
+		_set_drag(snappedf(clampf(_grab_rate * grab_gain / full, -1.0, 1.0), 0.02))
 
 
 ## Entry point for every input event. Public so tests can feed events directly.
@@ -91,12 +116,18 @@ func handle_event(event: InputEvent) -> void:
 	elif event is InputEventMouseButton:
 		var button: InputEventMouseButton = event
 		if button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_UP:
-			zoom_requested.emit(wheel_step, button.position)
+			view_step_requested.emit(1)
 		elif button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			zoom_requested.emit(1.0 / wheel_step, button.position)
+			view_step_requested.emit(-1)
 	elif event is InputEventMagnifyGesture:
 		var magnify: InputEventMagnifyGesture = event
-		zoom_requested.emit(magnify.factor, magnify.position)
+		_magnify_accum *= magnify.factor
+		if _magnify_accum >= magnify_step:
+			_magnify_accum = 1.0
+			view_step_requested.emit(1)
+		elif _magnify_accum <= 1.0 / magnify_step:
+			_magnify_accum = 1.0
+			view_step_requested.emit(-1)
 	elif event is InputEventKey:
 		_key(event as InputEventKey)
 
@@ -128,11 +159,11 @@ func _touch_down(index: int, pos: Vector2) -> void:
 		_start_time = _time
 		_moved = false
 		_long_fired = false
-		_left_zone = pos.x < _viewport_size().x * 0.5
+		_end_grab()
 	else:
 		# A second finger turns the gesture into a pinch.
 		_primary = -1
-		_set_drag(0.0)
+		_end_grab()
 		_pinch_distance = _pinch_span()
 
 
@@ -151,10 +182,14 @@ func _touch_move(index: int, pos: Vector2) -> void:
 	var offset: Vector2 = pos - _start
 	if offset.length() > tap_max_px:
 		_moved = true
-	if _left_zone and _moved:
-		var magnitude: float = clampf(
-			(absf(offset.x) - drag_dead_px) / maxf(drag_range_px, 1.0), 0.0, 1.0)
-		_set_drag(magnitude * signf(offset.x))
+	if _moved:
+		if not _grabbing:
+			# The movement before the drag threshold counts too.
+			_grabbing = true
+			_grab_last = _start
+			_grab_rate = 0.0
+		_grab_accum += _angle_step(_grab_last, pos)
+		_grab_last = pos
 
 
 func _touch_up(index: int, pos: Vector2) -> void:
@@ -163,10 +198,12 @@ func _touch_up(index: int, pos: Vector2) -> void:
 	_touches.erase(index)
 	if index != _primary:
 		if _touches.size() < 2:
+			if _pinch_distance > 0.0:
+				pinch_ended.emit()
 			_pinch_distance = 0.0
 		return
 	_primary = -1
-	_set_drag(0.0)
+	_end_grab()
 	if not _moved and not _long_fired:
 		_tap(pos)
 
@@ -197,6 +234,25 @@ func _key(key: InputEventKey) -> void:
 		KEY_QUOTELEFT:
 			if key.pressed:
 				debug_toggled.emit()
+
+
+## Planet rotation (rad) that moving a finger from `a` to `b` asks for: the change
+## of its angle around the planet centre. Close to the centre the angle is
+## unstable, so there a horizontal drag counts as dragging the planet's top edge.
+func _angle_step(a: Vector2, b: Vector2) -> float:
+	var ra: Vector2 = a - planet_centre
+	var rb: Vector2 = b - planet_centre
+	var min_r: float = maxf(planet_radius_px * 0.35, 40.0)
+	if ra.length() < min_r or rb.length() < min_r:
+		return (b.x - a.x) / maxf(planet_radius_px, 1.0)
+	return wrapf(rb.angle() - ra.angle(), -PI, PI)
+
+
+func _end_grab() -> void:
+	_grabbing = false
+	_grab_accum = 0.0
+	_grab_rate = 0.0
+	_set_drag(0.0)
 
 
 func _set_drag(v: float) -> void:

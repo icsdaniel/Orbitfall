@@ -27,6 +27,8 @@ var edge_indicators: EdgeIndicators
 var start_button: Button
 var rotate_left: Button
 var rotate_right: Button
+## M1.12: toggles the Build (close) and Watch (wide) views.
+var view_button: Button
 var debug_button: Button
 
 var _stardust: Label
@@ -76,8 +78,14 @@ func setup(sim_node: Node, band_controller: BandController, input_router: InputR
 	start_button.pressed.connect(_on_start_pressed)
 	_pin(start_button, 1.0, 1.0, Vector2(-16.0, -16.0), Control.GROW_DIRECTION_BEGIN, Control.GROW_DIRECTION_BEGIN)
 
+	view_button = UiKit.button("WATCH", Vector2(160.0, 88.0), Color(0.18, 0.24, 0.40))
+	view_button.name = "ViewToggle"
+	view_button.add_theme_font_size_override(&"font_size", 28)
+	view_button.pressed.connect(func() -> void: bands.toggle())
+	_pin(view_button, 1.0, 1.0, Vector2(-282.0, -16.0), Control.GROW_DIRECTION_BEGIN, Control.GROW_DIRECTION_BEGIN)
+
 	var rotate_row: HBoxContainer = HBoxContainer.new()
-	rotate_row.add_theme_constant_override(&"separation", 12)
+	rotate_row.add_theme_constant_override(&"separation", 16)
 	rotate_left = _rotate_button("<", -1.0)
 	rotate_right = _rotate_button(">", 1.0)
 	rotate_row.add_child(rotate_left)
@@ -104,7 +112,7 @@ func setup(sim_node: Node, band_controller: BandController, input_router: InputR
 	tuning_panel = TuningPanel.new()
 	tuning_panel.sim = sim
 	tuning_panel.build(config.tunables())
-	_pin(tuning_panel, 0.0, 1.0, Vector2(330.0, -16.0), Control.GROW_DIRECTION_END, Control.GROW_DIRECTION_BEGIN)
+	_pin(tuning_panel, 0.0, 1.0, Vector2(350.0, -16.0), Control.GROW_DIRECTION_END, Control.GROW_DIRECTION_BEGIN)
 
 	end_screen = EndScreen.new()
 	end_screen.restart_requested.connect(func() -> void: restart_requested.emit())
@@ -137,10 +145,16 @@ func refresh() -> void:
 	var wave_index: int = sim.get_wave_index()
 	_set_text(_wave, "Wave %d / %d" % [mini(wave_index + 1, wave_count), wave_count])
 	start_button.visible = phase == PHASE_INTERMISSION
+	# The button names the view it goes to.
+	var other: int = BandController.Band.ORBIT if bands.band == BandController.Band.SURFACE \
+		else BandController.Band.SURFACE
+	var view_text: String = bands.view_name(other).to_upper()
+	if view_button.text != view_text:
+		view_button.text = view_text
 	build_menu.set_stardust(stardust)
 	if _toast_seconds <= 0.0:
 		if phase == PHASE_INTERMISSION:
-			_set_text(_hint, "Intermission: rotate, build, read the forecast, then Start Wave")
+			_set_text(_hint, "Drag to spin, tap a slot to build")
 		elif phase == PHASE_WAVE:
 			var scale: float = sim.get_time_scale()
 			_set_text(_hint, "Wave %d   time x%.2f" % [wave_index + 1, scale]
@@ -229,8 +243,8 @@ func _build_top_bar() -> void:
 
 
 func _rotate_button(text: String, value: float) -> Button:
-	var b: Button = UiKit.button(text, Vector2(92.0, 88.0), Color(0.16, 0.20, 0.32, 0.8))
-	b.add_theme_font_size_override(&"font_size", 40)
+	var b: Button = UiKit.button(text, Vector2(150.0, 140.0), Color(0.16, 0.20, 0.32, 0.8))
+	b.add_theme_font_size_override(&"font_size", 64)
 	b.button_down.connect(func() -> void: router.set_button_rotation(value))
 	b.button_up.connect(func() -> void: router.set_button_rotation(0.0))
 	return b

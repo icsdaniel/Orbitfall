@@ -4,6 +4,8 @@ extends Camera2D
 ## log space toward a target, around a screen focus point (mouse or pinch centre).
 ## Input code drives it through zoom_by() and set_zoom_target(); wheel, magnify
 ## gesture and two-finger pinch are handled here when handle_input is on.
+## M1.12: glide_to() moves between the two game views in a fixed time with an
+## ease-in-out curve (no long exponential tail), set_zoom_now() follows a pinch.
 
 signal zoom_changed(z: float)
 
@@ -23,6 +25,9 @@ var _zoom_target: float = 1.0
 var _has_focus: bool = false
 var _focus_screen: Vector2 = Vector2.ZERO
 var _touches: Dictionary[int, Vector2] = {}
+var _glide_from: float = 1.0
+var _glide_time: float = 0.0
+var _glide_seconds: float = 0.0
 
 
 func _ready() -> void:
@@ -39,6 +44,30 @@ func _process(delta: float) -> void:
 func set_zoom_target(z: float) -> void:
 	_zoom_target = clampf(z, min_zoom, max_zoom)
 	_has_focus = false
+	_glide_seconds = 0.0
+
+
+## Moves to a zoom (clamped) around the screen centre in `seconds`, ease-in-out
+## in log space.
+func glide_to(z: float, seconds: float) -> void:
+	set_zoom_target(z)
+	if seconds <= 0.0:
+		_apply_zoom(_zoom_target)
+		return
+	_glide_from = _zoom_value
+	_glide_time = 0.0
+	_glide_seconds = seconds
+
+
+## Sets the zoom (clamped) at once, around the screen centre: pinch follows the
+## fingers directly.
+func set_zoom_now(z: float) -> void:
+	set_zoom_target(z)
+	_apply_zoom(_zoom_target)
+
+
+func is_gliding() -> bool:
+	return _glide_seconds > 0.0
 
 
 ## Multiplies the target zoom by `factor`, keeping the world point under
@@ -48,6 +77,7 @@ func zoom_by(factor: float, screen_focus: Vector2) -> void:
 		return
 	_zoom_target = clampf(_zoom_target * factor, min_zoom, max_zoom)
 	_has_focus = true
+	_glide_seconds = 0.0
 	_focus_screen = screen_focus
 
 
@@ -77,6 +107,17 @@ func screen_to_world(screen: Vector2) -> Vector2:
 ## One easing step; called from _process, public so tests and replays can step it.
 func advance(delta: float) -> void:
 	if _zoom_value == _zoom_target:
+		_glide_seconds = 0.0
+		return
+	if _glide_seconds > 0.0:
+		_glide_time += maxf(delta, 0.0)
+		var u: float = clampf(_glide_time / _glide_seconds, 0.0, 1.0)
+		var s: float = u * u * u * (u * (u * 6.0 - 15.0) + 10.0)  # smootherstep
+		if u >= 1.0:
+			_glide_seconds = 0.0
+			_apply_zoom(_zoom_target)
+		else:
+			_apply_zoom(exp(lerpf(log(_glide_from), log(_zoom_target), s)))
 		return
 	var log_target: float = log(_zoom_target)
 	var t: float = 1.0 - exp(-zoom_rate * maxf(delta, 0.0))

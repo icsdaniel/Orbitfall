@@ -3,14 +3,19 @@
   "bands": {
     "surfacePlanetFrac": 0.32,
     "surfaceOffsetPx": 22,
-    "orbitViewRadius": 400,
+    "orbitViewRadius": 520,
+    "transitionSeconds": 0.45,
+    "pinchSwitchFactor": 1.15,
+    "autoSwitch": 1,
     "fadeWidth": 0.35,
     "startBand": "surface"
   },
   "time": { "normalTimeScale": 1.0 },
   "input": {
-    "dragRangePx": 90,
-    "dragDeadPx": 10,
+    "grabFullSpeedDegPerSec": 90,
+    "grabGain": 1.0,
+    "grabSmoothing": 30,
+    "magnifyStep": 1.15,
     "tapMaxPx": 18,
     "tapMaxSeconds": 0.35,
     "doubleTapSeconds": 0.3,
