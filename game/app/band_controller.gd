@@ -5,12 +5,18 @@ extends Node
 ## while a wave runs and the view is in the Surface band the sim is asked (as a
 ## command) for the planet's `surfaceTimeScale`, eased over the rules'
 ## `surfaceTimeEaseSeconds` (both read from the sim's content); otherwise normal speed.
+## M1.12 (feel gate): the zoom is two views, not a free range. Surface is shown to
+## the player as the Build view, Orbit as the Watch view (wide enough to see enemies
+## from their spawn ring). The camera glides between them in `transitionSeconds`;
+## a pinch follows the fingers and then settles on one of the two.
 
 signal band_changed(band: int)
 
 enum Band { SURFACE, ORBIT }
 const PHASE_WAVE: int = 1
 const BAND_NAMES: PackedStringArray = ["Surface", "Orbit"]
+## What the player sees on the toggle button and in the hint.
+const VIEW_NAMES: PackedStringArray = ["Build", "Watch"]
 
 var sim: Node
 var camera: OrbitCamera
@@ -25,11 +31,17 @@ var fade_width: float = 0.35
 var surface_time_scale: float = 0.75
 var normal_time_scale: float = 1.0
 var ease_seconds: float = 0.3
+var transition_seconds: float = 0.45
+## A pinch must change the zoom by this factor to settle on the other view.
+var pinch_switch_factor: float = 1.15
+## Go to Watch when a wave starts and back to Build when it is cleared.
+var auto_switch: bool = true
 
 var band: int = Band.SURFACE
 ## 1 in Surface, 0 in Orbit, smooth across the threshold.
 var surface_weight: float = 1.0
 var _sent_scale: float = -1.0
+var _pinch_from: int = -1
 
 
 func configure(config: ClientConfig) -> void:
@@ -37,6 +49,9 @@ func configure(config: ClientConfig) -> void:
 	orbit_view_radius = config.num("bands", "orbitViewRadius", orbit_view_radius)
 	fade_width = config.num("bands", "fadeWidth", fade_width)
 	surface_offset_px = config.num("bands", "surfaceOffsetPx", surface_offset_px)
+	transition_seconds = config.num("bands", "transitionSeconds", transition_seconds)
+	pinch_switch_factor = config.num("bands", "pinchSwitchFactor", pinch_switch_factor)
+	auto_switch = config.num("bands", "autoSwitch", 1.0) > 0.5
 	normal_time_scale = config.num("time", "normalTimeScale", normal_time_scale)
 	refresh_time_settings()
 
@@ -76,6 +91,10 @@ func band_name() -> String:
 	return BAND_NAMES[band]
 
 
+func view_name(target: int = -1) -> String:
+	return VIEW_NAMES[band if target < 0 else target]
+
+
 ## Jumps (no easing) to a band's default zoom.
 func snap_to(target: int) -> void:
 	_apply_limits()
@@ -85,19 +104,43 @@ func snap_to(target: int) -> void:
 
 func go_to(target: int) -> void:
 	_apply_limits()
-	camera.set_zoom_target(surface_zoom() if target == Band.SURFACE else orbit_zoom())
+	_pinch_from = -1
+	var z: float = surface_zoom() if target == Band.SURFACE else orbit_zoom()
+	if not is_equal_approx(camera.get_zoom_target(), z):
+		camera.glide_to(z, transition_seconds)
 	update()
+
+
+## Wheel notch / trackpad magnify: +1 goes to Build, -1 to Watch.
+func step(direction: int) -> void:
+	go_to(Band.SURFACE if direction > 0 else Band.ORBIT)
 
 
 func toggle() -> void:
 	go_to(Band.ORBIT if band == Band.SURFACE else Band.SURFACE)
 
 
-## Pinch / wheel zoom around the planet (the camera stays centred on it).
+## Live pinch around the planet (the camera stays centred on it); settle() ends it.
 func zoom_by(factor: float) -> void:
 	_apply_limits()
-	camera.zoom_by(factor, _viewport_size() * 0.5)
+	if _pinch_from < 0:
+		_pinch_from = band
+	camera.set_zoom_now(camera.get_zoom_value() * factor)
 	update()
+
+
+## Pinch released: go to the other view if the pinch moved far enough toward it,
+## otherwise glide back.
+func settle() -> void:
+	if _pinch_from < 0:
+		return
+	var z: float = camera.get_zoom_value()
+	var target: int = _pinch_from
+	if _pinch_from == Band.SURFACE and z < surface_zoom() / pinch_switch_factor:
+		target = Band.ORBIT
+	elif _pinch_from == Band.ORBIT and z > orbit_zoom() * pinch_switch_factor:
+		target = Band.SURFACE
+	go_to(target)
 
 
 ## Recomputes the band and fade and sends set_time_scale when the wanted scale
@@ -131,8 +174,8 @@ func reset_time_scale() -> void:
 
 
 func _apply_limits() -> void:
-	camera.min_zoom = orbit_zoom() * 0.55
-	camera.max_zoom = surface_zoom() * 1.8
+	camera.min_zoom = orbit_zoom() * 0.8
+	camera.max_zoom = surface_zoom() * 1.25
 
 
 func _on_viewport_resized() -> void:

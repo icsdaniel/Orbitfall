@@ -120,12 +120,59 @@ func test_tap_away_from_the_ring_closes_the_menu() -> void:
 	assert_int(game.planet_view.selected_slot).is_equal(-1)
 
 
-func test_tap_in_orbit_band_does_not_open_the_menu() -> void:
+func test_tap_planet_in_watch_view_goes_to_build_without_opening_the_menu() -> void:
 	var game: Game = _make_game()
 	game.bands.snap_to(BandController.Band.ORBIT)
 	game.planet_view.view_zoom = game.camera.get_zoom_value()
 	_tap_slot(game, 9)
 	assert_bool(game.hud.build_menu.is_open()).is_false()
+	assert_int(game.bands.band).is_equal(BandController.Band.SURFACE)
+
+
+func test_tap_far_from_planet_in_watch_view_stays_in_watch() -> void:
+	var game: Game = _make_game()
+	game.bands.snap_to(BandController.Band.ORBIT)
+	game.input_router.advance(1.0)
+	tap(game.input_router, Vector2(40.0, 360.0))
+	assert_int(game.bands.band).is_equal(BandController.Band.ORBIT)
+
+
+func test_wave_start_goes_to_watch_and_wave_end_back_to_build() -> void:
+	var game: Game = _make_game()
+	var sim: MockSimServer = game.sim as MockSimServer
+	game.bands.auto_switch = true
+	game._track_phase()
+	assert_int(game.bands.band).is_equal(BandController.Band.SURFACE)
+	sim.start_wave()
+	game._track_phase()
+	assert_int(game.bands.band).is_equal(BandController.Band.ORBIT)
+	# The glide has a fixed length and ends exactly on the Watch zoom.
+	for i: int in 40:
+		game.camera.advance(1.0 / 60.0)
+	assert_float(game.camera.get_zoom_value()).is_equal_approx(game.bands.orbit_zoom(), 0.0001)
+
+
+func test_pinch_follows_fingers_then_settles_on_a_view() -> void:
+	var game: Game = _make_game()
+	var bands: BandController = game.bands
+	var start: float = game.camera.get_zoom_value()
+	bands.zoom_by(0.95)
+	assert_float(game.camera.get_zoom_value()).is_equal_approx(start * 0.95, 0.0001)
+	bands.settle()  # small pinch: back to Build
+	assert_int(bands.band).is_equal(BandController.Band.SURFACE)
+	bands.zoom_by(0.6)
+	bands.settle()  # big pinch out: Watch
+	assert_int(bands.band).is_equal(BandController.Band.ORBIT)
+
+
+func test_view_button_toggles_and_names_the_other_view() -> void:
+	var game: Game = _make_game()
+	game.hud.refresh()
+	assert_str(game.hud.view_button.text).is_equal("WATCH")
+	game.hud.view_button.pressed.emit()
+	assert_int(game.bands.band).is_equal(BandController.Band.ORBIT)
+	game.hud.refresh()
+	assert_str(game.hud.view_button.text).is_equal("BUILD")
 
 
 func test_ghost_arc_rotates_with_the_planet() -> void:
@@ -300,7 +347,7 @@ func test_hud_shows_stardust_hp_wave_and_start_wave_button() -> void:
 	assert_str(hud._wave.text).is_equal("Wave 1 / %d" % sim.get_wave_count())
 	assert_bool(hud.start_button.visible).is_true()
 	assert_float(hud.start_button.custom_minimum_size.y).is_greater_equal(48.0)
-	assert_str(hud._hint.text).contains("Intermission")
+	assert_str(hud._hint.text).contains("tap a slot")
 	hud.start_button.pressed.emit()
 	assert_int(sim.calls_to(&"start_wave").size()).is_equal(1)
 	hud.refresh()

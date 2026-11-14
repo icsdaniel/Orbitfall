@@ -23,6 +23,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [x] M1.9 Waves, flow, forecast
 - [x] M1.10 Bands and slow time (client; sim honours set_time_scale)
 - [x] M1.11 Debug overlay and tuning (client; tunables applied by SimServer)
+- [x] M1.12 Feel-gate fixes (Daniele, 2026-11-14): grab-to-spin rotation, bigger rotate buttons, two views Build/Watch with a timed glide, toggle button, auto-switch on wave start/end
 
 ## Design track
 - [ ] D1 DECISIONS.md

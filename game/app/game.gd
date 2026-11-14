@@ -38,6 +38,7 @@ var _frame: int = 0
 var force_mock: bool = false
 var _demo: bool = false
 var _start_band: String = ""
+var _tap_switched_view: bool = false
 var _select_arg: int = -1
 var _debug_arg: bool = false
 var _end_arg: String = ""
@@ -60,6 +61,8 @@ func _ready() -> void:
 	_start_run(run_seed)
 	var start_band: String = _start_band if _start_band != "" else config.text("bands", "startBand", "surface")
 	bands.snap_to(BandController.Band.ORBIT if start_band == "orbit" else BandController.Band.SURFACE)
+	if _start_band != "":
+		bands.auto_switch = false  # screenshots and bots ask for a fixed view
 	if _demo:
 		_setup_demo()
 	if _play != "":
@@ -81,6 +84,8 @@ func _process(delta: float) -> void:
 	planet_view.view_zoom = zoom
 	planet_view.surface_weight = bands.surface_weight
 	entity_view.view_zoom = zoom
+	input_router.planet_centre = world_to_screen(Vector2.ZERO)
+	input_router.planet_radius_px = float(sim.get_planet_radius()) * zoom
 	_handle_events()
 	_track_phase()
 	_forecast_timer -= delta
@@ -181,6 +186,8 @@ func _build_scene() -> void:
 	input_router.long_pressed.connect(_on_long_pressed)
 	input_router.double_tapped.connect(_on_double_tapped)
 	input_router.zoom_requested.connect(_on_zoom_requested)
+	input_router.pinch_ended.connect(bands.settle)
+	input_router.view_step_requested.connect(bands.step)
 	input_router.debug_toggled.connect(hud.toggle_debug)
 	bands.band_changed.connect(_on_band_changed)
 	hud.debug_toggle_requested.connect(hud.toggle_debug)
@@ -211,6 +218,12 @@ func _track_phase() -> void:
 	var phase: int = sim.get_phase()
 	if phase == _phase:
 		return
+	if bands.auto_switch and _phase >= 0:
+		# M1.12: watch the wave come in, then come back close to build.
+		if phase == PHASE_WAVE and _phase == PHASE_INTERMISSION:
+			bands.go_to(BandController.Band.ORBIT)
+		elif phase == PHASE_INTERMISSION and _phase == PHASE_WAVE:
+			bands.go_to(BandController.Band.SURFACE)
 	_phase = phase
 	_refresh_forecast()
 	if phase == PHASE_WON or phase == PHASE_LOST:
@@ -264,10 +277,16 @@ func _select_slot(slot: int) -> void:
 
 
 func _on_tapped(screen_pos: Vector2) -> void:
-	# Building happens at Surface zoom (BRIEF §4.1); in Orbit a tap only deselects.
+	# Building happens in the Build view (BRIEF §4.1). In the Watch view a tap on
+	# or near the planet goes to the Build view; elsewhere it only deselects.
 	if bands.band != BandController.Band.SURFACE:
 		clear_selection()
+		var r: float = float(sim.get_planet_radius()) * camera.get_zoom_value()
+		if screen_pos.distance_to(world_to_screen(Vector2.ZERO)) <= r * 1.6 + _slot_pick_px:
+			bands.go_to(BandController.Band.SURFACE)
+			_tap_switched_view = true
 		return
+	_tap_switched_view = false
 	_select_slot(_slot_at_screen(screen_pos))
 
 
@@ -280,6 +299,10 @@ func _on_long_pressed(screen_pos: Vector2) -> void:
 
 func _on_double_tapped(_screen_pos: Vector2) -> void:
 	clear_selection()
+	if _tap_switched_view:
+		# The first tap already took the Watch view to Build.
+		_tap_switched_view = false
+		return
 	bands.toggle()
 
 
