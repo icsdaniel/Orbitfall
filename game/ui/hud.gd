@@ -30,6 +30,9 @@ var rotate_right: Button
 ## M1.12: toggles the Build (close) and Watch (wide) views.
 var view_button: Button
 var debug_button: Button
+## M2.3: enemy codex and trait legend, one tap away.
+var codex_button: Button
+var codex: CodexPanel
 
 var _stardust: Label
 var _income: Label
@@ -72,6 +75,13 @@ func setup(sim_node: Node, band_controller: BandController, input_router: InputR
 	debug_button.pressed.connect(func() -> void: debug_toggle_requested.emit())
 	_pin(debug_button, 1.0, 0.0, Vector2(-10.0, 10.0), Control.GROW_DIRECTION_BEGIN, Control.GROW_DIRECTION_END)
 
+	# M2.3: codex button under the debug button; the panel is added last (on top).
+	codex_button = UiKit.button("?", Vector2(60.0, 56.0), Color(0.20, 0.22, 0.38))
+	codex_button.name = "Codex"
+	codex_button.add_theme_font_size_override(&"font_size", 30)
+	codex_button.pressed.connect(toggle_codex)
+	_pin(codex_button, 1.0, 0.0, Vector2(-10.0, 72.0), Control.GROW_DIRECTION_BEGIN, Control.GROW_DIRECTION_END)
+
 	start_button = UiKit.button("START WAVE", Vector2(250.0, 88.0), Color(0.14, 0.46, 0.26))
 	start_button.name = "StartWave"
 	start_button.add_theme_font_size_override(&"font_size", 30)
@@ -113,6 +123,11 @@ func setup(sim_node: Node, band_controller: BandController, input_router: InputR
 	tuning_panel.sim = sim
 	tuning_panel.build(config.tunables())
 	_pin(tuning_panel, 0.0, 1.0, Vector2(350.0, -16.0), Control.GROW_DIRECTION_END, Control.GROW_DIRECTION_BEGIN)
+
+	codex = CodexPanel.new()
+	codex.name = "CodexPanel"
+	codex.build_from(sim)
+	_pin(codex, 0.5, 0.5, Vector2.ZERO, Control.GROW_DIRECTION_BOTH, Control.GROW_DIRECTION_BOTH)
 
 	end_screen = EndScreen.new()
 	end_screen.restart_requested.connect(func() -> void: restart_requested.emit())
@@ -169,6 +184,7 @@ func show_forecast(data: Array[Dictionary]) -> void:
 
 func show_end(won: bool, run_seed: int, waves_survived: int, wave_count: int) -> void:
 	build_menu.close()
+	codex.close()
 	end_screen.show_result(won, run_seed, waves_survived, wave_count)
 
 
@@ -180,6 +196,13 @@ func hide_end() -> void:
 func toast(text: String, seconds: float = 1.6) -> void:
 	_toast_seconds = seconds
 	_set_text(_hint, text)
+
+
+## M2.3: opens or closes the codex; it replaces the build menu while open.
+func toggle_codex() -> void:
+	if not codex.visible:
+		build_menu.close()
+	codex.toggle()
 
 
 func toggle_debug() -> void:

@@ -44,20 +44,49 @@ func sync() -> void:
 	queue_redraw()
 
 
+## M2.3: geometry of the segmented HP bar of one large unit, in world units.
+## `px` is one screen pixel in world units. Returns {back: Rect2, fill: Rect2,
+## color: Color, dividers: PackedFloat32Array (x of each divider, segments - 1 of
+## them), segments: int, full_segments: int (segments still completely full),
+## shield: Rect2 (zero size when no shield is up)}.
+static func hp_bar_layout(unit: Dictionary, px: float) -> Dictionary:
+	var pos: Vector2 = unit.get("pos", Vector2.ZERO)
+	var r: float = unit.get("radius", 10.0)
+	var frac: float = clampf(float(unit.get("hp_frac", 1.0)), 0.0, 1.0)
+	var segments: int = clampi(int(unit.get("segments", 1)), 1, 64)
+	var shield: float = clampf(float(unit.get("shield_frac", 0.0)), 0.0, 1.0)
+	var w: float = maxf(r * 2.0, 44.0 * px)
+	var h: float = 6.0 * px
+	var origin: Vector2 = pos + Vector2(-w * 0.5, -r - 12.0 * px)
+	var dividers: PackedFloat32Array = PackedFloat32Array()
+	for i: int in range(1, segments):
+		dividers.append(origin.x + w * float(i) / float(segments))
+	var shield_rect: Rect2 = Rect2(origin + Vector2(0.0, -4.0 * px), Vector2.ZERO)
+	if shield > 0.0:
+		shield_rect.size = Vector2(w * shield, 3.0 * px)
+	return {
+		"back": Rect2(origin - Vector2(px, px), Vector2(w + 2.0 * px, h + 2.0 * px)),
+		"fill": Rect2(origin, Vector2(w * frac, h)),
+		"color": Palette.GOOD.lerp(Palette.THREAT, 1.0 - frac),
+		"dividers": dividers,
+		"segments": segments,
+		"full_segments": floori(frac * float(segments) + 0.0001),
+		"shield": shield_rect,
+	}
+
+
 func _draw() -> void:
 	var px: float = 1.0 / maxf(view_zoom, 0.01)
 	for unit: Dictionary in _large_units:
-		var pos: Vector2 = unit.get("pos", Vector2.ZERO)
-		var r: float = unit.get("radius", 10.0)
-		var frac: float = clampf(float(unit.get("hp_frac", 1.0)), 0.0, 1.0)
-		var w: float = maxf(r * 2.0, 44.0 * px)
-		var h: float = 6.0 * px
-		var origin: Vector2 = pos + Vector2(-w * 0.5, -r - 12.0 * px)
-		draw_rect(Rect2(origin - Vector2(px, px), Vector2(w + 2.0 * px, h + 2.0 * px)),
-			Color(0.0, 0.0, 0.0, 0.8))
-		draw_rect(Rect2(origin, Vector2(w * frac, h)),
-			Palette.GOOD.lerp(Palette.THREAT, 1.0 - frac))
-		# Segments.
-		for i: int in range(1, 4):
-			var x: float = origin.x + w * float(i) / 4.0
-			draw_line(Vector2(x, origin.y), Vector2(x, origin.y + h), Color(0, 0, 0, 0.7), px)
+		var bar: Dictionary = hp_bar_layout(unit, px)
+		var back: Rect2 = bar["back"]
+		var fill: Rect2 = bar["fill"]
+		draw_rect(back, Color(0.0, 0.0, 0.0, 0.8))
+		draw_rect(fill, bar["color"])
+		var dividers: PackedFloat32Array = bar["dividers"]
+		for x: float in dividers:
+			draw_line(Vector2(x, fill.position.y), Vector2(x, fill.end.y),
+				Color(0.0, 0.0, 0.0, 0.85), 1.5 * px)
+		var shield: Rect2 = bar["shield"]
+		if shield.size.x > 0.0:
+			draw_rect(shield, Palette.SHIELD)
