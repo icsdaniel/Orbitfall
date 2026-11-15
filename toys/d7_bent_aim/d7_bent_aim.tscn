@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://toys/d7_bent_aim/d7_bent_aim.gd" id="1"]
+
+[node name="D7BentAim" type="Node2D"]
+script = ExtResource("1")
