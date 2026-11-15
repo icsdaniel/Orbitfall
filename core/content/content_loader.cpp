@@ -39,9 +39,15 @@ constexpr Named<Shape> kShapes[] = {
     {"hexagon", Shape::Hexagon}, {"star", Shape::Star},         {"diamond", Shape::Diamond},
     {"disc", Shape::Disc}};
 constexpr Named<BuildingKind> kBuildingKinds[] = {{"tower", BuildingKind::Tower},
-                                                  {"panel", BuildingKind::Panel}};
+                                                  {"panel", BuildingKind::Panel},
+                                                  {"support", BuildingKind::Support}};
 constexpr Named<BuildingLayer> kBuildingLayers[] = {{"ground", BuildingLayer::Ground},
-                                                    {"elevated", BuildingLayer::Elevated}};
+                                                    {"elevated", BuildingLayer::Elevated},
+                                                    {"any", BuildingLayer::Any}};
+constexpr Named<AuraStat> kAuraStats[] = {{"range", AuraStat::Range},
+                                          {"fireRate", AuraStat::FireRate},
+                                          {"damage", AuraStat::Damage},
+                                          {"income", AuraStat::Income}};
 constexpr Named<ProjectileKind> kProjectileKinds[] = {{"dot", ProjectileKind::Dot},
                                                       {"shell", ProjectileKind::Shell}};
 constexpr Named<DamageType> kDamageTypes[] = {
@@ -301,6 +307,7 @@ struct Loader {
     o.num("spawnRadius", r.spawnRadius, kPositive);
     o.angle("spawnJitterDeg", r.spawnJitter, Range{0.0, false, 180.0});
     o.num("surfaceTimeEaseSeconds", r.surfaceTimeEaseSeconds, kNonNeg);
+    if (o.has("elevatedRangeBonus")) o.num("elevatedRangeBonus", r.elevatedRangeBonus, Range{-0.9, false, 10.0});
   }
 
   // {"kinetic": 0.5, ...} -> out[type]. The floor is checked in resolve().
@@ -355,6 +362,10 @@ struct Loader {
     o.num("startStardust", p.startStardust, kNonNeg);
     o.num("surfaceTimeScale", p.surfaceTimeScale, Range{0.0, true, 1.0});
     o.num("sellRefund", p.sellRefund, kUnit);
+    // M2.1 (optional): the elevated ring; its height defaults to 10% of the radius.
+    if (o.has("elevatedLayer")) o.boolean("elevatedLayer", p.elevatedLayer);
+    p.elevatedHeight = 0.1f * p.radius;
+    if (o.has("elevatedHeight")) o.num("elevatedHeight", p.elevatedHeight, kNonNeg);
     if (const Value* lanes = o.array("lanes")) {
       if (lanes->array.empty()) o.field_error("lanes", "must not be empty");
       for (size_t i = 0; i < lanes->array.size(); ++i) {
@@ -389,8 +400,10 @@ struct Loader {
     BuildingDef b;
     if (!read_id(o, stem, db.buildingIds, db.buildings.size(), b.id)) return;
     const bool kindOk = o.named("kind", kBuildingKinds, b.kind);
-    o.integer("footprint", b.footprint, Range{1.0, false, 3.0});
-    o.named("layer", kBuildingLayers, b.layer);
+    // M1 files give both; optional since M2.1 (1 slot, ground only).
+    if (o.has("footprint")) o.integer("footprint", b.footprint, Range{1.0, false, 3.0});
+    if (o.has("layer")) o.named("layer", kBuildingLayers, b.layer);
+    read_auras(o, b);
     o.num("cost", b.cost, kNonNeg);
     o.boolean("aimMount", b.aimMount);
     if (o.has("aimOffsetDeg"))
@@ -428,6 +441,38 @@ struct Loader {
     }
     buildingWhere.push_back(o.where());
     db.buildings.push_back(std::move(b));
+  }
+
+  // "auras": [{ "stat", "amount", "radius", "affects": [kinds] }] (M2.1,
+  // optional). No "affects" = every kind of building.
+  void read_auras(const Obj& o, BuildingDef& b) {
+    if (!o.has("auras")) return;
+    const Value* list = o.array("auras");
+    if (list == nullptr) return;
+    for (size_t i = 0; i < list->array.size(); ++i) {
+      const Obj a = o.element("auras", *list, i);
+      if (!a.valid()) continue;
+      AuraDef aura;
+      a.named("stat", kAuraStats, aura.stat);
+      a.num("amount", aura.amount, Range{-0.9, false, 10.0});
+      a.integer("radius", aura.radius, Range{0.0, false, 4096.0});
+      if (a.has("affects")) {
+        aura.kinds = 0;
+        if (const Value* kinds = a.array("affects")) {
+          if (kinds->array.empty()) a.field_error("affects", "must not be empty");
+          for (const Value& k : kinds->array) {
+            BuildingKind kind = BuildingKind::Tower;
+            if (!k.is_string() || !lookup_named(kBuildingKinds, k.string, kind)) {
+              a.field_error("affects", "unknown building kind '" + k.string +
+                                           "' (expected one of: " + names_of(kBuildingKinds) + ")");
+              continue;
+            }
+            aura.kinds |= 1u << static_cast<uint32_t>(kind);
+          }
+        }
+      }
+      b.auras.push_back(aura);
+    }
   }
 
   // "falloff": [[t, mult], ...] with t in 0..1 ascending. Optional: flat 1.

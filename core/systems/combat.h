@@ -14,11 +14,13 @@ struct TowerAim {
   float x = 0.0f, y = 0.0f;    // position T
   float ax = 1.0f, ay = 0.0f;  // aim axis
 };
-TowerAim towerAim(const World& world, uint32_t slot);
+TowerAim towerAim(const World& world, uint32_t slot);  // slot = site index
 
 // BRIEF §6 tower arc: |E - T| <= range and the angle between (E - T) and the
-// aim axis <= arc.
-bool canTarget(const TowerAim& aim, const BuildingDef& def, float ex, float ey);
+// aim axis <= arc. `rangeMult` is the slot's range multiplier (M2.1: elevated
+// bonus and adjacency auras).
+bool canTarget(const TowerAim& aim, const BuildingDef& def, float ex, float ey,
+               float rangeMult = 1.0f);
 
 // Damage multiplier of the falloff curve at `t` = distance / range in [0, 1].
 float falloffAt(const BuildingDef& def, float t);

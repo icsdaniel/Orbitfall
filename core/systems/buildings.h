@@ -9,16 +9,30 @@ namespace orbitfall {
 
 struct World;
 
-// Pays the building's cost and puts it on an empty slot. `aimOffset` (rad) is
+// M2.1: `slot` is a site index (World): slot + layer * ring slots, so M1 slot
+// numbers still mean the ground ring. Sell / aim / targeting accept any slot a
+// building covers.
+//
+// Pays the building's cost and puts it on an empty slot (all the slots of its
+// footprint, starting at `slot`, must be free; an elevated slot needs a
+// building on every ground slot below: NoFoundation otherwise). `aimOffset` (rad) is
 // added to the definition's default mount offset and clamped to the bent-aim
 // limit; it is ignored for buildings without an aim mount.
 bool placeBuilding(World& world, int32_t slot, int32_t building, float aimOffset);
-// Removes the building and refunds cost * planet sellRefund.
+// Removes the building and refunds cost * planet sellRefund. A ground building
+// that carries an elevated one cannot be sold (SupportsElevated).
 bool sellBuilding(World& world, int32_t slot);
 // Sets the mount offset of an aim-mounted building (free in M1; M2.11 prices it).
 bool setAim(World& world, int32_t slot, float aimOffset);
 // Picks one of the targeting modes the building's definition lists.
 bool setTargeting(World& world, int32_t slot, uint8_t mode);
+
+// M2.1: recomputes every slot's stat multipliers (elevated range bonus and
+// adjacency auras) and World::auraLinks. Called when the layout changes, never
+// per tick.
+void recomputeLayout(World& world);
+// No aura stack can push a stat below this fraction of its definition.
+inline constexpr float kMinAuraMult = 0.1f;
 
 // Adds `delta` stardust and emits StardustChanged (value = new total, x = delta).
 void addStardust(World& world, float delta);

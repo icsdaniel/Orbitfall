@@ -74,20 +74,21 @@ float segmentCircle(float ax, float ay, float bx, float by, float cx, float cy, 
 
 TowerAim towerAim(const World& world, uint32_t slot) {
   TowerAim aim;
-  const float angle = world.slotAngle(slot) + world.planetRotation;
-  const float r = world.planet->radius;
+  const float angle = world.siteAngle(slot) + world.planetRotation;
+  const float r = world.siteRadius(slot);
   aim.x = r * std::cos(angle);
   aim.y = r * std::sin(angle);
-  const float axis = angle + world.slots[slot].aimOffset;
+  const float axis = angle + world.site(slot).aimOffset;
   aim.ax = std::cos(axis);
   aim.ay = std::sin(axis);
   return aim;
 }
 
-bool canTarget(const TowerAim& aim, const BuildingDef& def, float ex, float ey) {
+bool canTarget(const TowerAim& aim, const BuildingDef& def, float ex, float ey, float rangeMult) {
   const float dx = ex - aim.x, dy = ey - aim.y;
   const float d2 = dx * dx + dy * dy;
-  if (d2 > def.range * def.range) return false;
+  const float range = def.range * rangeMult;
+  if (d2 > range * range) return false;
   // angle <= arc  <=>  dot >= |d| * cos(arc)
   return dx * aim.ax + dy * aim.ay >= std::sqrt(d2) * std::cos(def.arc);
 }
@@ -186,9 +187,9 @@ void towerTargeting(World& world, float /*dt*/) {
   if (world.content == nullptr || world.planet == nullptr) return;
   const ContentDB& db = *world.content;
   const EnemyPool& e = world.enemies;
-  const uint32_t n = world.slotCount();
+  const uint32_t n = world.siteCount();
   for (uint32_t s = 0; s < n; ++s) {
-    BuildingSlot& b = world.slots[s];
+    BuildingSlot& b = world.site(s);
     b.flags &= static_cast<uint8_t>(~kSlotHasTarget);
     world.slotTargets[s] = kInvalidIndex;
     const BuildingDef* def = world.running() ? towerDef(world, b) : nullptr;
@@ -198,11 +199,11 @@ void towerTargeting(World& world, float /*dt*/) {
     const TargetingMode mode = static_cast<TargetingMode>(b.mode);
     uint32_t best = kInvalidIndex;
     float bestKey = 0.0f, bestTie = 0.0f;
-    world.grid.query(aim.x - def->range, aim.y - def->range, aim.x + def->range,
-                     aim.y + def->range, [&](uint32_t i) {
+    const float range = def->range * b.rangeMult;  // elevated bonus and auras (M2.1)
+    world.grid.query(aim.x - range, aim.y - range, aim.x + range, aim.y + range, [&](uint32_t i) {
       if (e.flags[i] & kEnemyDead) return;
       const float ex = e.posX[i], ey = e.posY[i];
-      if (!canTarget(aim, *def, ex, ey)) return;
+      if (!canTarget(aim, *def, ex, ey, b.rangeMult)) return;
       // Lower key wins; ties go to the enemy nearest the planet, then the lower index.
       const float toPlanet = ex * ex + ey * ey;
       float key = toPlanet;
@@ -230,9 +231,9 @@ void towerFire(World& world, float dt) {
   if (!world.running()) return;
   const EnemyPool& e = world.enemies;
   ProjectilePool& p = world.projectiles;
-  const uint32_t n = world.slotCount();
+  const uint32_t n = world.siteCount();
   for (uint32_t s = 0; s < n; ++s) {
-    BuildingSlot& b = world.slots[s];
+    BuildingSlot& b = world.site(s);
     const BuildingDef* def = towerDef(world, b);
     if (def == nullptr) continue;
     b.cooldown -= dt;
@@ -242,7 +243,7 @@ void towerFire(World& world, float dt) {
       continue;
     }
     if (b.cooldown > 0.0f || !(def->fireRate > 0.0f) || !(def->projectile.speed > 0.0f)) continue;
-    b.cooldown += 1.0f / def->fireRate;  // keeps the remainder, so the average rate is exact
+    b.cooldown += 1.0f / (def->fireRate * b.fireRateMult);  // keeps the remainder, so the average rate is exact
     if (b.cooldown < 0.0f) b.cooldown = 0.0f;
 
     const TowerAim aim = towerAim(world, s);
@@ -255,8 +256,10 @@ void towerFire(World& world, float dt) {
     p.posY[k] = aim.y;
     p.velX[k] = dirX * def->projectile.speed;
     p.velY[k] = dirY * def->projectile.speed;
-    p.damage[k] = def->projectile.damage;
-    p.life[k] = def->range / def->projectile.speed;
+    const float range = def->range * b.rangeMult;
+    p.damage[k] = def->projectile.damage * b.damageMult;
+    p.life[k] = range / def->projectile.speed;
+    p.range[k] = range;
     p.type[k] = static_cast<uint16_t>(b.type);
   }
 }
@@ -307,8 +310,9 @@ void collisions(World& world, float dt) {
     const float hx = ax + (bx - ax) * hitT, hy = ay + (by - ay) * hitT;
     // Distance flown at impact as a fraction of range, for the falloff curve.
     const float speed = source.projectile.speed;
-    const float flown = source.range - (p.life[i] + (1.0f - hitT) * dt) * speed;
-    const float fraction = source.range > 0.0f ? flown / source.range : 0.0f;
+    const float range = p.range[i];
+    const float flown = range - (p.life[i] + (1.0f - hitT) * dt) * speed;
+    const float fraction = range > 0.0f ? flown / range : 0.0f;
     const float damage = p.damage[i];
     const float splash = source.projectile.splash;
     if (splash > 0.0f) {

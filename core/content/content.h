@@ -20,8 +20,13 @@ inline constexpr float kHardMinDamageMult = 0.25f;
 inline constexpr float kMaxAimOffsetDeg = 60.0f;
 
 enum class Shape : uint8_t { Circle, Triangle, Square, Hexagon, Star, Diamond, Disc };
-enum class BuildingKind : uint8_t { Tower, Panel };
-enum class BuildingLayer : uint8_t { Ground, Elevated };
+// Support (M2.1): a building that neither shoots nor earns, e.g. an aura source.
+enum class BuildingKind : uint8_t { Tower, Panel, Support, Count };
+// Where a building may stand (M2.1): the ground ring only, the elevated ring
+// only, or either.
+enum class BuildingLayer : uint8_t { Ground, Elevated, Any };
+// Stats an adjacency aura can change (M2.1).
+enum class AuraStat : uint8_t { Range, FireRate, Damage, Income, Count };
 enum class ProjectileKind : uint8_t { Dot, Shell };
 enum class DamageType : uint8_t { Kinetic, Explosive, Energy, Cryo, Emp, Pierce, Count };
 enum class TargetingMode : uint8_t { First, Strong, Close };
@@ -96,6 +101,11 @@ struct PlanetDef {
   std::vector<LaneDef> lanes;
   float surfaceTimeScale = 1.0f;
   float sellRefund = 0.0f;  // fraction of cost refunded
+  // M2.1: a second ring of slots above the ground ring. Elevated slot i needs
+  // a building on ground slot i; buildings there stand `elevatedHeight` above
+  // the surface.
+  bool elevatedLayer = true;
+  float elevatedHeight = 10.0f;
   VisualDef visual;
 
   int lane_index(const std::string& laneId) const {
@@ -127,11 +137,22 @@ struct FalloffPoint {
   float mult = 1.0f;  // damage multiplier at t (>= minDamageMult)
 };
 
+// Adjacency aura (M2.1): every other building whose footprint is within
+// `radius` slots along the ring (either layer) and whose kind is in `kinds`
+// gets `stat` multiplied by 1 + the sum of the amounts reaching it.
+struct AuraDef {
+  AuraStat stat = AuraStat::Range;
+  float amount = 0.0f;  // +0.2 = +20%; may be negative
+  int radius = 1;       // k: reach in slots from the edge of the footprint
+  uint32_t kinds = ~0u;  // bit per BuildingKind it affects
+};
+
 struct BuildingDef {
   std::string id;
   BuildingKind kind = BuildingKind::Tower;
-  int footprint = 1;
-  BuildingLayer layer = BuildingLayer::Ground;
+  int footprint = 1;  // slots covered (1..3): the anchor slot and the next ones
+  BuildingLayer layer = BuildingLayer::Ground;  // where it may be built
+  std::vector<AuraDef> auras;
   float cost = 0.0f;
   bool aimMount = false;
   float aimOffset = 0.0f;  // rad, default mount offset from the slot normal
@@ -221,6 +242,7 @@ struct RulesDef {  // content/rules.json: global tunables
   float spawnRadius = 0.0f;   // lane enemies spawn at this distance
   float spawnJitter = 0.0f;   // rad, +- around the lane bearing for lane enemies
   float surfaceTimeEaseSeconds = 0.0f;
+  float elevatedRangeBonus = 0.15f;  // M2.1: +15% range on the elevated ring
 };
 
 struct ContentDB {

@@ -1,5 +1,5 @@
 {
-  "id": "gatling", "kind": "tower", "footprint": 1, "layer": "ground", "cost": 60,
+  "id": "gatling", "kind": "tower", "footprint": 1, "layer": "any", "cost": 60,
   "arcDeg": 40, "range": 350, "fireRate": 5, "aimMount": true, "aimOffsetDeg": 0,
   "projectile": { "kind": "dot", "speed": 900, "damage": 1, "type": "kinetic", "splash": 0 },
   "falloff": [[0, 1], [1, 1]],

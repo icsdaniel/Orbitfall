@@ -65,19 +65,19 @@ void sunlight(World& world, float dt) {
 
   // Lit and shaded flags are refreshed in every phase: the planet also turns
   // between waves.
-  const uint32_t n = world.slotCount();
+  const uint32_t n = world.siteCount();  // both rings (M2.1)
   uint32_t shadedSlots = 0;
   bool changed = false;
   for (uint32_t s = 0; s < n; ++s) {
-    BuildingSlot& b = world.slots[s];
+    BuildingSlot& b = world.site(s);
     const uint8_t before = b.flags;
     b.flags &= static_cast<uint8_t>(~(kSlotLit | kSlotShaded));
-    const float angle = world.slotAngle(s) + world.planetRotation;
+    const float angle = world.siteAngle(s) + world.planetRotation;
     if (inBeam(radius, width, world.sunBearing, angle)) {
       b.flags |= kSlotLit;
       if (isShaded(world.shade.data(), world.shadeCount, radius * std::sin(angle - world.sunBearing))) {
         b.flags |= kSlotShaded;
-        ++shadedSlots;
+        if (!world.siteElevated(s)) ++shadedSlots;  // the event counts ring slots
       }
     }
     changed = changed || ((before ^ b.flags) & kSlotShaded) != 0;
@@ -91,10 +91,12 @@ void sunlight(World& world, float dt) {
 void income(World& world, float dt) {
   if (world.content == nullptr || world.planet == nullptr) return;
   float rate = 0.0f;
-  for (const BuildingSlot& b : world.slots) {
+  const uint32_t n = world.siteCount();
+  for (uint32_t s = 0; s < n; ++s) {
+    const BuildingSlot& b = world.site(s);
     if (b.type < 0 || (b.flags & (kSlotLit | kSlotShaded)) != kSlotLit) continue;
     const BuildingDef& def = world.content->buildings[static_cast<size_t>(b.type)];
-    if (def.kind == BuildingKind::Panel) rate += def.panelRate * world.beamStrength;
+    if (def.kind == BuildingKind::Panel) rate += def.panelRate * world.beamStrength * b.incomeMult;
   }
   world.incomePerSecond = rate;
   if (!world.running() || !(rate > 0.0f) || !(dt > 0.0f)) return;

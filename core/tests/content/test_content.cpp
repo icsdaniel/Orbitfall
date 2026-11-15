@@ -537,6 +537,79 @@ TEST_CASE("a failed load leaves the output untouched and reports every problem")
   CHECK(db.enemies.size() == enemiesBefore);
 }
 
+TEST_CASE("M2.1 placement fields: shipped values, defaults and an aura building from JSON") {
+  const ContentDB db = shipped_db();
+  CHECK(db.rules.elevatedRangeBonus == doctest::Approx(0.15f));
+  const PlanetDef& planet = db.planets[static_cast<size_t>(db.planet_index("medium"))];
+  CHECK(planet.elevatedLayer);
+  CHECK(planet.elevatedHeight == doctest::Approx(12.0f));
+  // Towers may be built above; panels stay on the ground. Every M1 building is 1 slot.
+  CHECK(db.buildings[static_cast<size_t>(db.building_index("gatling"))].layer == BuildingLayer::Any);
+  CHECK(db.buildings[static_cast<size_t>(db.building_index("cannon"))].layer == BuildingLayer::Any);
+  CHECK(db.buildings[static_cast<size_t>(db.building_index("solar_panel"))].layer == BuildingLayer::Ground);
+  for (const BuildingDef& b : db.buildings) {
+    CHECK(b.footprint == 1);
+    CHECK(b.auras.empty());
+  }
+
+  // The new fields are optional: files without them keep loading.
+  {
+    Files files = shipped_files();
+    edit(files, "rules.json", "\"surfaceTimeEaseSeconds\": 0.3,", "\"surfaceTimeEaseSeconds\": 0.3");
+    edit(files, "rules.json", "\"elevatedRangeBonus\": 0.15", "");
+    edit(files, "planets/medium.json", "\"elevatedLayer\": true,", "");
+    edit(files, "planets/medium.json", "\"elevatedHeight\": 12,", "");
+    edit(files, "buildings/solar_panel.json", "\"footprint\": 1, \"layer\": \"ground\",", "");
+    ContentDB d;
+    std::vector<std::string> errors;
+    REQUIRE_MESSAGE(load_content_from_strings(files, d, errors), joined(errors));
+    CHECK(d.rules.elevatedRangeBonus == doctest::Approx(0.15f));
+    CHECK(d.planets[0].elevatedLayer);
+    CHECK(d.planets[0].elevatedHeight == doctest::Approx(10.0f));  // 10% of the radius
+    const BuildingDef& panel = d.buildings[static_cast<size_t>(d.building_index("solar_panel"))];
+    CHECK(panel.footprint == 1);
+    CHECK(panel.layer == BuildingLayer::Ground);
+  }
+
+  // A pure-content aura building (what the M2.6 Amplifier will be).
+  {
+    Files files = shipped_files();
+    files["buildings/test_amplifier.json"] =
+        "{ \"id\": \"test_amplifier\", \"kind\": \"support\", \"footprint\": 2, \"layer\": \"any\","
+        "  \"cost\": 80, \"aimMount\": false,"
+        "  \"auras\": [ { \"stat\": \"range\", \"amount\": 0.2, \"radius\": 2, \"affects\": [\"tower\"] },"
+        "               { \"stat\": \"income\", \"amount\": 0.1, \"radius\": 1 } ],"
+        "  \"visual\": { \"shape\": \"hexagon\", \"color\": \"building.amplifier\" } }";
+    ContentDB d;
+    std::vector<std::string> errors;
+    REQUIRE_MESSAGE(load_content_from_strings(files, d, errors), joined(errors));
+    const BuildingDef& amp = d.buildings[static_cast<size_t>(d.building_index("test_amplifier"))];
+    CHECK(amp.kind == BuildingKind::Support);
+    CHECK(amp.footprint == 2);
+    CHECK(amp.layer == BuildingLayer::Any);
+    REQUIRE(amp.auras.size() == 2);
+    CHECK(amp.auras[0].stat == AuraStat::Range);
+    CHECK(amp.auras[0].amount == doctest::Approx(0.2f));
+    CHECK(amp.auras[0].radius == 2);
+    CHECK(amp.auras[0].kinds == 1u << static_cast<uint32_t>(BuildingKind::Tower));
+    CHECK(amp.auras[1].stat == AuraStat::Income);
+    CHECK(amp.auras[1].kinds == ~0u);  // no "affects": every kind
+
+    const auto bad = [&](const std::string& from, const std::string& to, const std::string& needle) {
+      Files f = files;
+      edit(f, "buildings/test_amplifier.json", from, to);
+      const std::vector<std::string> errs = load_errors(f);
+      CHECK_MESSAGE(any_contains(errs, "test_amplifier", needle), joined(errs));
+    };
+    bad("\"stat\": \"range\"", "\"stat\": \"luck\"", "unknown value 'luck'");
+    bad("\"radius\": 2", "\"radius\": -1", "must be >= 0");
+    bad("[\"tower\"]", "[\"castle\"]", "unknown building kind 'castle'");
+    bad("\"amount\": 0.2", "\"amount\": -2", "must be >= -0.9");
+    bad("\"footprint\": 2", "\"footprint\": 4", "must be <= 3");
+    bad("\"layer\": \"any\"", "\"layer\": \"sky\"", "unknown value 'sky'");
+  }
+}
+
 TEST_CASE("mini_json parses the JSON grammar and rejects junk") {
   mini_json::Value v;
   std::string err;

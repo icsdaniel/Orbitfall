@@ -214,6 +214,7 @@ TEST_CASE("projectiles: shots lead a moving target and expire at range") {
   miss.world().projectiles.posX[k] = 100.0f;
   miss.world().projectiles.velX[k] = 900.0f;
   miss.world().projectiles.life[k] = 350.0f / 900.0f;
+  miss.world().projectiles.range[k] = 350.0f;
   miss.world().projectiles.type[k] = kGatling;
   for (int t = 0; t < 11; ++t) miss.step();
   CHECK(miss.world().projectiles.count == 1);

@@ -19,7 +19,7 @@ enum class EventType : uint8_t {
   ShadowChanged,
   GameOver,
   Victory,
-  BuildingPlaced,   // a = slot, b = building index, value = cost paid
+  BuildingPlaced,   // a = slot (site index, see World), b = building index, value = cost paid
   BuildingSold,     // a = slot, b = building index, value = refund
   CommandRejected,  // a = slot, b = RejectReason, x = CommandType, value = cost (Unaffordable)
   Count
@@ -35,6 +35,10 @@ enum class RejectReason : int32_t {
   EmptySlot,        // sell / aim / targeting on an empty slot
   NotAllowed,       // the building has no aim mount or lacks that targeting mode
   WrongPhase,       // not accepted in the current phase (e.g. after the run ended)
+  // M2.1
+  NoFoundation,      // elevated slot without a building on the ground slot below
+  WrongLayer,        // the building may not stand on that layer
+  SupportsElevated,  // selling a foundation that carries an elevated building
 };
 
 // Generic payload; each emitting system documents which fields it fills.

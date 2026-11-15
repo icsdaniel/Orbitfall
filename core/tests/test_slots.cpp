@@ -70,7 +70,7 @@ TEST_CASE("slots: unaffordable, bad slot and bad building are rejected") {
   Sim sim(sandboxConfig(db));
   sim.push(cmd::placeBuilding(0, 0, kCannon, 0.0f));  // 150 -> 60
   sim.push(cmd::placeBuilding(0, 1, kCannon, 0.0f));  // needs 90
-  sim.push(cmd::placeBuilding(0, 36, kPanel, 0.0f));
+  sim.push(cmd::placeBuilding(0, 72, kPanel, 0.0f));  // past both rings (36..71 is the M2.1 elevated ring)
   sim.push(cmd::placeBuilding(0, -1, kPanel, 0.0f));
   sim.push(cmd::placeBuilding(0, 2, 99, 0.0f));
   sim.step();
