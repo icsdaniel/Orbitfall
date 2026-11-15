@@ -23,6 +23,12 @@ const SHAPE_COUNT: int = 7
 const TRAIT_CAMO: int = 1
 const TRAIT_ARMORED: int = 2
 const TRAIT_SHIELDED: int = 4
+# M2.3: the remaining trait bits the shader draws (same values as core).
+const TRAIT_FAST: int = 8
+const TRAIT_REGROW: int = 16
+const TRAIT_SPLITTER: int = 32
+const TRAIT_HEAT_RESISTANT: int = 64
+const TRAIT_LAYERED: int = 4096
 
 const SHAPE_SHADER: Shader = preload("res://game/render/shaders/sdf_shapes.gdshader")
 const _HUGE: float = 1.0e9
