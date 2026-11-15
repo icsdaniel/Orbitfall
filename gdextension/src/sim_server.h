@@ -66,7 +66,10 @@ class SimServer : public Node {
 
   // --- commands ---
   void rotate_input(float v);
-  void place_building(int64_t slot, int64_t building, float aim_offset);
+  // `layer` (M2.1): 0 ground (default), 1 elevated. The command carries the
+  // site index slot + layer * get_slot_count(); sell/aim/targeting take that
+  // index too (so M1 slot numbers still mean the ground ring).
+  void place_building(int64_t slot, int64_t building, float aim_offset, int64_t layer);
   void sell_building(int64_t slot);
   void set_aim(int64_t slot, float offset);
   void set_targeting(int64_t slot, int64_t mode);
@@ -102,6 +105,18 @@ class SimServer : public Node {
   int64_t get_projectile_count() const { return curr_->projectileCount; }
   TypedArray<Dictionary> get_large_units() const;
   TypedArray<Dictionary> get_building_defs() const;
+  // ---- M2.1 placement depth -------------------------------------------------
+  // Sites: one index space over both rings, site = slot + layer * slot_count.
+  // The M1 slot getters keep returning the ground ring only.
+  int64_t get_layer_count() const { return statics_.layerCount; }  // 1, or 2 with an elevated ring
+  float get_elevated_height() const { return statics_.elevatedHeight; }  // world units above the surface
+  float get_elevated_range_bonus() const { return content_.rules.elevatedRangeBonus; }  // 0.15 = +15%
+  PackedInt32Array get_site_buildings() const;   // per site: building index on the anchor slot, else -1
+  PackedInt32Array get_site_flags() const;       // per site: same bits as get_slot_flags
+  PackedInt32Array get_site_owners() const;      // per site: anchor site of the covering building, -1 = free
+  PackedFloat32Array get_site_modifiers() const; // 4 per site: range, fire rate, damage, income multipliers
+  PackedInt32Array get_adjacency_links() const;  // triples: source site, target site, stat (0 range, 1 fire rate, 2 damage, 3 income)
+  // ---- end M2.1 -------------------------------------------------------------
   TypedArray<Dictionary> get_enemy_defs() const;
   TypedArray<Dictionary> get_forecast(int64_t count);
   // --- M2.3 damage types and traits ---

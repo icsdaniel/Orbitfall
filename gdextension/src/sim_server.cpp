@@ -121,7 +121,7 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_alpha"), &SimServer::get_alpha);
 
   ClassDB::bind_method(D_METHOD("rotate_input", "v"), &SimServer::rotate_input);
-  ClassDB::bind_method(D_METHOD("place_building", "slot", "building", "aim_offset"), &SimServer::place_building, DEFVAL(0.0f));
+  ClassDB::bind_method(D_METHOD("place_building", "slot", "building", "aim_offset", "layer"), &SimServer::place_building, DEFVAL(0.0f), DEFVAL(0));
   ClassDB::bind_method(D_METHOD("sell_building", "slot"), &SimServer::sell_building);
   ClassDB::bind_method(D_METHOD("set_aim", "slot", "offset"), &SimServer::set_aim);
   ClassDB::bind_method(D_METHOD("set_targeting", "slot", "mode"), &SimServer::set_targeting);
@@ -156,6 +156,16 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_projectile_count"), &SimServer::get_projectile_count);
   ClassDB::bind_method(D_METHOD("get_large_units"), &SimServer::get_large_units);
   ClassDB::bind_method(D_METHOD("get_building_defs"), &SimServer::get_building_defs);
+  // ---- M2.1 placement depth ----
+  ClassDB::bind_method(D_METHOD("get_layer_count"), &SimServer::get_layer_count);
+  ClassDB::bind_method(D_METHOD("get_elevated_height"), &SimServer::get_elevated_height);
+  ClassDB::bind_method(D_METHOD("get_elevated_range_bonus"), &SimServer::get_elevated_range_bonus);
+  ClassDB::bind_method(D_METHOD("get_site_buildings"), &SimServer::get_site_buildings);
+  ClassDB::bind_method(D_METHOD("get_site_flags"), &SimServer::get_site_flags);
+  ClassDB::bind_method(D_METHOD("get_site_owners"), &SimServer::get_site_owners);
+  ClassDB::bind_method(D_METHOD("get_site_modifiers"), &SimServer::get_site_modifiers);
+  ClassDB::bind_method(D_METHOD("get_adjacency_links"), &SimServer::get_adjacency_links);
+  // ---- end M2.1 ----
   ClassDB::bind_method(D_METHOD("get_enemy_defs"), &SimServer::get_enemy_defs);
   ClassDB::bind_method(D_METHOD("get_forecast", "count"), &SimServer::get_forecast);
   // M2.3
@@ -235,6 +245,8 @@ void SimServer::rebuild_statics() {
   statics_.planetRadius = w.planet ? w.planet->radius : 0.0f;
   statics_.planetHpMax = w.planetHpMax;
   statics_.slotCount = static_cast<int32_t>(w.slotCount());
+  statics_.layerCount = w.elevated.empty() ? 1 : 2;  // M2.1
+  statics_.elevatedHeight = w.planet != nullptr ? w.planet->elevatedHeight : 0.0f;
   statics_.enemyColors = enemyColors_.empty() ? nullptr : enemyColors_.data();
   const auto shot = palette_.find("projectile");
   if (shot != palette_.end()) {
@@ -441,8 +453,15 @@ void SimServer::queue(Command c) {
 }
 
 void SimServer::rotate_input(float v) { queue(orbitfall::cmd::rotateInput(0, v)); }
-void SimServer::place_building(int64_t slot, int64_t building, float aim_offset) {
-  queue(orbitfall::cmd::placeBuilding(0, static_cast<int32_t>(slot), static_cast<int32_t>(building), aim_offset));
+void SimServer::place_building(int64_t slot, int64_t building, float aim_offset, int64_t layer) {
+  // M2.1: the command addresses a site. A bad slot stays out of range so the
+  // sim rejects it (InvalidSlot) instead of it landing on the other ring.
+  int64_t site = slot;
+  if (layer != 0) {
+    const int64_t n = statics_.slotCount;
+    site = (layer == 1 && slot >= 0 && slot < n) ? slot + n : -1;
+  }
+  queue(orbitfall::cmd::placeBuilding(0, static_cast<int32_t>(site), static_cast<int32_t>(building), aim_offset));
 }
 void SimServer::sell_building(int64_t slot) { queue(orbitfall::cmd::sellBuilding(0, static_cast<int32_t>(slot))); }
 void SimServer::set_aim(int64_t slot, float offset) {
@@ -525,6 +544,20 @@ float SimServer::get_planet_rotation() const {
 
 PackedInt32Array SimServer::get_slot_buildings() const { return to_packed_int32(curr_->slotBuildings); }
 PackedInt32Array SimServer::get_slot_flags() const { return to_packed_int32(curr_->slotFlags); }
+
+// ---- M2.1 placement depth ----
+PackedInt32Array SimServer::get_site_buildings() const { return to_packed_int32(curr_->siteBuildings); }
+PackedInt32Array SimServer::get_site_flags() const { return to_packed_int32(curr_->siteFlags); }
+PackedInt32Array SimServer::get_site_owners() const { return to_packed_int32(curr_->siteOwners); }
+PackedInt32Array SimServer::get_adjacency_links() const { return to_packed_int32(curr_->auraLinks); }
+PackedFloat32Array SimServer::get_site_modifiers() const {
+  PackedFloat32Array out;
+  const std::vector<float>& v = curr_->siteModifiers;
+  out.resize(static_cast<int64_t>(v.size()));
+  if (!v.empty()) std::memcpy(out.ptrw(), v.data(), v.size() * sizeof(float));
+  return out;
+}
+// ---- end M2.1 ----
 
 PackedFloat32Array SimServer::get_shade_intervals() const {
   PackedFloat32Array out;
@@ -638,7 +671,21 @@ TypedArray<Dictionary> SimServer::get_building_defs() const {
     d["cost"] = b.cost;
     d["arc"] = b.arc;  // rad, half-angle
     d["range"] = b.range;
-    d["kind"] = b.kind == orbitfall::BuildingKind::Panel ? String("panel") : String("tower");
+    d["kind"] = b.kind == orbitfall::BuildingKind::Panel
+                    ? String("panel")
+                    : (b.kind == orbitfall::BuildingKind::Support ? String("support") : String("tower"));
+    // M2.1: where it may stand (0 ground, 1 elevated, 2 any) and its auras.
+    d["layer"] = static_cast<int64_t>(b.layer);
+    TypedArray<Dictionary> auras;
+    for (const orbitfall::AuraDef& a : b.auras) {
+      Dictionary ad;
+      ad["stat"] = static_cast<int64_t>(a.stat);
+      ad["amount"] = a.amount;
+      ad["radius"] = static_cast<int64_t>(a.radius);
+      ad["kinds"] = static_cast<int64_t>(a.kinds & 0xffu);
+      auras.push_back(ad);
+    }
+    d["auras"] = auras;
     d["shape"] = static_cast<int64_t>(b.visual.shape);
     d["color"] = to_gd(b.visual.color);  // palette key
     d["footprint"] = b.footprint;
