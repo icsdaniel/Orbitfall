@@ -41,9 +41,11 @@ const TOWER_DAMAGE: float = 5.0
 const TWIN_MAX_GAP: int = 4  # slots; towers further apart do not pair
 const TWIN_MAX_OFFSET: float = deg_to_rad(60.0)
 # Enemies and waves.
-const ENEMY_HP: float = 30.0
+const ENEMY_HP: float = 60.0  # two unfocused towers cannot quite hold a lane; focus tips it
 const ENEMY_SPEED: float = 30.0
 const ENEMY_R: float = 7.0
+const CLUMP: int = 6  # enemies arrive in clumps of this many
+const CLUMP_SPACING: float = 12.0
 const SPAWN_R: float = 440.0
 const KILL_REWARD: int = 2
 const WAVE_SECONDS: float = 25.0
@@ -95,7 +97,7 @@ var _tracer_boost: Array[bool] = []
 var _wave: int = 1
 var _wave_on: bool = true
 var _wave_time: float = 0.0
-var _spawn_acc: Array[float] = [0.0, 0.0]
+var _spawn_acc: Array[float] = [5.0, 5.0]
 var _kills: int = 0
 var _leaks: int = 0
 var _wave_base: float = 0.0  # damage this wave without the focus bonus
@@ -187,7 +189,7 @@ func _build_ui() -> void:
 		margin.add_theme_constant_override("margin_" + side, 10)
 	scroll.add_child(margin)
 	var box: VBoxContainer = VBoxContainer.new()
-	box.add_theme_constant_override("separation", 4)
+	box.add_theme_constant_override("separation", 2)
 	margin.add_child(box)
 
 	var title: Label = Label.new()
@@ -200,7 +202,7 @@ func _build_ui() -> void:
 		var b: Button = Button.new()
 		b.text = FORM_NAMES[i]
 		b.toggle_mode = true
-		b.custom_minimum_size = Vector2(0, 56)
+		b.custom_minimum_size = Vector2(0, 52)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(_set_form.bind(i))
@@ -209,7 +211,7 @@ func _build_ui() -> void:
 	_help_label = _add_text(box, 14)
 	_help_label.custom_minimum_size = Vector2(0, 62)
 	_dps_label = _add_text(box, 15)
-	_dps_label.custom_minimum_size = Vector2(0, 66)
+	_dps_label.custom_minimum_size = Vector2(0, 62)
 
 	_add_slider(box, "focus bonus % per extra tower", 0.0, 50.0, 1.0, focus_bonus, func(v: float) -> void: focus_bonus = v)
 	_add_slider(box, "focus bonus cap %", 0.0, 100.0, 5.0, focus_cap, func(v: float) -> void: focus_cap = v)
@@ -255,7 +257,7 @@ func _add_slider(box: VBoxContainer, title: String, lo: float, hi: float, step: 
 	slider.max_value = hi
 	slider.step = step
 	slider.value = value
-	slider.custom_minimum_size = Vector2(0, 36)
+	slider.custom_minimum_size = Vector2(0, 32)
 	slider.focus_mode = Control.FOCUS_NONE
 	box.add_child(slider)
 	var update: Callable = func(v: float) -> void:
@@ -352,6 +354,7 @@ func _reset() -> void:
 	_wave = 1
 	_wave_on = true
 	_wave_time = 0.0
+	_spawn_acc = [5.0, 5.0]
 	_kills = 0
 	_leaks = 0
 	_wave_base = 0.0
@@ -394,6 +397,7 @@ func _start_wave() -> void:
 		return
 	_wave_on = true
 	_wave_time = 0.0
+	_spawn_acc = [5.0, 5.0]
 	_kills = 0
 	_leaks = 0
 	_wave_base = 0.0
@@ -600,11 +604,14 @@ func _step_wave(dt: float) -> void:
 	if _wave_time < WAVE_SECONDS:
 		for lane: int in range(2):
 			_spawn_acc[lane] += spawn_rate * dt
-			while _spawn_acc[lane] >= 1.0:
-				_spawn_acc[lane] -= 1.0
-				var bearing: float = _lane_bearing(lane) + deg_to_rad(randf_range(-3.0, 3.0))
-				_enemy_pos.append(Vector2.from_angle(bearing) * SPAWN_R)
-				_enemy_hp.append(ENEMY_HP)
+			# Swarm clumps: a steady trickle dies at the edge of range and never
+			# reaches a focus zone.
+			while _spawn_acc[lane] >= float(CLUMP):
+				_spawn_acc[lane] -= float(CLUMP)
+				for n: int in range(CLUMP):
+					var bearing: float = _lane_bearing(lane) + deg_to_rad(randf_range(-3.0, 3.0))
+					_enemy_pos.append(Vector2.from_angle(bearing) * (SPAWN_R + CLUMP_SPACING * float(n)))
+					_enemy_hp.append(ENEMY_HP)
 	elif _enemy_pos.is_empty():
 		_wave_on = false
 		var share: float = 100.0 * _wave_bonus / maxf(_wave_base + _wave_bonus, 1.0)
