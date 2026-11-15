@@ -30,6 +30,7 @@ struct Args {
   ThreatOptions threat;
   bool quiet = false;
   bool strict = false;  // exit 2 when a wave has too few answers
+  bool trace = false;   // print each run's state at every wave start
 };
 
 void usage() {
@@ -46,6 +47,7 @@ void usage() {
       "  --beaten-seeds F  ...in more than F of the seeds (default 0.5)\n"
       "  --answers N       strategies that must beat every wave (default 3)\n"
       "  --strict          exit with status 2 when a wave has too few answers\n"
+      "  --trace           print every run's state at each wave start (use with --runs 1)\n"
       "  --quiet           no summary tables\n"
       "  --list-bots       print the bot ids and exit\n");
 }
@@ -73,6 +75,8 @@ bool parse(int argc, char** argv, Args& a, bool& exitNow) {
       exitNow = true;
     } else if (k == "--quiet") {
       a.quiet = true;
+    } else if (k == "--trace") {
+      a.trace = true;
     } else if (k == "--strict") {
       a.strict = true;
     } else if (k == "--content") {
@@ -242,6 +246,8 @@ int main(int argc, char** argv) {
       run.seed = args.seed + i;
       run.waveSet = waveSet;
       run.maxWaves = args.maxWaves;
+      run.trace = args.trace;
+      if (args.trace) std::printf("  %s, seed %u\n", strategyId(s), run.seed);
       who.push_back(s);
       seeds.push_back(run.seed);
       runs.push_back(play(db, s, run));

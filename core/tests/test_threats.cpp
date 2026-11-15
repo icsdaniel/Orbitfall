@@ -153,6 +153,7 @@ TEST_CASE("bots: threat coverage counts strategies that clear a wave cheaply") {
   CHECK(report.waves[1].beatenBy.size() == 2);  // towers lost too much HP
   CHECK_FALSE(report.waves[1].ok);
   CHECK(report.waves[3].beatenBy.size() == 2);  // balance stopped after wave 3
-  CHECK(report.failing == 7);
+  CHECK(report.waves[2].ok);
+  CHECK(report.failing == 6);
   CHECK(formatThreatReport(report, options).find("TOO FEW") != std::string::npos);
 }

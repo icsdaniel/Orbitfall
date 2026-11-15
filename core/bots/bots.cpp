@@ -311,7 +311,7 @@ struct Bot {
     laidOut = true;
     const World& w = world();
     for (const LaneDef& lane : w.planet->lanes) laneSlots.push_back(ringAround(lane.bearing, 6));
-    batterySlots = ringAround(0.0f, 10);
+    batterySlots = ringAround(0.0f, 8);
     fieldSlots = ringAround(0.0f, 8);
     switch (strategy) {
       case Strategy::RotateToLane:
@@ -375,11 +375,27 @@ struct Bot {
     budget += db.buildings[static_cast<size_t>(type)].cost * w.planet->sellRefund;
   }
 
+  // Fraction of the coming wave a surface point at world angle `angle` spends
+  // in the beam, with the sun drifting on from where it is now.
+  float litShare(float angle) {
+    const World& w = world();
+    const float drift = w.sun->speed * expectedWaveSeconds();
+    const float half = 0.5f * litArc(w.planet->radius, w.sun->beamWidth);
+    const float off = wrapPi(angle - w.sunBearing);  // ahead of the sun when positive
+    if (std::fabs(drift) < 1.0e-4f) return std::fabs(off) <= half ? 1.0f : 0.0f;
+    // Lit while the sun's travel so far is within `half` of `off`.
+    const float lo = drift > 0.0f ? 0.0f : drift, hi = drift > 0.0f ? drift : 0.0f;
+    const float from = off - half > lo ? off - half : lo;
+    const float to = off + half < hi ? off + half : hi;
+    return to > from ? (to - from) / (hi - lo) : 0.0f;
+  }
+
   // Sells the panels the sun has left behind and tops the lit ones up to
   // `want`, assuming the planet will sit at rotation `ref` during the wave.
+  // New panels go on the free slots that will be lit longest, the ones
+  // furthest ahead of the sun first (they stay useful for later waves).
   void tendPanels(float ref, int want, bool buyNew) {
     World& w = world();
-    const float drift = w.sun->speed * expectedWaveSeconds();
     const float half = 0.5f * litArc(w.planet->radius, w.sun->beamWidth);
     for (uint32_t i = 0; i < w.slotCount(); ++i) {
       if (w.slots[i].type != panel) continue;
@@ -388,12 +404,21 @@ struct Bot {
     if (!buyNew) return;
     int lit = 0;
     for (uint32_t i = 0; i < w.slotCount(); ++i) {
-      if (w.slots[i].type == panel && wrapPi(w.slotAngle(i) + ref - w.sunBearing) > -half + drift) ++lit;
+      if (w.slots[i].type == panel && litShare(w.slotAngle(i) + ref) >= 0.5f) ++lit;
     }
-    const float lead = wrapTau(w.sunBearing + half - 8.0f * kDeg - ref);  // local
     while (lit < want) {
-      const int slot = nearestFree(lead, reservedSlots, half);
-      if (slot < 0 || !buy(slot, panel)) break;
+      int best = -1;
+      float bestScore = 0.6f;  // not worth a panel below 60% of the wave in the light
+      for (uint32_t i = 0; i < w.slotCount(); ++i) {
+        if (taken(static_cast<int>(i)) || isReserved(static_cast<int>(i))) continue;
+        const float angle = w.slotAngle(i) + ref;
+        const float score = litShare(angle) + 0.1f * wrapPi(angle - w.sunBearing);
+        if (score > bestScore) {
+          bestScore = score;
+          best = static_cast<int>(i);
+        }
+      }
+      if (best < 0 || !buy(best, panel)) break;
       ++lit;
     }
   }
@@ -496,9 +521,24 @@ struct Bot {
       fieldTowers.push_back(slot);
       return true;
     };
-    for (size_t l = 0; l < lanes; ++l) {
-      const int want = l == 0 ? kWantFirstLane[k] : kWantOtherLane[k];
-      while (covering(l) < want && buyFor(l)) {}
+    // Guns the turning planet has carried away from every lane are sold.
+    for (size_t t = 0; t < fieldTowers.size();) {
+      const float world = w.slotAngle(static_cast<uint32_t>(fieldTowers[t])) + rotMid;
+      bool useful = false;
+      for (size_t l = 0; l < lanes; ++l) {
+        useful = useful || std::fabs(wrapPi(world - w.planet->lanes[l].bearing)) < reach + 10.0f * kDeg;
+      }
+      if (useful) {
+        ++t;
+      } else {
+        sell(static_cast<uint32_t>(fieldTowers[t]));
+        fieldTowers.erase(fieldTowers.begin() + static_cast<std::ptrdiff_t>(t));
+      }
+    }
+    // One gun on the wave's main lane, then light before more guns.
+    if (lanes > 0) {
+      const size_t heavy = static_cast<size_t>(heaviestLane());
+      if (covering(heavy) < 1) buyFor(heavy);
     }
     while (towersOn(fieldSlots) < kWantFieldPanels[k]) {
       bool bought = false;
@@ -508,6 +548,10 @@ struct Bot {
         break;
       }
       if (!bought) break;
+    }
+    for (size_t l = 0; l < lanes; ++l) {
+      const int want = l == 0 ? kWantFirstLane[k] : kWantOtherLane[k];
+      while (covering(l) < want && buyFor(l)) {}
     }
     for (int guard = 0; guard < 8 && lanes > 0; ++guard) {
       size_t least = 0;
