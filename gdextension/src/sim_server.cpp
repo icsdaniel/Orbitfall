@@ -14,6 +14,7 @@
 
 #include "content/content_loader.h"
 #include "sim/mathx.h"
+#include "systems/combat.h"
 #include "systems/waves.h"
 #include "sim/version.h"
 
@@ -157,6 +158,10 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_building_defs"), &SimServer::get_building_defs);
   ClassDB::bind_method(D_METHOD("get_enemy_defs"), &SimServer::get_enemy_defs);
   ClassDB::bind_method(D_METHOD("get_forecast", "count"), &SimServer::get_forecast);
+  // M2.3
+  ClassDB::bind_method(D_METHOD("get_damage_types"), &SimServer::get_damage_types);
+  ClassDB::bind_method(D_METHOD("get_trait_defs"), &SimServer::get_trait_defs);
+  ClassDB::bind_method(D_METHOD("get_shield_mults"), &SimServer::get_shield_mults);
   ClassDB::bind_method(D_METHOD("get_debug_stats"), &SimServer::get_debug_stats);
   ClassDB::bind_method(D_METHOD("set_tunable", "path", "value"), &SimServer::set_tunable);
   ClassDB::bind_method(D_METHOD("drain_events"), &SimServer::drain_events);
@@ -570,6 +575,8 @@ TypedArray<Dictionary> SimServer::get_large_units() const {
     d["radius"] = u.radius;
     d["hp_frac"] = u.hpFrac;
     d["shadow"] = u.shadow;
+    d["segments"] = u.segments;        // M2.3
+    d["shield_frac"] = u.shieldFrac;   // M2.3
     out.push_back(d);
   }
   return out;
@@ -639,6 +646,12 @@ TypedArray<Dictionary> SimServer::get_building_defs() const {
     d["aim_offset"] = b.aimOffset;
     d["fire_rate"] = b.fireRate;
     d["panel_rate"] = b.panelRate;
+    // M2.3: towers declare a damage type (-1 for buildings that do not shoot).
+    d["damage_type"] = b.hasProjectile ? static_cast<int64_t>(b.projectile.type) : int64_t(-1);
+    d["damage_type_name"] =
+        b.hasProjectile ? String(orbitfall::damage_type_name(b.projectile.type)) : String();
+    d["damage"] = b.hasProjectile ? b.projectile.damage : 0.0f;
+    d["splash"] = b.hasProjectile ? b.projectile.splash : 0.0f;
     out.push_back(d);
   }
   return out;
@@ -664,10 +677,59 @@ TypedArray<Dictionary> SimServer::get_enemy_defs() const {
     d["shadow_caster"] = e.shadowCaster;
     d["hp_bar"] = e.hpBar;
     d["pops_into"] = e.popsInto;
+    // M2.3 (codex): shield, HP bar segments, landing damage and the final
+    // multiplier per damage type (own damageMult x trait rows, floored).
+    d["shield"] = e.shield;
+    d["hp_bar_segments"] = e.hpBarSegments;
+    d["land_damage"] = e.land_damage(e.layers);
+    PackedFloat32Array mults;
+    mults.resize(orbitfall::kDamageTypeCount);
+    for (int t = 0; t < orbitfall::kDamageTypeCount; ++t)
+      mults[t] = orbitfall::typeMultiplier(content_, e, static_cast<orbitfall::DamageType>(t));
+    d["damage_mult"] = mults;
     out.push_back(d);
   }
   return out;
 }
+
+// --- M2.3 damage types and traits ---
+PackedStringArray SimServer::get_damage_types() const {
+  PackedStringArray out;
+  for (int t = 0; t < orbitfall::kDamageTypeCount; ++t)
+    out.push_back(String(orbitfall::damage_type_name(static_cast<orbitfall::DamageType>(t))));
+  return out;
+}
+
+TypedArray<Dictionary> SimServer::get_trait_defs() const {
+  TypedArray<Dictionary> out;
+  if (!contentLoaded_) return out;
+  for (int bit = 0; bit < orbitfall::kTraitCount; ++bit) {
+    const orbitfall::TraitDef& t = content_.damage.traits[bit];
+    Dictionary d;
+    d["bit"] = bit;
+    d["mask"] = static_cast<int64_t>(1u << bit);
+    d["id"] = to_gd(t.id);
+    d["name"] = to_gd(t.name);
+    d["cue"] = to_gd(t.cue);
+    d["effect"] = to_gd(t.effect);
+    d["easier_with"] = to_gd(t.easierWith);
+    PackedFloat32Array mults;
+    mults.resize(orbitfall::kDamageTypeCount);
+    for (int k = 0; k < orbitfall::kDamageTypeCount; ++k) mults[k] = t.mult[k];
+    d["mult"] = mults;
+    out.push_back(d);
+  }
+  return out;
+}
+
+PackedFloat32Array SimServer::get_shield_mults() const {
+  PackedFloat32Array out;
+  out.resize(orbitfall::kDamageTypeCount);
+  for (int t = 0; t < orbitfall::kDamageTypeCount; ++t)
+    out[t] = orbitfall::shieldMultiplier(content_, static_cast<orbitfall::DamageType>(t));
+  return out;
+}
+// --- end M2.3 ---
 
 namespace {
 Dictionary forecast_to_dict(const orbitfall::WaveForecast& f) {

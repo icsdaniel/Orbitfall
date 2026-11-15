@@ -61,7 +61,14 @@ constexpr Named<uint32_t> kTraits[] = {
     {"regrow", kTraitRegrow},     {"splitter", kTraitSplitter},
     {"heat_resistant", kTraitHeatResistant}, {"burrower", kTraitBurrower},
     {"orbiter", kTraitOrbiter},   {"healer", kTraitHealer},
-    {"bulwark", kTraitBulwark},   {"carrier", kTraitCarrier}};
+    {"bulwark", kTraitBulwark},   {"carrier", kTraitCarrier},
+    {"layered", kTraitLayered}};
+
+int trait_bit_index(uint32_t bit) {
+  int i = 0;
+  while (i < kTraitCount - 1 && (1u << i) != bit) ++i;
+  return i;
+}
 
 template <typename E, size_t N>
 bool lookup_named(const Named<E> (&table)[N], const std::string& name, E& out) {
@@ -255,6 +262,8 @@ struct Loader {
   ContentDB db;
   std::vector<std::string>& errors;
   bool haveRules = false;
+  bool haveDamage = false;
+  std::string damageWhere = "damage.json";
   std::vector<PendingEnemy> pendingEnemies;
   std::vector<PendingWaveSet> pendingWaveSets;
   std::vector<std::string> buildingWhere;
@@ -292,6 +301,46 @@ struct Loader {
     o.num("spawnRadius", r.spawnRadius, kPositive);
     o.angle("spawnJitterDeg", r.spawnJitter, Range{0.0, false, 180.0});
     o.num("surfaceTimeEaseSeconds", r.surfaceTimeEaseSeconds, kNonNeg);
+  }
+
+  // {"kinetic": 0.5, ...} -> out[type]. The floor is checked in resolve().
+  void read_type_mults(const Obj& parent, const char* key, float* out) {
+    const Obj m = parent.object(key);
+    if (!m.valid()) return;
+    const Value* raw = parent.get(key, mini_json::Type::Object);
+    for (const auto& kv : raw->object) {
+      DamageType type = DamageType::Kinetic;
+      if (!lookup_named(kDamageTypes, kv.first, type)) {
+        m.error("unknown damage type '" + kv.first + "'");
+        continue;
+      }
+      m.num(kv.first.c_str(), out[static_cast<int>(type)], kNonNeg);
+    }
+  }
+
+  // M2.3: content/damage.json, the soft-counter matrix and trait legend.
+  void read_damage(const Obj& o) {
+    haveDamage = true;
+    DamageRulesDef& d = db.damage;
+    if (o.has("shieldMult")) read_type_mults(o, "shieldMult", d.shieldMult);
+    const Obj traits = o.object("traits");
+    if (!traits.valid()) return;
+    const Value* raw = o.get("traits", mini_json::Type::Object);
+    for (const auto& kv : raw->object) {
+      uint32_t bit = 0;
+      if (!lookup_named(kTraits, kv.first, bit)) {
+        traits.error("unknown trait '" + kv.first + "'");
+        continue;
+      }
+      const Obj t = traits.object(kv.first.c_str());
+      if (!t.valid()) continue;
+      TraitDef& def = d.traits[trait_bit_index(bit)];
+      t.str("name", def.name);
+      t.str("cue", def.cue);
+      t.str("effect", def.effect);
+      if (t.has("easierWith")) t.str("easierWith", def.easierWith);
+      if (t.has("mult")) read_type_mults(t, "mult", def.mult);
+    }
   }
 
   void read_planet(const Obj& o, const std::string& stem) {
@@ -446,21 +495,13 @@ struct Loader {
         e.traits |= bit;
       }
     }
-    if (o.has("damageMult")) {
-      const Obj dm = o.object("damageMult");
-      if (dm.valid()) {
-        const Value* raw = o.get("damageMult", mini_json::Type::Object);
-        for (const auto& kv : raw->object) {
-          DamageType type = DamageType::Kinetic;
-          if (!lookup_named(kDamageTypes, kv.first, type)) {
-            dm.error("unknown damage type '" + kv.first + "'");
-            continue;
-          }
-          // Floor checked in resolve(), once rules are known.
-          dm.num(kv.first.c_str(), e.damageMult[static_cast<int>(type)], kNonNeg);
-        }
-      }
-    }
+    if (o.has("damageMult")) read_type_mults(o, "damageMult", e.damageMult);
+    if (e.layers > 1) e.traits |= kTraitLayered;
+    if (o.has("shield")) o.num("shield", e.shield, kPositive);
+    if ((e.traits & kTraitShielded) && !(e.shield > 0.0f))
+      o.field_error("traits", "'shielded' needs a 'shield' amount > 0");
+    if (e.shield > 0.0f) e.traits |= kTraitShielded;
+    if (o.has("hpBarSegments")) o.integer("hpBarSegments", e.hpBarSegments, Range{1.0, false, 64.0});
     if (e.behavior == EnemyBehavior::Eclipser) {
       const Obj h = o.object("hover");
       if (h.valid()) {
@@ -544,6 +585,24 @@ struct Loader {
       for (const FalloffPoint& pt : db.buildings[i].falloff)
         if (pt.mult < floor)
           err(buildingWhere[i], "'falloff': multiplier " + fmt(pt.mult) + floorMsg);
+    }
+
+    // M2.3: trait names always resolve, with or without a damage.json.
+    for (const auto& t : kTraits) {
+      TraitDef& def = db.damage.traits[trait_bit_index(t.value)];
+      def.id = t.name;
+      if (def.name.empty()) def.name = t.name;
+      for (const auto& dt : kDamageTypes) {
+        const float m = def.mult[static_cast<int>(dt.value)];
+        if (m < floor)
+          err(damageWhere, std::string("traits: ") + t.name + ": mult: '" + dt.name +
+                               "': multiplier " + fmt(m) + floorMsg);
+      }
+    }
+    for (const auto& dt : kDamageTypes) {
+      const float m = db.damage.shieldMult[static_cast<int>(dt.value)];
+      if (m < floor)
+        err(damageWhere, std::string("shieldMult: '") + dt.name + "': multiplier " + fmt(m) + floorMsg);
     }
 
     for (size_t i = 0; i < db.enemies.size(); ++i) {
@@ -638,10 +697,16 @@ void split_path(const std::string& path, std::string& category, std::string& ste
   category = dslash == std::string::npos ? dir : dir.substr(dslash + 1);
   const size_t dot = file.find_last_of('.');
   stem = dot == std::string::npos ? file : file.substr(0, dot);
-  display = file == "rules.json" ? file : category + "/" + file;
+  display = file == "rules.json" || file == "damage.json" ? file : category + "/" + file;
 }
 
 }  // namespace
+
+const char* damage_type_name(DamageType type) {
+  for (const auto& dt : kDamageTypes)
+    if (dt.value == type) return dt.name;
+  return "";
+}
 
 bool load_content_from_strings(const std::map<std::string, std::string>& files, ContentDB& out,
                                std::vector<std::string>& errors) {
@@ -664,6 +729,9 @@ bool load_content_from_strings(const std::map<std::string, std::string>& files, 
     if (display == "rules.json") {
       if (loader.haveRules) o.error("more than one rules.json");
       else loader.read_rules(o);
+    } else if (display == "damage.json") {
+      if (loader.haveDamage) o.error("more than one damage.json");
+      else loader.read_damage(o);
     } else if (category == "planets") {
       loader.read_planet(o, stem);
     } else if (category == "sun") {

@@ -23,8 +23,18 @@ bool canTarget(const TowerAim& aim, const BuildingDef& def, float ex, float ey);
 // Damage multiplier of the falloff curve at `t` = distance / range in [0, 1].
 float falloffAt(const BuildingDef& def, float t);
 
-// Final multiplier for a hit: falloff x the enemy's damage-type multiplier,
-// never below rules.minDamageMult (no hard counters, floor 0.25).
+// M2.3: the damage floor in force, rules.minDamageMult but never under 0.25.
+float damageFloor(const ContentDB& db);
+
+// M2.3 soft-counter matrix: the enemy's own damageMult for `type` times the
+// row of every trait it carries (content/damage.json), floored.
+float typeMultiplier(const ContentDB& db, const EnemyDef& enemy, DamageType type);
+
+// M2.3: multiplier on damage of `type` dealt to a shield, floored.
+float shieldMultiplier(const ContentDB& db, DamageType type);
+
+// Final multiplier for a hit: falloff x typeMultiplier(), never below
+// rules.minDamageMult (no hard counters, floor 0.25).
 float damageMultiplier(const ContentDB& db, const BuildingDef& source, const EnemyDef& enemy,
                        float rangeFraction);
 
@@ -33,6 +43,9 @@ float damageMultiplier(const ContentDB& db, const BuildingDef& source, const Ene
 // (a = old type, b = new type, x/y) per layer and, on the last one,
 // EnemyKilled (a = type, b = lane, x/y, value = bounty) plus the bounty.
 // The enemy is flagged dead, not removed. Returns true when it died.
-bool damageEnemy(World& world, uint32_t i, float damage);
+// M2.3: a shield absorbs first (damage x shieldMultiplier(type)); what is left
+// over after it breaks goes on to the hit points, and the entity loses its
+// Shielded trait bit so the glow ring disappears.
+bool damageEnemy(World& world, uint32_t i, float damage, DamageType type = DamageType::Kinetic);
 
 }  // namespace orbitfall

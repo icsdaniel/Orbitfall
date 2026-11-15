@@ -102,7 +102,7 @@ TEST_CASE("every shipped content file loads with zero errors") {
   const Files files = shipped_files();
   // Every file ended up as exactly one definition (rules.json is the +1).
   CHECK(files.size() == db.planets.size() + db.suns.size() + db.buildings.size() +
-                            db.enemies.size() + db.waveSets.size() + 1);
+                            db.enemies.size() + db.waveSets.size() + 2);
   CHECK(db.planets.size() == 1);
   CHECK(db.suns.size() == 1);
   CHECK(db.buildings.size() == 3);

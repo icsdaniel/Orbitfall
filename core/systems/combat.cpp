@@ -107,19 +107,49 @@ float falloffAt(const BuildingDef& def, float t) {
   return def.falloff[n - 1].mult;
 }
 
-float damageMultiplier(const ContentDB& db, const BuildingDef& source, const EnemyDef& enemy,
-                       float rangeFraction) {
-  const float mult = falloffAt(source, clampf(rangeFraction, 0.0f, 1.0f)) *
-                     enemy.damageMult[static_cast<int>(source.projectile.type)];
-  const float floor = db.rules.minDamageMult > kHardMinDamageMult ? db.rules.minDamageMult
-                                                                   : kHardMinDamageMult;
+float damageFloor(const ContentDB& db) {
+  return db.rules.minDamageMult > kHardMinDamageMult ? db.rules.minDamageMult : kHardMinDamageMult;
+}
+
+float typeMultiplier(const ContentDB& db, const EnemyDef& enemy, DamageType type) {
+  const int t = static_cast<int>(type);
+  float mult = enemy.damageMult[t];
+  for (int bit = 0; bit < kTraitCount; ++bit)
+    if (enemy.traits & (1u << bit)) mult *= db.damage.traits[bit].mult[t];
+  const float floor = damageFloor(db);
   return mult < floor ? floor : mult;
 }
 
-bool damageEnemy(World& world, uint32_t i, float damage) {
+float shieldMultiplier(const ContentDB& db, DamageType type) {
+  const float mult = db.damage.shieldMult[static_cast<int>(type)];
+  const float floor = damageFloor(db);
+  return mult < floor ? floor : mult;
+}
+
+float damageMultiplier(const ContentDB& db, const BuildingDef& source, const EnemyDef& enemy,
+                       float rangeFraction) {
+  const float mult = falloffAt(source, clampf(rangeFraction, 0.0f, 1.0f)) *
+                     typeMultiplier(db, enemy, source.projectile.type);
+  const float floor = damageFloor(db);
+  return mult < floor ? floor : mult;
+}
+
+bool damageEnemy(World& world, uint32_t i, float damage, DamageType type) {
   const ContentDB& db = *world.content;
   EnemyPool& e = world.enemies;
   if (i >= e.count || (e.flags[i] & kEnemyDead) || !(damage > 0.0f)) return false;
+  if (e.shield[i] > 0.0f) {
+    const float sm = shieldMultiplier(db, type);
+    const float onShield = damage * sm;
+    if (onShield < e.shield[i]) {
+      e.shield[i] -= onShield;
+      return false;
+    }
+    damage = (onShield - e.shield[i]) / sm;
+    e.shield[i] = 0.0f;
+    e.traits[i] &= ~static_cast<uint32_t>(kTraitShielded);
+    if (!(damage > 0.0f)) return false;
+  }
   // Bounded by the chain length; the loader rejects cyclic chains.
   for (;;) {
     e.hp[i] -= damage;
@@ -138,7 +168,11 @@ bool damageEnemy(World& world, uint32_t i, float damage) {
     world.emit(EventType::LayerPopped, e.type[i], def.popsInto, e.posX[i], e.posY[i]);
     e.type[i] = static_cast<uint16_t>(def.popsInto);
     e.hp[i] = layerHp(next);
-    e.traits[i] = next.traits;
+    // The shield belongs to the entity: it carries over to the next layer
+    // while that layer is Shielded too, and never comes back once broken.
+    if (!(next.traits & kTraitShielded)) e.shield[i] = 0.0f;
+    e.traits[i] = e.shield[i] > 0.0f ? next.traits
+                                     : next.traits & ~static_cast<uint32_t>(kTraitShielded);
     if (def.speed > 0.0f && next.speed != def.speed) {
       const float scale = next.speed / def.speed;
       e.velX[i] *= scale;
@@ -285,10 +319,12 @@ void collisions(World& world, float dt) {
         const float dx = e.posX[k] - hx, dy = e.posY[k] - hy;
         const float r = splash + def.size;  // the blast touches the enemy's disc
         if (dx * dx + dy * dy > r * r) return;
-        damageEnemy(world, k, damage * damageMultiplier(db, source, def, fraction));
+        damageEnemy(world, k, damage * damageMultiplier(db, source, def, fraction),
+                    source.projectile.type);
       });
     } else {
-      damageEnemy(world, hit, damage * damageMultiplier(db, source, db.enemies[e.type[hit]], fraction));
+      damageEnemy(world, hit, damage * damageMultiplier(db, source, db.enemies[e.type[hit]], fraction),
+                  source.projectile.type);
     }
     p.remove(i);
   }

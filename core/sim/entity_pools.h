@@ -15,6 +15,7 @@ namespace orbitfall {
   F(float, velY)                                               \
   F(float, hp)        /* hit points left on this layer */      \
   F(float, timer)     /* behaviour timer, seconds */           \
+  F(float, shield)    /* M2.3: shield points left */           \
   F(uint32_t, traits) /* trait bits */                         \
   F(uint16_t, type)   /* enemy definition index */             \
   F(uint16_t, flags)  /* EnemyFlag bits and behaviour state */ \
