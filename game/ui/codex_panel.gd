@@ -84,15 +84,14 @@ func _init() -> void:
 	var title: Label = UiKit.label("Codex", 30)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
-	var hint: Label = UiKit.label("shape = movement   colour = health   outline / badge = trait",
-		16, Palette.TEXT_DIM)
-	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hint.clip_text = true
-	head.add_child(hint)
 	var close_button: Button = UiKit.button("X", Vector2(56.0, 56.0), Color(0.30, 0.16, 0.18))
 	close_button.name = "Close"
 	close_button.pressed.connect(close)
 	head.add_child(close_button)
+	var hint: Label = UiKit.label("shape = movement   colour = health   outline / badge = trait",
+		16, Palette.TEXT_DIM)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(hint)
 	_scroll = ScrollContainer.new()
 	_scroll.custom_minimum_size = Vector2(900.0, 500.0)
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -169,7 +168,7 @@ func build(enemy_defs: Array[Dictionary], trait_defs: Array[Dictionary],
 ## Scroll area size for a viewport: never larger than the screen, whatever the
 ## aspect ratio (phone landscape, desktop window).
 static func fit_size(viewport: Vector2) -> Vector2:
-	return Vector2(clampf(viewport.x - 120.0, 320.0, 900.0), clampf(viewport.y - 170.0, 160.0, 500.0))
+	return Vector2(clampf(viewport.x - 120.0, 320.0, 900.0), clampf(viewport.y - 200.0, 130.0, 480.0))
 
 
 func open() -> void:

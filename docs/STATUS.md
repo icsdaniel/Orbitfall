@@ -26,6 +26,9 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [x] M1.12 Feel-gate fixes (Daniele, 2026-11-14): grab-to-spin rotation, bigger rotate buttons, two views Build/Watch with a timed glide, toggle button, auto-switch on wave start/end
 - [x] M1.13 Build view shows the whole planet and slot ring clear of the HUD (surfacePlanetFrac 0.32 -> 0.24)
 
+## M2 Depth of defence
+- [x] M2.3 Damage types and soft-counter matrix (`content/damage.json`), trait bitmask and shader cues, colour tiers, segmented HP bars with shield strip, enemy codex (`?` button or C). Screenshots in `docs/screenshots/m2.3/`
+
 ## Design track
 - [ ] D1 DECISIONS.md
 - [ ] D2 rotation toy
