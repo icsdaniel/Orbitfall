@@ -39,6 +39,9 @@ var _frame: int = 0
 ## Set before the node enters the tree (or pass --mock) to skip the real SimServer.
 var force_mock: bool = false
 var _demo: bool = false
+## --demo-placement: an M2.1 layout for screenshots (elevated towers; on the
+## mock also a wide building and an aura building, which M1 content lacks).
+var _demo_placement: bool = false
 var _start_band: String = ""
 var _tap_switched_view: bool = false
 var _select_arg: int = -1
@@ -68,6 +71,8 @@ func _ready() -> void:
 		bands.auto_switch = false  # screenshots and bots ask for a fixed view
 	if _demo:
 		_setup_demo()
+	if _demo_placement:
+		_setup_placement_demo()
 	if _play != "":
 		_autoplay = Autoplay.new()
 		_autoplay.setup(sim, _play)
@@ -438,6 +443,8 @@ func _parse_args() -> void:
 			force_mock = true
 		elif arg == "--demo":
 			_demo = true
+		elif arg == "--demo-placement":
+			_demo_placement = true
 		elif arg == "--debug":
 			_debug_arg = true
 		elif arg.begins_with("--seed="):
@@ -500,6 +507,44 @@ func _setup_demo() -> void:
 		elif _end_arg == "lost":
 			mock.debug_set_planet_hp(0.0)
 			mock.debug_set_phase(PHASE_LOST)
+	bands.update()
+
+
+## M2.1 screenshot layout, between waves: towers with towers above them, and on
+## the mock a 3-slot building and an aura building with its links.
+func _setup_placement_demo() -> void:
+	var mock: MockSimServer = sim as MockSimServer
+	if mock != null:
+		mock.debug_set_stardust(3000.0)
+	var panel: int = -1
+	var towers: Array[int] = []
+	for def: Dictionary in sim.get_building_defs():
+		if str(def.get("kind", "")) == "panel":
+			panel = int(def.get("index", -1))
+		elif str(def.get("kind", "")) == "tower":
+			towers.append(int(def.get("index", -1)))
+	if towers.is_empty():
+		return
+	var n: int = sim.get_slot_count()
+	for slot: int in [n - 2, n - 1, 0, 1]:
+		if panel >= 0:
+			sim.place_building(slot, panel, 0.0)
+	for k: int in 5:
+		sim.place_building(3 + k, towers[k % towers.size()], 0.0)
+	for slot: int in [3, 4, 6]:
+		sim.place_building(slot, towers[0], 0.0, 1)
+	if mock != null:
+		var amp: int = mock.debug_add_building("amplifier", {
+			"cost": 80.0, "color": "building.amplifier",
+			"auras": [{"stat": 0, "amount": 0.2, "radius": 2, "kinds": 1}]})
+		var wide: int = mock.debug_add_building("depot", {
+			"cost": 60.0, "footprint": 3, "layer": 0, "shape": 1, "color": "building.depot"})
+		planet_view.building_defs = sim.get_building_defs()
+		sim.place_building(8, amp, 0.0)
+		sim.place_building(11, wide, 0.0)
+		sim.place_building(12, towers[0], 0.0, 1)
+		sim.place_building(16, towers[towers.size() - 1], 0.0)
+	sim.step_ticks(2)
 	bands.update()
 
 
