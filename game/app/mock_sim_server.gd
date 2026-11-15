@@ -408,7 +408,7 @@ func get_enemy_defs() -> Array[Dictionary]:
 			"layers": e["layers"], "hp": e["hp"], "speed": e["speed"], "bounty": e["bounty"],
 			"traits": e["traits"], "hp_bar": e["hp_bar"], "pops_into": e["pops_into"],
 			"shield": e["shield"], "hp_bar_segments": e["hp_bar_segments"],
-			"land_damage": e["land_damage"], "damage_mult": _enemy_mults(e),
+			"land_damage": float(e["land_damage"]) * float(e["layers"]), "damage_mult": _enemy_mults(e),
 		})
 	return out
 

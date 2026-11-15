@@ -189,6 +189,8 @@ func _build_scene() -> void:
 	input_router.pinch_ended.connect(bands.settle)
 	input_router.view_step_requested.connect(bands.step)
 	input_router.debug_toggled.connect(hud.toggle_debug)
+	input_router.codex_toggled.connect(hud.toggle_codex)  # M2.3
+	input_router.codex_close_requested.connect(hud.codex.close)
 	bands.band_changed.connect(_on_band_changed)
 	hud.debug_toggle_requested.connect(hud.toggle_debug)
 	hud.restart_requested.connect(restart)

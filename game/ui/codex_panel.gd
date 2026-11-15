@@ -87,6 +87,7 @@ func _init() -> void:
 	var hint: Label = UiKit.label("shape = movement   colour = health   outline / badge = trait",
 		16, Palette.TEXT_DIM)
 	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hint.clip_text = true
 	head.add_child(hint)
 	var close_button: Button = UiKit.button("X", Vector2(56.0, 56.0), Color(0.30, 0.16, 0.18))
 	close_button.name = "Close"
@@ -165,7 +166,15 @@ func build(enemy_defs: Array[Dictionary], trait_defs: Array[Dictionary],
 		tower_text[id] = text
 
 
+## Scroll area size for a viewport: never larger than the screen, whatever the
+## aspect ratio (phone landscape, desktop window).
+static func fit_size(viewport: Vector2) -> Vector2:
+	return Vector2(clampf(viewport.x - 120.0, 320.0, 900.0), clampf(viewport.y - 170.0, 160.0, 500.0))
+
+
 func open() -> void:
+	if is_inside_tree():
+		_scroll.custom_minimum_size = fit_size(get_viewport_rect().size)
 	visible = true
 	_scroll.scroll_vertical = 0
 
