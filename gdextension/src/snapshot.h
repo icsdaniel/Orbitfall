@@ -74,6 +74,7 @@ struct Snapshot {
   std::vector<int32_t> siteOwners;     // anchor site of the building covering the slot, -1 = free
   std::vector<float> siteModifiers;    // 4 per site: range, fire rate, damage, income multipliers
   std::vector<int32_t> auraLinks;      // triples: source site, target site, stat
+  std::vector<int32_t> slotTiers;      // M2.2: kUpgradePaths entries per site, bought tiers
   // --- sun ---
   float sunBearing = 0.0f;
   float beamWidth = 0.0f;
@@ -120,6 +121,7 @@ inline void fill_snapshot(const orbitfall::World& w, const RunStatics& run, Snap
   s.slotFlags.resize(slots);
   uint32_t panels = 0, earning = 0;
   const size_t sites = w.siteCount();
+  s.slotTiers.resize(sites * static_cast<size_t>(kUpgradePaths));  // M2.2
   s.siteBuildings.resize(sites);
   s.siteFlags.resize(sites);
   s.siteOwners.resize(sites);
@@ -143,6 +145,8 @@ inline void fill_snapshot(const orbitfall::World& w, const RunStatics& run, Snap
     s.siteModifiers[4 * i + 1] = b.fireRateMult;
     s.siteModifiers[4 * i + 2] = b.damageMult;
     s.siteModifiers[4 * i + 3] = b.incomeMult;
+    for (int p = 0; p < kUpgradePaths; ++p)  // M2.2
+      s.slotTiers[i * static_cast<size_t>(kUpgradePaths) + static_cast<size_t>(p)] = b.tiers[p];
     if (b.type < 0 || w.content == nullptr) continue;
     if (w.content->buildings[static_cast<size_t>(b.type)].kind != BuildingKind::Panel) continue;
     ++panels;

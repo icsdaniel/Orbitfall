@@ -17,6 +17,7 @@ enum class CommandType : uint8_t {
   SetTargeting,   // slot, mode = targeting mode index
   StartWave,      // no payload
   SetTimeScale,   // value = scale (0 = pause), value2 = ease seconds (0 = instant)
+  UpgradeBuilding,  // M2.2: slot, id = upgrade path index; buys that path's next tier
   Count
 };
 
@@ -75,6 +76,12 @@ inline Command setTimeScale(uint32_t tick, float scale, float easeSeconds = 0.0f
   Command c = make(tick, CommandType::SetTimeScale);
   c.value = scale;
   c.value2 = easeSeconds;
+  return c;
+}
+inline Command upgradeBuilding(uint32_t tick, int32_t slot, int32_t path) {  // M2.2
+  Command c = make(tick, CommandType::UpgradeBuilding);
+  c.slot = slot;
+  c.id = path;
   return c;
 }
 }  // namespace cmd

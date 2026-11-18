@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "content/content_loader.h"
+#include "systems/upgrades.h"
 #include "third_party/json/mini_json.h"
 
 namespace orbitfall {
@@ -61,6 +62,12 @@ constexpr Named<SunPathType> kSunPathTypes[] = {{"constant_drift", SunPathType::
                                                 {"fixed", SunPathType::Fixed}};
 constexpr Named<EnemyBehavior> kEnemyBehaviors[] = {{"lane", EnemyBehavior::Lane},
                                                     {"eclipser", EnemyBehavior::Eclipser}};
+// M2.2: stats an upgrade tier may modify, and how.
+constexpr Named<UpgradeStat> kUpgradeStats[] = {
+    {"damage", UpgradeStat::Damage}, {"fireRate", UpgradeStat::FireRate},
+    {"range", UpgradeStat::Range},   {"arc", UpgradeStat::Arc},
+    {"splash", UpgradeStat::Splash}, {"income", UpgradeStat::Income}};
+constexpr Named<ModOp> kModOps[] = {{"add", ModOp::Add}, {"mul", ModOp::Mul}};
 constexpr Named<uint32_t> kTraits[] = {
     {"camo", kTraitCamo},         {"armored", kTraitArmored},
     {"shielded", kTraitShielded}, {"fast", kTraitFast},
@@ -308,6 +315,9 @@ struct Loader {
     o.angle("spawnJitterDeg", r.spawnJitter, Range{0.0, false, 180.0});
     o.num("surfaceTimeEaseSeconds", r.surfaceTimeEaseSeconds, kNonNeg);
     if (o.has("elevatedRangeBonus")) o.num("elevatedRangeBonus", r.elevatedRangeBonus, Range{-0.9, false, 10.0});
+    if (o.has("upgradeExclusiveTier"))  // M2.2
+      o.integer("upgradeExclusiveTier", r.upgradeExclusiveTier,
+                Range{0.0, false, static_cast<double>(kMaxUpgradeTiers)});
   }
 
   // {"kinetic": 0.5, ...} -> out[type]. The floor is checked in resolve().
@@ -439,6 +449,7 @@ struct Loader {
     } else if (kindOk && b.kind == BuildingKind::Panel) {
       o.num("panelRate", b.panelRate, kNonNeg);
     }
+    if (kindOk && o.has("paths")) read_paths(o, b);  // M2.2
     buildingWhere.push_back(o.where());
     db.buildings.push_back(std::move(b));
   }
@@ -473,6 +484,72 @@ struct Loader {
       }
       b.auras.push_back(aura);
     }
+  }
+
+  // M2.2 "paths": [{ "id", "name", "tiers": [{ "name", "cost", "mods":
+  // [{ "stat", "op": "add" | "mul", "value" }] }] }]. Optional; at most
+  // kUpgradePaths paths of 1..kMaxUpgradeTiers tiers. "arc" + "add" is in degrees.
+  void read_paths(const Obj& o, BuildingDef& b) {
+    const Value* paths = o.array("paths");
+    if (paths == nullptr) return;
+    if (paths->array.size() > static_cast<size_t>(kUpgradePaths)) {
+      o.field_error("paths", "at most " + std::to_string(kUpgradePaths) + " upgrade paths, got " +
+                                 std::to_string(paths->array.size()));
+      return;
+    }
+    for (size_t i = 0; i < paths->array.size(); ++i) {
+      const Obj po = o.element("paths", *paths, i);
+      if (!po.valid()) continue;
+      UpgradePathDef path;
+      po.str("id", path.id);
+      path.name = path.id;
+      if (po.has("name")) po.str("name", path.name);
+      for (const UpgradePathDef& other : b.paths)
+        if (!path.id.empty() && other.id == path.id)
+          po.field_error("id", "duplicate path id '" + path.id + "'");
+      if (const Value* tiers = po.array("tiers")) {
+        if (tiers->array.empty() || tiers->array.size() > static_cast<size_t>(kMaxUpgradeTiers))
+          po.field_error("tiers", "a path has 1 to " + std::to_string(kMaxUpgradeTiers) +
+                                      " tiers, got " + std::to_string(tiers->array.size()));
+        for (size_t t = 0; t < tiers->array.size() && t < static_cast<size_t>(kMaxUpgradeTiers); ++t) {
+          const Obj to = po.element("tiers", *tiers, t);
+          UpgradeTierDef tier;
+          if (to.valid()) {
+            tier.name = "Tier " + std::to_string(t + 1);
+            if (to.has("name")) to.str("name", tier.name);
+            to.num("cost", tier.cost, kNonNeg);
+            if (const Value* mods = to.array("mods")) {
+              if (mods->array.empty()) to.field_error("mods", "a tier needs at least one modifier");
+              for (size_t m = 0; m < mods->array.size(); ++m) {
+                const Obj mo = to.element("mods", *mods, m);
+                if (mo.valid()) read_modifier(mo, b, tier);
+              }
+            }
+          }
+          path.tiers.push_back(std::move(tier));  // kept even when invalid, so tier numbers stay aligned
+        }
+      }
+      b.paths.push_back(std::move(path));
+    }
+  }
+
+  void read_modifier(const Obj& mo, const BuildingDef& b, UpgradeTierDef& tier) {
+    StatModifier mod;
+    const bool statOk = mo.named("stat", kUpgradeStats, mod.stat);
+    const bool opOk = mo.named("op", kModOps, mod.op);
+    double value = 0.0;
+    if (!statOk || !opOk) return;
+    const bool forPanel = mod.stat == UpgradeStat::Income;
+    if (forPanel != (b.kind == BuildingKind::Panel)) {
+      mo.field_error("stat", forPanel ? "'income' only applies to panels"
+                                      : "only 'income' applies to panels");
+      return;
+    }
+    // A multiplier of 0 or less would switch the stat off: not an upgrade.
+    if (!mo.num("value", value, mod.op == ModOp::Mul ? kPositive : kAny)) return;
+    mod.value = mod.stat == UpgradeStat::Arc && mod.op == ModOp::Add ? deg2rad(value)
+                                                                      : static_cast<float>(value);
+    tier.mods.push_back(mod);
   }
 
   // "falloff": [[t, mult], ...] with t in 0..1 ascending. Optional: flat 1.
@@ -648,6 +725,25 @@ struct Loader {
       const float m = db.damage.shieldMult[static_cast<int>(dt.value)];
       if (m < floor)
         err(damageWhere, std::string("shieldMult: '") + dt.name + "': multiplier " + fmt(m) + floorMsg);
+    }
+
+    // M2.2: a tower must keep working at every tier combination.
+    for (size_t i = 0; i < db.buildings.size(); ++i) {
+      const BuildingDef& b = db.buildings[i];
+      if (b.kind != BuildingKind::Tower || b.paths.empty()) continue;
+      const size_t n0 = b.paths[0].tiers.size();
+      const size_t n1 = b.paths.size() > 1 ? b.paths[1].tiers.size() : 0;
+      bool bad = false;
+      for (size_t t0 = 0; t0 <= n0 && !bad; ++t0) {
+        for (size_t t1 = 0; t1 <= n1 && !bad; ++t1) {
+          const uint8_t tiers[kUpgradePaths] = {static_cast<uint8_t>(t0), static_cast<uint8_t>(t1)};
+          const BuildingStats s = effectiveStats(b, tiers);
+          if (s.range > 0.0f && s.fireRate > 0.0f && s.arc > 0.0f) continue;
+          err(buildingWhere[i], "'paths': range, fireRate and arc must stay above 0 (tiers " +
+                                    std::to_string(t0) + "/" + std::to_string(t1) + ")");
+          bad = true;
+        }
+      }
     }
 
     for (size_t i = 0; i < db.enemies.size(); ++i) {

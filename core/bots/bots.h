@@ -30,6 +30,10 @@
 //                         covered threat and turns to the better rotation.
 //   bank-and-drill        the sensible build, but banks stardust ahead of dim waves and buys
 //                         drills instead of panels (the drill part is a no-op until M2.7).
+// M2.2 bot:
+//   upgrader              sensible, but the stardust left after the wanted towers and panels
+//                         buys upgrade tiers (cheapest first, one path per tower) instead of
+//                         extra towers.
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -53,6 +57,7 @@ enum class Strategy {
   FaceTheThreat,
   Balance,
   BankAndDrill,
+  Upgrader,  // M2.2
   Count
 };
 
@@ -100,6 +105,7 @@ struct RunResult {
   uint32_t waveLeaks[kMaxWavesTracked][kMaxLanesTracked] = {};  // landings per wave (0-based) and lane
   uint32_t rejected = 0;
   uint32_t towers = 0, panels = 0;  // standing at the end
+  uint32_t upgrades = 0;            // upgrade tiers bought (M2.2)
   uint64_t hash = 0;
   // Per enemy definition (index into ContentDB::enemies), all lanes.
   std::vector<uint32_t> leaksByEnemy;

@@ -137,6 +137,27 @@ class SimServer : public Node {
   float get_surface_time_scale() const;
   float get_surface_time_ease_seconds() const;
 
+  // --- M2.2 upgrade paths (begin) ---
+  // Command: buys the next tier of `path` (0 or 1) for the building on `slot`.
+  // Emits BuildingUpgraded {a: slot, b: path, x: new tier, value: cost} or
+  // CommandRejected {a: slot, b: reason (4 Unaffordable with value = cost,
+  // 11 UpgradeBlocked), x: 8}.
+  void upgrade_building(int64_t slot, int64_t path);
+  // Bought tier per path of the building on `slot` ([0, 0] when empty or invalid).
+  PackedInt32Array get_slot_tiers(int64_t slot) const;
+  // Next-tier preview for one path of the building on `slot`; empty when the slot
+  // or path does not exist. Keys: path, id, name, tier, max_tier, cap (highest
+  // tier reachable given the other path), has_next, next_name, cost, affordable,
+  // can_upgrade, locked (capped by the other path), before / after (stats
+  // dictionaries: damage, fire_rate, range, arc (rad), splash, income) and
+  // changes ([{stat, before, after}] for the stats the tier changes).
+  Dictionary get_upgrade_preview(int64_t slot, int64_t path) const;
+  // Everything the upgrade UI needs for `slot` in one call; empty when the slot
+  // is empty. Keys: slot, building, tiers, stats, spent (on upgrades),
+  // sell_refund, paths (one get_upgrade_preview dictionary per path).
+  Dictionary get_slot_upgrades(int64_t slot) const;
+  // --- M2.2 upgrade paths (end) ---
+
   // --- extras (not in CONTRACT.md) ---
   // Colours for palette keys that are not colour tiers ("enemy.eclipser"); default white.
   void set_palette(const Dictionary& colors);

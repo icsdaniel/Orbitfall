@@ -4,6 +4,19 @@
   "projectile": { "kind": "shell", "speed": 600, "damage": 3, "type": "explosive", "splash": 28 },
   "falloff": [[0, 1], [1, 1]],
   "targeting": ["first", "strong", "close"],
-  "paths": [], "active": null,
+  "paths": [
+    { "id": "blast", "name": "Big Blast", "tiers": [
+      { "name": "Wide Shells", "cost": 65, "mods": [{ "stat": "splash", "op": "mul", "value": 1.25 }] },
+      { "name": "Dense Charge", "cost": 100, "mods": [{ "stat": "damage", "op": "add", "value": 1 }] },
+      { "name": "Cluster Shells", "cost": 155, "mods": [{ "stat": "splash", "op": "mul", "value": 1.3 }, { "stat": "damage", "op": "add", "value": 1 }] },
+      { "name": "Sunburst Shells", "cost": 240, "mods": [{ "stat": "splash", "op": "mul", "value": 1.3 }, { "stat": "damage", "op": "mul", "value": 1.5 }] }
+    ] },
+    { "id": "loader", "name": "Autoloader", "tiers": [
+      { "name": "Quick Breech", "cost": 65, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.25 }] },
+      { "name": "Long Rifling", "cost": 100, "mods": [{ "stat": "range", "op": "mul", "value": 1.15 }] },
+      { "name": "Drum Magazine", "cost": 155, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.4 }] },
+      { "name": "Battery Fire", "cost": 240, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.5 }, { "stat": "arc", "op": "add", "value": 10 }] }
+    ] }
+  ], "active": null,
   "visual": { "shape": "square", "color": "tower.cannon" }
 }

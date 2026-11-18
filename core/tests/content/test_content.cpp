@@ -11,6 +11,7 @@
 #include "content/content_loader.h"
 #include "doctest/doctest.h"
 #include "json/mini_json.h"
+#include "systems/upgrades.h"
 
 #ifndef ORBITFALL_CONTENT_DIR
 #define ORBITFALL_CONTENT_DIR "../content"
@@ -635,6 +636,139 @@ TEST_CASE("mini_json parses the JSON grammar and rejects junk") {
   }
   std::string deep(200, '[');
   CHECK_FALSE(mini_json::parse(deep, v, err));
+}
+
+// --- M2.2 upgrade paths ---
+
+TEST_CASE("M2.2: gatling, cannon and solar panel each ship 2 paths x 4 tiers") {
+  const ContentDB db = shipped_db();
+  CHECK(db.rules.upgradeExclusiveTier == 2);
+  const double scale[4] = {0.6, 0.9, 1.4, 2.2};  // orchestrator default: tier cost / building cost
+  for (const char* id : {"gatling", "cannon", "solar_panel"}) {
+    CAPTURE(id);
+    REQUIRE(db.building_index(id) != kNoIndex);
+    const BuildingDef& b = db.buildings[static_cast<size_t>(db.building_index(id))];
+    REQUIRE(b.paths.size() == 2);
+    CHECK(b.paths[0].id != b.paths[1].id);
+    for (const UpgradePathDef& path : b.paths) {
+      CAPTURE(path.id);
+      CHECK_FALSE(path.id.empty());
+      CHECK_FALSE(path.name.empty());
+      REQUIRE(path.tiers.size() == 4);
+      for (size_t t = 0; t < 4; ++t) {
+        CAPTURE(t);
+        const UpgradeTierDef& tier = path.tiers[t];
+        CHECK_FALSE(tier.name.empty());
+        CHECK_FALSE(tier.mods.empty());
+        CHECK(tier.cost == doctest::Approx(b.cost * scale[t]).epsilon(0.1));
+        if (t > 0) CHECK(tier.cost > path.tiers[t - 1].cost);
+      }
+    }
+    // Every tier makes at least one stat better and none worse, whatever the other path holds.
+    for (int path = 0; path < 2; ++path) {
+      for (uint8_t other = 0; other <= 2; ++other) {
+        for (uint8_t t = 0; t < 4; ++t) {
+          uint8_t before[kUpgradePaths] = {other, other}, after[kUpgradePaths] = {other, other};
+          before[path] = t;
+          after[path] = static_cast<uint8_t>(t + 1);
+          const BuildingStats a = effectiveStats(b, before), z = effectiveStats(b, after);
+          bool better = false;
+          for (int k = 0; k < kUpgradeStatCount; ++k) {
+            const UpgradeStat stat = static_cast<UpgradeStat>(k);
+            CHECK(z.get(stat) >= a.get(stat));
+            better = better || z.get(stat) > a.get(stat);
+          }
+          CHECK(better);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("M2.2: shipped upgrade numbers") {
+  const ContentDB db = shipped_db();
+  const BuildingDef& g = db.buildings[static_cast<size_t>(db.building_index("gatling"))];
+  CHECK(g.paths[0].id == "rapid");
+  CHECK(g.paths[0].name == "Rapid Fire");
+  CHECK(g.paths[0].tiers[0].name == "Oiled Feed");
+  CHECK(g.paths[0].tiers[0].cost == doctest::Approx(35));
+  REQUIRE(g.paths[0].tiers[3].mods.size() == 2);
+  CHECK(g.paths[0].tiers[3].mods[1].stat == UpgradeStat::Arc);
+  CHECK(g.paths[0].tiers[3].mods[1].op == ModOp::Add);
+  CHECK(g.paths[0].tiers[3].mods[1].value == doctest::Approx(10 * kDeg));  // degrees in JSON
+  const uint8_t rapid[kUpgradePaths] = {4, 2};
+  BuildingStats s = effectiveStats(g, rapid);
+  CHECK(s.fireRate == doctest::Approx(5 * 1.3 * 1.3 * 1.35 * 1.4));
+  CHECK(s.arc == doctest::Approx(60 * kDeg));
+  CHECK(s.range == doctest::Approx(350 * 1.15));
+  const uint8_t reach[kUpgradePaths] = {2, 4};
+  s = effectiveStats(g, reach);
+  CHECK(s.damage == doctest::Approx(3));
+  CHECK(s.range == doctest::Approx(350 * 1.15 * 1.1 * 1.2));
+  CHECK(s.arc == doctest::Approx(65 * kDeg));
+
+  const BuildingDef& c = db.buildings[static_cast<size_t>(db.building_index("cannon"))];
+  const uint8_t blast[kUpgradePaths] = {4, 0};
+  s = effectiveStats(c, blast);
+  CHECK(s.damage == doctest::Approx((3 + 2) * 1.5));
+  CHECK(s.splash == doctest::Approx(28 * 1.25 * 1.3 * 1.3));
+  const uint8_t loader[kUpgradePaths] = {0, 4};
+  s = effectiveStats(c, loader);
+  CHECK(s.fireRate == doctest::Approx(0.8 * 1.25 * 1.4 * 1.5));
+  CHECK(s.range == doctest::Approx(450 * 1.15));
+  CHECK(upgradeSpent(c, loader) == doctest::Approx(65 + 100 + 155 + 240));
+
+  const BuildingDef& p = db.buildings[static_cast<size_t>(db.building_index("solar_panel"))];
+  const uint8_t eff[kUpgradePaths] = {4, 2};
+  CHECK(effectiveStats(p, eff).income == doctest::Approx((3 + 1.25) * 1.25 * 1.25 * 1.3 * 1.4));
+  const uint8_t arr[kUpgradePaths] = {2, 4};
+  CHECK(effectiveStats(p, arr).income == doctest::Approx((3 + 3.75) * 1.25 * 1.25));
+}
+
+TEST_CASE("M2.2: paths are optional; a building without them is not upgradable") {
+  Files files = shipped_files();
+  edit(files, "buildings/gatling.json", "\"paths\": [", "\"notPaths\": [");
+  edit(files, "rules.json", ",\n  \"upgradeExclusiveTier\": 2", "");
+  ContentDB db;
+  std::vector<std::string> errors;
+  REQUIRE_MESSAGE(load_content_from_strings(files, db, errors), joined(errors));
+  CHECK(db.buildings[static_cast<size_t>(db.building_index("gatling"))].paths.empty());
+  CHECK(db.buildings[static_cast<size_t>(db.building_index("cannon"))].paths.size() == 2);
+  CHECK(db.rules.upgradeExclusiveTier == 2);  // the default
+}
+
+TEST_CASE("M2.2: rejects bad upgrade paths") {
+  const std::string g = "buildings/gatling.json";
+  const std::string oiled = "{ \"stat\": \"fireRate\", \"op\": \"mul\", \"value\": 1.3 }] },\n      { \"name\": \"Twin";
+  expect_rejected(g, oiled, "{ \"stat\": \"luck\", \"op\": \"mul\", \"value\": 1.3 }] },\n      { \"name\": \"Twin",
+                  "unknown value 'luck'");
+  expect_rejected(g, oiled, "{ \"stat\": \"fireRate\", \"op\": \"pow\", \"value\": 1.3 }] },\n      { \"name\": \"Twin",
+                  "unknown value 'pow'");
+  expect_rejected(g, oiled, "{ \"stat\": \"fireRate\", \"op\": \"mul\", \"value\": 0 }] },\n      { \"name\": \"Twin",
+                  "must be > 0");
+  expect_rejected(g, oiled, "{ \"stat\": \"fireRate\", \"op\": \"mul\" }] },\n      { \"name\": \"Twin",
+                  "missing field 'value'");
+  expect_rejected(g, oiled, "{ \"stat\": \"income\", \"op\": \"mul\", \"value\": 1.3 }] },\n      { \"name\": \"Twin",
+                  "only applies to panels");
+  expect_rejected("buildings/solar_panel.json", "{ \"stat\": \"income\", \"op\": \"add\", \"value\": 0.5 }",
+                  "{ \"stat\": \"range\", \"op\": \"add\", \"value\": 0.5 }", "only 'income' applies to panels");
+  expect_rejected(g, "\"name\": \"Oiled Feed\", \"cost\": 35", "\"name\": \"Oiled Feed\", \"cost\": -35",
+                  "must not be negative");
+  expect_rejected(g, "\"name\": \"Oiled Feed\", \"cost\": 35", "\"name\": \"Oiled Feed\"",
+                  "missing field 'cost'");
+  expect_rejected(g, "\"name\": \"Long Barrel\", \"cost\": 35, \"mods\": [{ \"stat\": \"range\", \"op\": \"mul\", \"value\": 1.15 }]",
+                  "\"name\": \"Long Barrel\", \"cost\": 35, \"mods\": []", "at least one modifier");
+  // A tier that would switch the tower off.
+  expect_rejected(g, "\"name\": \"Long Barrel\", \"cost\": 35, \"mods\": [{ \"stat\": \"range\", \"op\": \"mul\", \"value\": 1.15 }]",
+                  "\"name\": \"Long Barrel\", \"cost\": 35, \"mods\": [{ \"stat\": \"range\", \"op\": \"add\", \"value\": -9999 }]",
+                  "must stay above 0");
+  expect_rejected(g, "\"id\": \"reach\"", "\"id\": \"rapid\"", "duplicate path id");
+  const std::string extraTier = "{ \"name\": \"X\", \"cost\": 1, \"mods\": [{ \"stat\": \"damage\", \"op\": \"add\", \"value\": 1 }] }";
+  expect_rejected(g, "\"paths\": [",
+                  "\"paths\": [{ \"id\": \"third\", \"tiers\": [" + extraTier + "] },", "at most 2 upgrade paths");
+  expect_rejected(g, "{ \"name\": \"Oiled Feed\"", extraTier + ", { \"name\": \"Oiled Feed\"", "1 to 4 tiers");
+  expect_rejected("rules.json", "\"upgradeExclusiveTier\": 2", "\"upgradeExclusiveTier\": 9", "must be <= 4");
+  expect_rejected("rules.json", "\"upgradeExclusiveTier\": 2", "\"upgradeExclusiveTier\": 1.5", "whole number");
 }
 
 }  // TEST_SUITE

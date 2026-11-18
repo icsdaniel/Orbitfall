@@ -30,7 +30,8 @@ const ContentDB& shippedContent() {
   return db;
 }
 
-const Strategy kAll[] = {Strategy::Never, Strategy::Towers, Strategy::Chaser, Strategy::Sensible};
+const Strategy kAll[] = {Strategy::Never, Strategy::Towers, Strategy::Chaser, Strategy::Sensible,
+                         Strategy::Upgrader};
 
 }  // namespace
 
@@ -42,14 +43,14 @@ TEST_CASE("balance report" * doctest::skip()) {
     REQUIRE(load_content(dir, other, errors));
     db = &other;
   }
-  std::printf("\n| Strategy | Result | Waves survived | HP left | Stardust earned (panels) | Leaks A / B | Wave time | Towers / panels |\n");
-  std::printf("|---|---|---|---|---|---|---|---|\n");
+  std::printf("\n| Strategy | Result | Waves survived | HP left | Stardust earned (panels) | Leaks A / B | Wave time | Towers / panels | Upgrade tiers |\n");
+  std::printf("|---|---|---|---|---|---|---|---|---|\n");
   for (Strategy s : kAll) {
     const RunResult r = play(*db, s);
-    std::printf("| %s | %s | %u | %.0f / %.0f | %.0f (%.0f) | %u / %u | %.0f s | %u / %u |\n", strategyName(s),
+    std::printf("| %s | %s | %u | %.0f / %.0f | %.0f (%.0f) | %u / %u | %.0f s | %u / %u | %u |\n", strategyName(s),
                 r.phase == Phase::Won ? "won" : (r.phase == Phase::Lost ? "lost" : "?"), r.wavesCleared,
                 r.hp, r.hpMax, r.earned, r.fromPanels, r.leaks[0], r.leaks[1], r.waveSeconds, r.towers,
-                r.panels);
+                r.panels, r.upgrades);
   }
   if (std::getenv("ORBITFALL_BALANCE_TRACE")) {
     for (Strategy s : kAll) {
@@ -120,6 +121,19 @@ TEST_CASE("balance: a sensible strategy wins wave 8 with HP to spare in 3 to 4 m
     CHECK(r.waveSeconds <= 250.0f);
     CHECK(r.fromPanels > 2.0f * (r.earned - r.fromPanels));  // sunlight is the economy
     CHECK(r.rejected == 0);
+  }
+}
+
+TEST_CASE("balance: upgrades are a real alternative to extra towers, not a must-have (M2.2)") {
+  for (uint32_t seed = 1; seed <= 6; ++seed) {
+    CAPTURE(seed);
+    const RunResult up = play(shippedContent(), Strategy::Upgrader, seed);
+    const RunResult wide = play(shippedContent(), Strategy::Sensible, seed);
+    CHECK(up.phase == Phase::Won);  // fewer towers, upgraded, also hold
+    CHECK(up.upgrades >= 4);
+    CHECK(up.towers < wide.towers);
+    CHECK(up.rejected == 0);        // the bot's preview matches the command
+    CHECK(up.hp <= wide.hp);        // and do not beat building wide
   }
 }
 

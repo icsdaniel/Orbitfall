@@ -6,5 +6,6 @@
   "spawnRadius": 600,
   "spawnJitterDeg": 8,
   "surfaceTimeEaseSeconds": 0.3,
-  "elevatedRangeBonus": 0.15
+  "elevatedRangeBonus": 0.15,
+  "upgradeExclusiveTier": 2
 }

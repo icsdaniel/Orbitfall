@@ -160,6 +160,7 @@ uint64_t hashWorld(const World& world) {
     h.add(b.aimOffset);
     h.add(b.cooldown);
     h.add(b.anchor);
+    for (const uint8_t t : b.tiers) h.add(t);  // M2.2
   }
   h.array(world.rng.s, 4);
   h.add(world.commandsApplied);

@@ -67,6 +67,7 @@ struct BuildingSlot {
   float fireRateMult = 1.0f;
   float damageMult = 1.0f;
   float incomeMult = 1.0f;
+  uint8_t tiers[kUpgradePaths] = {0, 0};  // M2.2: bought tiers per upgrade path (anchors)
 };
 
 // One adjacency link (M2.1), for the Build view: `source` buffs `target`.

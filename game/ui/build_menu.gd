@@ -9,6 +9,8 @@ signal build_requested(building: int)
 signal sell_requested
 ## M2.1: "Build above" on a ground building whose elevated slot is free.
 signal build_above_requested
+## M2.2: buy the next tier of an upgrade path of the selected building.
+signal upgrade_requested(path: int)
 signal closed
 
 var slot: int = -1
@@ -23,6 +25,9 @@ var _list: VBoxContainer
 var _build: Button
 var _sell: Button
 var _above: Button
+## M2.2: upgrade paths of a built tower (Build view only).
+var upgrades: UpgradePanel
+var _upgrades_allowed: bool = true
 var _buttons: Dictionary[int, Button] = {}
 var _costs: Dictionary[int, float] = {}
 var _names: Dictionary[int, String] = {}
@@ -57,14 +62,27 @@ func _init() -> void:
 	var phone: bool = OS.has_feature("mobile") or OS.has_feature("web_android") \
 		or OS.has_feature("web_ios")
 	var above_text: String = "Build above" if phone else "Build above (W)"
-	_above = UiKit.button(above_text, Vector2(230.0, 68.0), Color(0.14, 0.36, 0.42))
+	_above = UiKit.button(above_text, Vector2(150.0, 62.0), Color(0.14, 0.36, 0.42))
 	_above.name = "BuildAbove"
+	_above.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_above.pressed.connect(_on_above_pressed)
-	_box.add_child(_above)
-	_sell = UiKit.button("Sell", Vector2(230.0, 68.0), Color(0.45, 0.20, 0.16))
+	upgrades = UpgradePanel.new()
+	upgrades.name = "Upgrades"
+	upgrades.visible = false
+	upgrades.upgrade_requested.connect(func(path: int) -> void: upgrade_requested.emit(path))
+	_box.add_child(upgrades)
+	_sell = UiKit.button("Sell", Vector2(150.0, 62.0), Color(0.45, 0.20, 0.16))
 	_sell.name = "Sell"
+	_sell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_sell.pressed.connect(_on_sell_pressed)
-	_box.add_child(_sell)
+	# M2.1 + M2.2: "Build above" and "Sell" share one row under the upgrade paths,
+	# so a built tower's menu fits a landscape phone.
+	var actions: HBoxContainer = HBoxContainer.new()
+	actions.name = "Actions"
+	actions.add_theme_constant_override(&"separation", 8)
+	actions.add_child(_above)
+	actions.add_child(_sell)
+	_box.add_child(actions)
 
 
 func is_open() -> bool:
@@ -121,7 +139,9 @@ func open_empty(
 	_build.visible = true
 	_sell.visible = false
 	_above.visible = false
+	upgrades.visible = false
 	visible = true
+	refit()
 	previewed = -1
 	if _buttons.has(preferred):
 		_set_preview(preferred)
@@ -144,7 +164,7 @@ func open_building(
 	_title.text = str(def.get("name", def.get("id", "Building")))
 	var light: String = "shaded" if shaded else ("in the beam" if lit else "in the dark")
 	var where: String = "Above slot %d" if layer > 0 else "Slot %d"
-	_info.text = "%s, %s\nCost %d" % [
+	_info.text = "%s, %s   Cost %d" % [
 		where % for_slot, light, roundi(float(def.get("cost", 0.0)))]
 	var notes: Array = extra.get("notes", [])
 	for note: Variant in notes:
@@ -160,7 +180,44 @@ func open_building(
 	_sell.disabled = false
 	_sell.modulate = Color(1.0, 1.0, 1.0, 0.55) if carrying else Color.WHITE
 	_above.visible = bool(extra.get("can_build_above", false))
+	_sell.text = "Sell"
+	upgrades.show_upgrades({})
+	upgrades.visible = false
 	visible = true
+	refit()
+
+
+## M2.2: fills the upgrade paths of the open building from `get_slot_upgrades`.
+## `build_view` false (Watch view) hides them: upgrading is a Build-view action.
+func show_upgrades(info: Dictionary, build_view: bool) -> void:
+	if not visible or not _sell.visible:
+		return
+	_upgrades_allowed = build_view
+	upgrades.show_upgrades(info)
+	upgrades.visible = build_view and not info.is_empty()
+	if info.has("sell_refund"):
+		_sell.text = "Sell  +%d" % floori(float(info["sell_refund"]))
+	refit()
+
+
+## Shrinks the menu back to its content around the point the HUD pinned it to, so
+## it grows away from the screen edge it hugs (`reset_size` would grow right/down).
+func refit() -> void:
+	var x: float = _pin_point(offset_left, offset_right, grow_horizontal)
+	var y: float = _pin_point(offset_top, offset_bottom, grow_vertical)
+	offset_left = x
+	offset_right = x
+	offset_top = y
+	offset_bottom = y
+
+
+static func _pin_point(begin: float, end: float, grow: Control.GrowDirection) -> float:
+	match grow:
+		Control.GROW_DIRECTION_BEGIN:
+			return end
+		Control.GROW_DIRECTION_END:
+			return begin
+	return (begin + end) * 0.5
 
 
 func close() -> void:

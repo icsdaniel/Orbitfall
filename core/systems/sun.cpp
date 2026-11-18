@@ -7,6 +7,7 @@
 #include "systems/enemies.h"
 #include "systems/shadows.h"
 #include "systems/systems.h"
+#include "systems/upgrades.h"
 
 namespace orbitfall {
 namespace {
@@ -96,7 +97,9 @@ void income(World& world, float dt) {
     const BuildingSlot& b = world.site(s);
     if (b.type < 0 || (b.flags & (kSlotLit | kSlotShaded)) != kSlotLit) continue;
     const BuildingDef& def = world.content->buildings[static_cast<size_t>(b.type)];
-    if (def.kind == BuildingKind::Panel) rate += def.panelRate * world.beamStrength * b.incomeMult;
+    // M2.2 upgrades, then M2.1 elevated/aura multiplier.
+    if (def.kind == BuildingKind::Panel)
+      rate += effectiveStats(def, b.tiers).income * world.beamStrength * b.incomeMult;
   }
   world.incomePerSecond = rate;
   if (!world.running() || !(rate > 0.0f) || !(dt > 0.0f)) return;
