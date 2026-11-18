@@ -4,6 +4,7 @@
 
 #include "sim/world.h"
 #include "systems/enemies.h"
+#include "systems/falling.h"
 
 namespace orbitfall {
 namespace {
@@ -77,6 +78,28 @@ uint32_t fillProjectileRenderBuffer(const World& world, float* out, uint32_t max
     o[13] = -1.0f;
     o[14] = 0.0f;
     o[15] = static_cast<float>(kind);
+  }
+  return n;
+}
+
+uint32_t fillFallingRenderBuffer(const World& world, float* out, uint32_t maxInstances,
+                                 const RenderParams& params) {
+  if (world.content == nullptr || out == nullptr) return 0;
+  const ContentDB& db = *world.content;
+  const FallingPool& f = world.falling;
+  const float back = backstep(world, params.alpha);
+  const uint32_t n = f.count < maxInstances ? f.count : maxInstances;
+  for (uint32_t i = 0; i < n; ++i) {
+    const FallingDef& def = db.falling[f.type[i]];
+    float* o = out + static_cast<size_t>(i) * kRenderFloatsPerInstance;
+    writeTransform(o, f.posX[i] - f.velX[i] * back, f.posY[i] - f.velY[i] * back, f.velX[i], f.velY[i],
+                   def.size);
+    const float* color = params.fallingColors ? params.fallingColors + 4u * f.type[i] : nullptr;
+    for (int c = 0; c < 4; ++c) o[8 + c] = color ? color[c] : 1.0f;
+    o[12] = static_cast<float>(static_cast<int>(def.visual.shape));
+    o[13] = static_cast<float>(def.visual.colorTier);
+    o[14] = 0.0f;
+    o[15] = fallingEta(world, i);
   }
   return n;
 }

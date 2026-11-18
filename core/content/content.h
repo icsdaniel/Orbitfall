@@ -21,7 +21,8 @@ inline constexpr float kMaxAimOffsetDeg = 60.0f;
 
 enum class Shape : uint8_t { Circle, Triangle, Square, Hexagon, Star, Diamond, Disc };
 // Support (M2.1): a building that neither shoots nor earns, e.g. an aura source.
-enum class BuildingKind : uint8_t { Tower, Panel, Support, Count };
+// Shield (M2.10): protects an arc of sky from falling objects.
+enum class BuildingKind : uint8_t { Tower, Panel, Support, Shield, Count };
 // Where a building may stand (M2.1): the ground ring only, the elevated ring
 // only, or either.
 enum class BuildingLayer : uint8_t { Ground, Elevated, Any };
@@ -31,7 +32,7 @@ enum class ProjectileKind : uint8_t { Dot, Shell };
 enum class DamageType : uint8_t { Kinetic, Explosive, Energy, Cryo, Emp, Pierce, Count };
 enum class TargetingMode : uint8_t { First, Strong, Close };
 enum class SunPathType : uint8_t { ConstantDrift, Fixed };
-enum class EnemyBehavior : uint8_t { Lane, Eclipser };
+enum class EnemyBehavior : uint8_t { Lane, Eclipser, Bomber };  // Bomber: M2.10
 
 inline constexpr int kDamageTypeCount = static_cast<int>(DamageType::Count);
 // M2.3: the JSON name of a damage type ("kinetic"), for the codex and UI.
@@ -179,6 +180,20 @@ struct UpgradePathDef {
   std::vector<UpgradeTierDef> tiers;  // tiers[0] is tier 1
 };
 
+// M2.10 Shield building (PLAN §5.4b): a barrier over an arc of the sky above
+// its slot. Falling objects that come down inside the arc and under the dome
+// are absorbed and drain `energy`; at 0 the shield goes offline for
+// `rechargeSeconds` (charged lightChargeMult times faster while the slot is lit
+// and unshaded), then comes back full.
+struct ShieldDef {
+  float width = 0.0f;            // rad, FULL width of the protected arc (centred on the slot)
+  float height = 0.0f;           // world units above the surface: the dome radius is R + height
+  float energy = 0.0f;           // energy when full; an absorbed object costs its damage
+  float rechargeSeconds = 0.0f;  // offline time at 1x charge rate
+  float regenPerSec = 0.0f;      // energy back per second while online (also light-charged)
+  float upkeepPerSec = 0.0f;     // stardust per second while online (DESIGN Q23; default 0 = off)
+};
+
 struct BuildingDef {
   std::string id;
   BuildingKind kind = BuildingKind::Tower;
@@ -199,7 +214,29 @@ struct BuildingDef {
   // Panels only.
   float panelRate = 0.0f;  // stardust per second at beamStrength 1
   std::vector<UpgradePathDef> paths;  // M2.2: empty = not upgradable
+  // Shields only (M2.10).
+  ShieldDef shield;
   VisualDef visual;
+};
+
+// M2.10 falling object (content/falling/*.json): meteor, bomb. Falls straight
+// down a fixed world bearing at `speed`; on reaching the surface it subtracts
+// `damage` planet HP (buildings are never damaged).
+struct FallingDef {
+  std::string id;
+  float damage = 0.0f;
+  float speed = 0.0f;        // world units per second, radial
+  float size = 0.0f;         // radius
+  float spawnRadius = 0.0f;  // distance wave volleys appear at (0: only dropped, e.g. bombs)
+  VisualDef visual;
+};
+
+struct BomberDef {  // EnemyBehavior::Bomber parameters (M2.10)
+  float orbitRadius = 0.0f;  // it stops its approach here and circles the planet
+  float orbitSpeed = 0.0f;   // rad/s around the planet (sign = direction)
+  float dropSeconds = 0.0f;  // one bomb every this many seconds while circling
+  int bombs = 0;             // then it dives at the planet
+  int bomb = kNoIndex;       // index into ContentDB::falling
 };
 
 struct HoverDef {  // EnemyBehavior::Eclipser parameters
@@ -231,6 +268,8 @@ struct EnemyDef {
   int popsInto = kNoIndex;  // enemy index this becomes when a layer pops
   bool hasHover = false;
   HoverDef hover;
+  bool hasBomber = false;  // M2.10
+  BomberDef bomber;
   float damageMult[kDamageTypeCount] = {1, 1, 1, 1, 1, 1};
   VisualDef visual;
 
@@ -246,6 +285,17 @@ struct SpawnDef {
   int count = 0;
 };
 
+// M2.10: a volley of falling objects in a wave: `count` objects released
+// evenly from startSeconds over `seconds`, each on bearing +- spread (seeded).
+struct VolleyDef {
+  int falling = kNoIndex;  // index into ContentDB::falling
+  float bearing = 0.0f;    // rad, world
+  float spread = 0.0f;     // rad, +- around the bearing
+  int count = 0;
+  float startSeconds = 0.0f;
+  float seconds = 0.0f;
+};
+
 struct ForecastDef {
   int exactAhead = 1;
   int iconsAhead = 3;
@@ -256,6 +306,7 @@ struct WaveDef {
   float lightMult = 1.0f;
   float spawnSeconds = 0.0f;  // spawns are spread over this long
   std::vector<SpawnDef> spawns;
+  std::vector<VolleyDef> volleys;  // M2.10 ("falling" in JSON)
   ForecastDef forecast;
 };
 
@@ -279,6 +330,7 @@ struct RulesDef {  // content/rules.json: global tunables
   // M2.2: once any path of a building is above this tier, every other path
   // is capped at it (default 2: one path may reach the top, the other stops at 2).
   int upgradeExclusiveTier = 2;
+  float fallingWarnSeconds = 3.0f;  // M2.10: falling objects are telegraphed this long before impact
 };
 
 struct ContentDB {
@@ -289,6 +341,7 @@ struct ContentDB {
   std::vector<BuildingDef> buildings;
   std::vector<EnemyDef> enemies;
   std::vector<WaveSetDef> waveSets;
+  std::vector<FallingDef> falling;  // M2.10
 
   // id -> index, kNoIndex when unknown.
   int planet_index(const std::string& id) const { return lookup(planetIds, id); }
@@ -296,6 +349,7 @@ struct ContentDB {
   int building_index(const std::string& id) const { return lookup(buildingIds, id); }
   int enemy_index(const std::string& id) const { return lookup(enemyIds, id); }
   int wave_set_index(const std::string& id) const { return lookup(waveSetIds, id); }
+  int falling_index(const std::string& id) const { return lookup(fallingIds, id); }  // M2.10
 
   // Enemy indices from `enemy` down its popsInto chain, itself first
   // (drifter_green -> {green, blue, red}). Empty for an invalid index.
@@ -307,6 +361,7 @@ struct ContentDB {
   bool planet_fits_wave_set(int waveSet, int planet) const;
 
   std::unordered_map<std::string, int> planetIds, sunIds, buildingIds, enemyIds, waveSetIds;
+  std::unordered_map<std::string, int> fallingIds;  // M2.10
 
  private:
   static int lookup(const std::unordered_map<std::string, int>& m, const std::string& id) {

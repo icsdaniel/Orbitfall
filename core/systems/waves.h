@@ -27,11 +27,17 @@ inline float spawnTime(const WaveDef& wave, int count, int k) {
 // --- forecast (BRIEF §4.8; "the forecast never lies") ---
 
 struct ForecastEntry {
-  int lane = kNoIndex;       // lane index on the planet
-  float laneBearing = 0.0f;  // rad, world angle the lane comes in from
-  int enemy = kNoIndex;      // index into ContentDB::enemies
+  int lane = kNoIndex;       // lane index on the planet (kNoIndex for a volley)
+  float laneBearing = 0.0f;  // rad, world angle the lane (or volley) comes in from
+  int enemy = kNoIndex;      // index into ContentDB::enemies (kNoIndex for a volley)
   int count = 0;             // -1 when this wave is not shown exactly
   bool shadowCaster = false;
+  // M2.10: a volley of falling objects has falling >= 0 (index into
+  // ContentDB::falling) and its bearing spread; an enemy that drops falling
+  // objects (Bomber) names them in `drops`.
+  int falling = kNoIndex;
+  float spread = 0.0f;  // rad, +- around laneBearing
+  int drops = kNoIndex;
 };
 
 struct WaveForecast {
@@ -50,6 +56,9 @@ struct WaveForecast {
 // the spawner. How far ahead waves are exact / icons comes from the first
 // upcoming wave's forecast block.
 std::vector<WaveForecast> forecast(const World& world, int count);
+
+// M2.10: one forecast entry per volley of `wave` (count -1 unless `exact`).
+void appendVolleyEntries(const WaveDef& wave, bool exact, std::vector<ForecastEntry>& out);
 
 // --- replay ---
 

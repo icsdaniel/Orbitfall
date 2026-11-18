@@ -23,6 +23,12 @@ enum class EventType : uint8_t {
   BuildingSold,     // a = slot, b = building index, value = refund
   CommandRejected,  // a = slot, b = RejectReason, x = CommandType, value = cost (Unaffordable)
   BuildingUpgraded, // M2.2: a = slot, b = path, x = new tier of that path, value = cost paid
+  // --- M2.10 falling objects and shields ---
+  FallingWarning,  // a = falling type, b = slot of the shield covering it now (-1), x/y = impact point, value = seconds to impact
+  FallingImpact,   // a = falling type, x/y = impact point, value = planet HP lost
+  ShieldAbsorbed,  // a = slot, b = falling type, x/y = where, value = energy left
+  ShieldOffline,   // a = slot
+  ShieldOnline,    // a = slot (recharged, full)
   Count
 };
 

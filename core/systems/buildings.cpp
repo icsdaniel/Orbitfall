@@ -166,6 +166,7 @@ bool placeBuilding(World& world, int32_t slot, int32_t building, float aimOffset
     world.site(base + (first + k) % n).anchor = static_cast<int16_t>(site);
   }
   recomputeLayout(world);
+  if (def.kind == BuildingKind::Shield) b.energy = def.shield.energy;  // M2.10: placed full and online
   addStardust(world, -def.cost);
   world.emit(EventType::BuildingPlaced, slot, building, 0.0f, 0.0f, def.cost);
   return true;

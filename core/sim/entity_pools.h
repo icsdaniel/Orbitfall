@@ -36,4 +36,18 @@ ORBITFALL_DECLARE_POOL(EnemyPool, ORBITFALL_ENEMY_FIELDS)
   F(uint16_t, flags) /* per-entity state bits */
 ORBITFALL_DECLARE_POOL(ProjectilePool, ORBITFALL_PROJECTILE_FIELDS)
 
+// M2.10: falling objects (meteors, bombs), in world space. They fall straight
+// down a fixed world bearing, so `dist` (from the planet centre) and `bearing`
+// say everything; pos/vel are kept for rendering.
+#define ORBITFALL_FALLING_FIELDS(F)                              \
+  F(float, posX)                                                 \
+  F(float, posY)                                                 \
+  F(float, velX)                                                 \
+  F(float, velY)                                                 \
+  F(float, bearing) /* rad, world angle it comes down on */      \
+  F(float, dist)    /* distance from the planet centre */        \
+  F(uint16_t, type) /* falling definition index */               \
+  F(uint16_t, flags) /* FallingFlag bits */
+ORBITFALL_DECLARE_POOL(FallingPool, ORBITFALL_FALLING_FIELDS)
+
 }  // namespace orbitfall
