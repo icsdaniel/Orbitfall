@@ -55,7 +55,7 @@ None of these block M1. An agent that hits one uses the default, notes it in the
 | Q27 | Weapon skill points | A tree per weapon, one point every second level-up | Bot runs per weapon within 25% of each other | Open |
 | Q28 | Does Orbital Gun altitude matter? | Adjustable altitude kept | Adaptive bot must clearly beat fixed altitudes | Open |
 | Q15 | Does the economy snowball or stall? | Diminishing returns per building type and a soft income cap, only if bots show snowballing | Income vs spend plots | Open |
-| Q19 | Planet balance | Three home planets; none may be strictly best | Bot comparison (M2.8) | Open |
+| Q19 | Planet balance | Three home planets; none may be strictly best | Bot comparison (M2.8): small earns most, large forgives most, medium keeps most HP; see §3 | Open, bots pass; humans at the M2 gate |
 | — | Title | "Orbitfall" (placeholder) | Daniele | Open |
 
 ## 3. Defaults picked by agents (flagged for Daniele)
@@ -78,6 +78,11 @@ Small choices an agent had to make where the brief was silent. Each is data, not
 | 2026-11-13 | M1 sim | Unit k of n of a spawn entry appears at `spawnSeconds · k / n` into the wave; the forecast uses the same formula | `core/systems/waves.h` |
 | 2026-11-13 | M1 sim | Splash hits every enemy disc it touches at full damage (no falloff inside the splash radius) | `core/systems/combat.cpp` |
 | 2026-11-13 | M1 sim | `SetAim` is free in M1 (M2.11 prices re-aiming) | `core/systems/buildings.cpp` |
+| 2026-11-18 | M2.8 | Home planets (medium = M1 planet). Small: radius 80, 30 slots, HP 75, 135°/s (accel 540), lit 34%. Large: radius 125, 48 slots, HP 200, 60°/s (accel 240), lit 19%. Same lanes, start stardust, damping, refund and slow time on all three | `content/planets/*.json` |
+| 2026-11-18 | M2.8 | Bot comparison over seeds 1–6: sensible wins 6/6 on every planet; small has the most panel income (2181 vs 1807 medium, 1789 large), medium keeps the most HP (95% vs 72% small, 48% large), large lets towers-only and the sun-chaser survive a wave longer (6 and 4 waves vs 5 and 3). No planet is ≥ on every measure | `core/tests/test_balance.cpp` |
+| 2026-11-18 | M2.8 | Bots choose lane tower slots by angle (within 35° of the lane, at most 6, nearest first) instead of fixed slot indices; on medium these are the M1 lists, so M1 results are unchanged | `core/tests/balance_bots.h` |
+| 2026-11-18 | M2.8 | A planet can host a wave set only if it has the wave set's lane ids in the same order (spawns hold lane indices); otherwise `new_run` reports an error and plays the wave set's planet. The run log stores the planet in the high 16 bits of its wave-set word (0 = default), so old logs replay | `core/content/content_loader.cpp`, `gdextension/src/sim_server.cpp` |
+| 2026-11-18 | M2.8 | Build view fit: the slot ring (radius + 14) takes the same share of the screen height on every planet; on radius 100 the planet is `surfacePlanetFrac` (0.24) as in M1.13 | `game/app/band_controller.gd`, `game/app/client_config.json` |
 | 2026-11-13 | M1 sim | Shadows lag one tick: `sunlight` runs before `enemyMovement`, so shade is computed from the casters' positions of the previous tick | `core/sim/pipeline.cpp` |
 | 2026-11-13 | M1 sim | `StardustChanged` from panel income is emitted once per whole unit earned, not every tick | `core/systems/sun.cpp` |
 | 2026-11-13 | M1 sim | The disc is shape id 6 (after circle, triangle, square, hexagon, star, diamond); the client's `BatchRenderer.Shape` uses the same ids | `core/content/content.h`, `game/render/batch_renderer.gd` |
