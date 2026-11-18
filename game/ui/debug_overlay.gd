@@ -3,6 +3,9 @@ extends PanelContainer
 ## M1.11 debug overlay: fps, ms/tick, counts, band, sun bearing, shade intervals,
 ## income/s, taps/min, % time lit. Toggled with backtick or the HUD "DBG" button.
 
+## M2.4: restart on the next wave set (e.g. the Bulwark trial).
+signal wave_set_requested
+
 const PHASE_WAVE: int = 1
 const REFRESH_SECONDS: float = 0.2
 
@@ -28,6 +31,10 @@ func _init() -> void:
 	_copy.add_theme_font_size_override(&"font_size", 18)
 	_copy.pressed.connect(_on_copy)
 	box.add_child(_copy)
+	var waves: Button = UiKit.button("Next wave set", Vector2(180.0, 52.0))
+	waves.add_theme_font_size_override(&"font_size", 18)
+	waves.pressed.connect(func() -> void: wave_set_requested.emit())
+	box.add_child(waves)
 
 
 func _process(delta: float) -> void:
@@ -83,6 +90,9 @@ func build_text() -> String:
 			float(sim.get_income_per_second()), roundi(float(stats.get("lit_fraction", 0.0)) * 100.0)],
 		"taps/min %.1f   time lit %d%%" % [
 			router.taps_per_minute() if router != null else 0.0, roundi(percent_time_lit())],
+		# M2.4: hits on weak-point enemies over the run.
+		"weak-point hits %d   body hits %d" % [
+			int(stats.get("weak_hits", 0)), int(stats.get("body_hits", 0))],
 	])
 	return "\n".join(lines)
 

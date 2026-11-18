@@ -107,6 +107,7 @@ var _enemies: Array[Dictionary] = []
 var _trait_defs: Array[Dictionary] = []
 var _shield_mults: PackedFloat32Array = PackedFloat32Array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
 var _min_damage_mult: float = 0.25
+var _weak_window_deg: float = 8.0  # M2.4: rules.weakWindowDeg
 var _waves: Array[Dictionary] = []
 var _slot_building: PackedInt32Array = PackedInt32Array()
 var _slot_flags: PackedInt32Array = PackedInt32Array()
@@ -715,6 +716,7 @@ func get_building_defs() -> Array[Dictionary]:
 			# M2.3
 			"damage_type": b["damage_type"], "damage_type_name": b["damage_type_name"],
 			"damage": b["damage"], "splash": b["splash"],
+			"precision": b["precision"],  # M2.4
 		})
 	return out
 
@@ -731,6 +733,7 @@ func get_enemy_defs() -> Array[Dictionary]:
 			"traits": e["traits"], "hp_bar": e["hp_bar"], "pops_into": e["pops_into"],
 			"shield": e["shield"], "hp_bar_segments": e["hp_bar_segments"],
 			"land_damage": float(e["land_damage"]) * float(e["layers"]), "damage_mult": _enemy_mults(e),
+			"weak_point": (e["weak_point"] as Dictionary).duplicate(),  # M2.4
 		})
 	return out
 
@@ -792,6 +795,54 @@ func _load_damage_rules() -> void:
 # --- end M2.3 ---
 
 
+# --- M2.4 weak points ---
+## Same answer as core weakPointHint: the weak-point enemy nearest the planet
+## and the precision tower that needs the smallest turn to sit under it.
+func get_weak_point_hint() -> Dictionary:
+	var best: int = -1
+	var best_d: float = 0.0
+	for i: int in _e_pos.size():
+		var wp: Dictionary = _enemies[_e_def[i]].get("weak_point", {})
+		if wp.is_empty():
+			continue
+		var d: float = _e_pos[i].length()
+		if best < 0 or d < best_d:
+			best = i
+			best_d = d
+	if best < 0:
+		return {"active": false}
+	var pos: Vector2 = _e_prev[best].lerp(_e_pos[best], get_alpha()) if best < _e_prev.size() else _e_pos[best]
+	var bearing: float = pos.angle()
+	var rotation_now: float = get_planet_rotation()
+	var site: int = -1
+	var turn: float = 0.0
+	for s: int in _slot_building.size():
+		var b: int = _slot_building[s]
+		if b < 0 or not bool(_buildings[b].get("precision", false)):
+			continue
+		var t: float = wrapf(bearing - (_site_angle(s) + rotation_now), -PI, PI)
+		if site < 0 or absf(t) < absf(turn):
+			site = s
+			turn = t
+	if site < 0:
+		return {"active": false}
+	var window: float = float((_enemies[_e_def[best]]["weak_point"] as Dictionary).get("window", 0.0))
+	return {
+		"active": true, "site": site, "site_angle": _site_angle(site), "bearing": bearing,
+		"pos": pos, "distance": pos.length(), "turn": turn, "window": window,
+	}
+
+
+func get_wave_sets() -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	for d: Dictionary in _read_dir("waves"):
+		out.append(str(d.get("id", "?")))
+	if out.is_empty():
+		out.append("sample")
+	return out
+# --- end M2.4 ---
+
+
 func get_forecast(count: int) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for k: int in count:
@@ -831,6 +882,7 @@ func get_debug_stats() -> Dictionary:
 	return {
 		"ms_per_tick": _ms_per_tick, "enemies": _e_pos.size(),
 		"projectiles": _p_t.size(), "lit_fraction": _lit_fraction, "mock": true,
+		"weak_hits": 0, "body_hits": 0,  # M2.4 (not simulated by the mock)
 	}
 
 
@@ -1374,6 +1426,7 @@ func _building(
 		"damage_type_name": "kinetic" if kind == "tower" else "",
 		# M2.1: slots covered, where it may stand, adjacency auras.
 		"footprint": 1, "layer": LAYER_ANY if kind == "tower" else LAYER_GROUND, "auras": [],
+		"precision": false,  # M2.4
 	}
 
 
@@ -1392,6 +1445,7 @@ func _enemy(
 		"traits": TRAIT_LAYERED if layers > 1 else 0, "shield": 0.0, "pops_into": -1,
 		"hp_bar_segments": 4 if shadow_caster else 1,
 		"damage_mult": PackedFloat32Array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+		"weak_point": {},  # M2.4: {mult, body_mult, window} when it has one
 	}
 
 
@@ -1434,6 +1488,7 @@ func _load_json_content(errors: PackedStringArray) -> void:
 	_exclusive_tier = int(rules.get("upgradeExclusiveTier", 2))  # M2.2
 	_surface_ease = float(rules.get("surfaceTimeEaseSeconds", 0.3))
 	_elevated_bonus = float(rules.get("elevatedRangeBonus", 0.15))
+	_weak_window_deg = float(rules.get("weakWindowDeg", 8.0))  # M2.4
 	if not planet.is_empty():
 		_radius = float(planet.get("radius", 100.0))
 		_slot_count = int(planet.get("slots", 36))
@@ -1475,6 +1530,7 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				b["damage_type"] = maxi(DAMAGE_TYPES.find(type_name), 0)
 				b["damage_type_name"] = DAMAGE_TYPES[int(b["damage_type"])]
 			b["footprint"] = clampi(int(d.get("footprint", 1)), 1, 3)
+			b["precision"] = bool(d.get("precision", false))  # M2.4
 			b["layer"] = int(LAYER_NAMES.get(str(d.get("layer", "ground")), LAYER_GROUND))
 			var auras: Array[Dictionary] = []
 			var raw_auras: Array = d.get("auras", [])
@@ -1517,6 +1573,14 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				e["traits"] = int(e["traits"]) | (1 << TRAIT_IDS.find("shielded"))
 			e["hp_bar_segments"] = int(d.get("hpBarSegments", 1))
 			e["damage_mult"] = _type_mults(d.get("damageMult"))
+			# M2.4 (the mock does not simulate weak-point damage, only the hint).
+			if d.get("weakPoint") is Dictionary:
+				var wp: Dictionary = d["weakPoint"]
+				e["weak_point"] = {
+					"mult": float(wp.get("mult", 3.5)), "body_mult": float(wp.get("bodyMult", 0.25)),
+					"window": deg_to_rad(float(wp.get("windowDeg", _weak_window_deg))),
+				}
+				e["traits"] = int(e["traits"]) | (1 << TRAIT_IDS.find("bulwark"))
 			e["_pops_into_id"] = str(d.get("popsInto", "")) if d.get("popsInto") != null else ""
 			_enemies.append(e)
 	for e: Dictionary in _enemies:

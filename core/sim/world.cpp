@@ -76,6 +76,8 @@ void initWorld(World& world, const SimConfig& config) {
   world.phase = world.waveSet != nullptr ? Phase::Intermission : Phase::Wave;
   world.waveIndex = 0;
   world.enemiesSpawned = 0;
+  world.weakPointHits = 0;
+  world.bodyHits = 0;
   world.stardust = world.planet ? world.planet->startStardust : 0.0f;
   world.slots.assign(world.planet ? static_cast<size_t>(world.planet->slots) : 0, BuildingSlot());
   world.elevated.assign(world.planet && world.planet->elevatedLayer ? world.slots.size() : 0,
@@ -148,6 +150,8 @@ uint64_t hashWorld(const World& world) {
   h.add(world.phase);
   h.add(world.waveIndex);
   h.add(world.enemiesSpawned);
+  h.add(world.weakPointHits);
+  h.add(world.bodyHits);
   h.add(world.waveTime);
   h.add(world.intermissionTime);
   h.array(world.spawned.data(), world.spawned.size());

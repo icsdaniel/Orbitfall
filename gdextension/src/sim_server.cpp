@@ -36,7 +36,8 @@ const char* const kEventNames[] = {
     "None",        "LayerPopped",   "EnemyKilled",  "PlanetHit",     "StardustChanged",
     "WaveStarted", "WaveCleared",   "ShadowChanged", "GameOver",     "Victory",
     "BuildingPlaced", "BuildingSold", "CommandRejected",
-    "BuildingUpgraded"};  // M2.2
+    "BuildingUpgraded",  // M2.2
+    "WeakPointHit"};     // M2.4
 constexpr int kEventNameCount = static_cast<int>(sizeof(kEventNames) / sizeof(kEventNames[0]));
 static_assert(kEventNameCount == static_cast<int>(orbitfall::EventType::Count), "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::CommandRejected) == 12, "event name table out of date");
@@ -175,6 +176,9 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_damage_types"), &SimServer::get_damage_types);
   ClassDB::bind_method(D_METHOD("get_trait_defs"), &SimServer::get_trait_defs);
   ClassDB::bind_method(D_METHOD("get_shield_mults"), &SimServer::get_shield_mults);
+  // M2.4
+  ClassDB::bind_method(D_METHOD("get_weak_point_hint"), &SimServer::get_weak_point_hint);
+  ClassDB::bind_method(D_METHOD("get_wave_sets"), &SimServer::get_wave_sets);
   ClassDB::bind_method(D_METHOD("get_debug_stats"), &SimServer::get_debug_stats);
   ClassDB::bind_method(D_METHOD("set_tunable", "path", "value"), &SimServer::set_tunable);
   ClassDB::bind_method(D_METHOD("drain_events"), &SimServer::drain_events);
@@ -708,6 +712,7 @@ TypedArray<Dictionary> SimServer::get_building_defs() const {
         b.hasProjectile ? String(orbitfall::damage_type_name(b.projectile.type)) : String();
     d["damage"] = b.hasProjectile ? b.projectile.damage : 0.0f;
     d["splash"] = b.hasProjectile ? b.projectile.splash : 0.0f;
+    d["precision"] = b.precision;  // M2.4: what the weak-point aim assist lines up
     out.push_back(d);
   }
   return out;
@@ -890,6 +895,14 @@ TypedArray<Dictionary> SimServer::get_enemy_defs() const {
     for (int t = 0; t < orbitfall::kDamageTypeCount; ++t)
       mults[t] = orbitfall::typeMultiplier(content_, e, static_cast<orbitfall::DamageType>(t));
     d["damage_mult"] = mults;
+    // M2.4: weak point (empty dictionary when it has none).
+    Dictionary weak;
+    if (e.hasWeakPoint) {
+      weak["mult"] = e.weakPoint.mult;
+      weak["body_mult"] = e.weakPoint.bodyMult;
+      weak["window"] = e.weakPoint.window;
+    }
+    d["weak_point"] = weak;
     out.push_back(d);
   }
   return out;
@@ -933,6 +946,41 @@ PackedFloat32Array SimServer::get_shield_mults() const {
   return out;
 }
 // --- end M2.3 ---
+
+// --- M2.4 weak points ---
+Dictionary SimServer::get_weak_point_hint() const {
+  Dictionary d;
+  const Snapshot& s = *curr_;
+  d["active"] = s.hasHint;
+  if (!s.hasHint) return d;
+  const float back = back_seconds();
+  const float x = s.hintX - s.hintVX * back, y = s.hintY - s.hintVY * back;
+  const float bearing = std::atan2(y, x);
+  d["site"] = s.hint.slot;
+  d["site_angle"] = s.hintSiteAngle;
+  d["bearing"] = bearing;
+  d["pos"] = Vector2(x, y);
+  d["distance"] = std::sqrt(x * x + y * y);
+  // Against the interpolated rotation the client draws with.
+  float turn = bearing - (s.hintSiteAngle + get_planet_rotation());
+  turn = std::remainder(turn, orbitfall::kTau);
+  d["turn"] = turn;
+  float window = 0.0f;
+  if (contentLoaded_) {
+    for (const orbitfall::EnemyDef& e : content_.enemies)
+      if (e.hasWeakPoint && e.weakPoint.window > window) window = e.weakPoint.window;
+  }
+  d["window"] = window;
+  return d;
+}
+
+PackedStringArray SimServer::get_wave_sets() const {
+  PackedStringArray out;
+  if (!contentLoaded_) return out;
+  for (const orbitfall::WaveSetDef& ws : content_.waveSets) out.push_back(to_gd(ws.id));
+  return out;
+}
+// --- end M2.4 ---
 
 namespace {
 Dictionary forecast_to_dict(const orbitfall::WaveForecast& f) {
@@ -1014,6 +1062,8 @@ Dictionary SimServer::get_debug_stats() const {
   d["sim_time"] = curr_->simTime;
   d["threaded"] = threadRunning_;
   d["seed"] = static_cast<int64_t>(seed_);
+  d["weak_hits"] = static_cast<int64_t>(curr_->weakPointHits);  // M2.4
+  d["body_hits"] = static_cast<int64_t>(curr_->bodyHits);       // M2.4
   return d;
 }
 

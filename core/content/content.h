@@ -195,6 +195,10 @@ struct BuildingDef {
   ProjectileDef projectile;
   std::vector<FalloffPoint> falloff;
   std::vector<TargetingMode> targeting;  // first entry is the default mode
+  // M2.4: a precision tower (the Lance) is the one the weak-point aim assist
+  // and the rotate-to-weak-point bot line up. Data only; the weak-point rule
+  // itself applies to every shot.
+  bool precision = false;
   // Panels only.
   float panelRate = 0.0f;  // stardust per second at beamStrength 1
   std::vector<UpgradePathDef> paths;  // M2.2: empty = not upgradable
@@ -207,6 +211,15 @@ struct HoverDef {  // EnemyBehavior::Eclipser parameters
   float descendSpeed = 0.0f;
   float spawnRadius = 0.0f;
   float spawnJitter = 0.0f;  // rad, +- around the lane bearing
+};
+
+// M2.4 weak point (PLAN §5.5, DECISIONS Q1). A hit is a weak-point hit when
+// the firing tower's world angle at launch is within +-window of the enemy's
+// bearing from the planet centre (the tower sits directly under it).
+struct WeakPointDef {
+  float window = 0.0f;    // rad; from rules.weakWindowDeg unless the enemy overrides it
+  float mult = 3.5f;      // damage multiplier of a weak-point hit (3 to 4)
+  float bodyMult = 0.25f; // damage multiplier of every other hit (floored at minDamageMult)
 };
 
 struct EnemyDef {
@@ -228,6 +241,12 @@ struct EnemyDef {
   int hpBarSegments = 1;  // M2.3: segments of the HP bar of a large unit
   float shield = 0.0f;    // M2.3: Shielded, damage absorbed before any HP is lost
   int popsInto = kNoIndex;  // enemy index this becomes when a layer pops
+  // M2.4: +- spread around the lane bearing for a lane enemy, rad; < 0 uses
+  // rules.spawnJitter. Bulwarks come in spread wide so a Lance fixed under the
+  // lane catches only some of them: lining up is a rotation decision.
+  float laneJitter = -1.0f;
+  bool hasWeakPoint = false;  // M2.4: sets kTraitBulwark
+  WeakPointDef weakPoint;
   bool hasHover = false;
   HoverDef hover;
   float damageMult[kDamageTypeCount] = {1, 1, 1, 1, 1, 1};
@@ -278,6 +297,7 @@ struct RulesDef {  // content/rules.json: global tunables
   // M2.2: once any path of a building is above this tier, every other path
   // is capped at it (default 2: one path may reach the top, the other stops at 2).
   int upgradeExclusiveTier = 2;
+  float weakWindow = 8.0f * 3.14159265358979323846f / 180.0f;  // M2.4: rad, default weak-point window
 };
 
 struct ContentDB {

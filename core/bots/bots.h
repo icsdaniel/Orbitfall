@@ -128,6 +128,12 @@ struct RunOptions {
   bool trace = false;      // print the state at every wave start
 };
 
+// M2.4: rotate input in [-1, 1] that turns the planet so a precision tower
+// (the Lance) sits right under the nearest weak-point enemy (weakPointHint),
+// braking in time to stop on it; 0 when there is nothing to line up. For
+// scripted scenarios that drive the rotation themselves.
+float weakPointRotateInput(const World& world);
+
 // Plays one run to the end (or `maxWaves`) and reports what happened.
 RunResult play(const ContentDB& db, Strategy strategy, const RunOptions& options);
 RunResult play(const ContentDB& db, Strategy strategy, uint32_t seed = 1, uint32_t maxWaves = 99,

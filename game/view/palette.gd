@@ -14,9 +14,11 @@ const TIER_NAMES: Array[String] = [
 const NAMED: Dictionary[String, Color] = {
 	"tower.cannon": Color(0.93, 0.55, 0.25),
 	"tower.gatling": Color(0.45, 0.85, 0.95),
+	"tower.lance": Color(0.92, 0.96, 1.0),  # M2.4: pale, thin, precise
 	"building.solar_panel": Color(0.35, 0.55, 1.0),
 	"planet.medium": Color(0.17, 0.22, 0.33),
 	"enemy.eclipser": Color(0.24, 0.13, 0.34),  # dark violet: reads against the night sky
+	"enemy.bulwark": Color(0.52, 0.58, 0.68),  # M2.4: steel plate; the weak side is a bright wedge
 	"projectile": Color(1.0, 0.92, 0.55),
 }
 const SHAPE_NAMES: Dictionary[String, int] = {
@@ -42,6 +44,7 @@ const SHIELD: Color = Color(0.45, 0.85, 1.0)
 const ARMOR: Color = Color(0.62, 0.64, 0.68)
 const HEAT: Color = Color(1.0, 0.55, 0.12)
 const REGROW: Color = Color(0.45, 1.0, 0.55)
+const WEAK: Color = Color(1.0, 0.93, 0.35)  # M2.4 weak-side wedge (shader weak_color)
 
 
 static func tier(index: int) -> Color:
