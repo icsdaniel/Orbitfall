@@ -7,6 +7,7 @@ extends ClientTestBase
 func _make_game() -> Game:
 	var game: Game = auto_free(Game.new())
 	game.force_mock = true
+	game.planet_picker_enabled = false  # M2.8: the picker has its own tests
 	add_child(game)
 	var sim: MockSimServer = game.sim as MockSimServer
 	sim.auto_advance = false

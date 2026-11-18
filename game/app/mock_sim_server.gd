@@ -60,6 +60,10 @@ var calls: Array[Dictionary] = []
 var auto_advance: bool = true
 
 var _content_dir: String = "res://content"
+## M2.8: every planet JSON (content order = file name order) and the run's planet.
+var _planets: Array[Dictionary] = []
+var _default_planet: String = "medium"
+var _planet_id: String = ""
 var _seed: int = 0
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var _tick: int = 0
@@ -176,9 +180,18 @@ func load_content(dir: String = "res://content") -> PackedStringArray:
 	return errors
 
 
-func new_run(run_seed: int, wave_set: int = 0) -> void:
-	_record(&"new_run", [run_seed, wave_set])
+## M2.8: `planet_id` picks the home planet ("" = the wave set's own).
+func new_run(run_seed: int, wave_set: int = 0, planet_id: String = "") -> void:
+	_record(&"new_run", [run_seed, wave_set, planet_id])
 	_seed = run_seed
+	var wanted: String = planet_id if planet_id != "" else _default_planet
+	var planet: Dictionary = _find_planet(wanted)
+	if planet.is_empty():
+		if planet_id != "":
+			push_error("MockSimServer.new_run: unknown planet '%s'" % planet_id)
+		planet = _find_planet(_default_planet)
+	if not planet.is_empty():
+		_apply_planet(planet)
 	_reset_run()
 
 
@@ -827,6 +840,62 @@ func get_forecast(count: int) -> Array[Dictionary]:
 	return out
 
 
+# ---------------------------------------------------------------- M2.8 home planets
+
+func get_planet_defs() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for i: int in _planets.size():
+		var p: Dictionary = _planets[i]
+		var radius: float = float(p.get("radius", 100.0))
+		var arc: float = 2.0 * asin(clampf(_beam_width / (2.0 * maxf(radius, 0.001)), 0.0, 1.0))
+		var visual: Dictionary = p.get("visual", {})
+		out.append({
+			"index": i, "id": str(p.get("id", "?")), "name": str(p.get("name", p.get("id", "?"))),
+			"radius": radius, "slots": int(p.get("slots", 36)), "hp": float(p.get("hp", 100.0)),
+			"rot_max_speed": deg_to_rad(float(p.get("rotMaxSpeed", 90.0))),
+			"rot_accel": deg_to_rad(float(p.get("rotAccel", 360.0))),
+			"lit_arc": arc, "lit_fraction": arc / TAU, "color": str(visual.get("color", "")),
+			"default": str(p.get("id", "")) == _default_planet, "fits": true,
+		})
+	return out
+
+
+func get_planet_id() -> String:
+	return _planet_id
+
+
+func _find_planet(id: String) -> Dictionary:
+	for p: Dictionary in _planets:
+		if str(p.get("id", "")) == id:
+			return p
+	return {}
+
+
+func _apply_planet(planet: Dictionary) -> void:
+	_planet_id = str(planet.get("id", ""))
+	_radius = float(planet.get("radius", 100.0))
+	_slot_count = int(planet.get("slots", 36))
+	_hp_max = float(planet.get("hp", 100.0))
+	_rot_max = deg_to_rad(float(planet.get("rotMaxSpeed", 90.0)))
+	_rot_accel = deg_to_rad(float(planet.get("rotAccel", 360.0)))
+	_rot_damping = float(planet.get("rotDamping", 4.0))
+	_start_stardust = float(planet.get("startStardust", 150.0))
+	_sell_refund = float(planet.get("sellRefund", 0.7))
+	_surface_time_scale = float(planet.get("surfaceTimeScale", 0.75))
+	_layer_count = 2 if bool(planet.get("elevatedLayer", true)) else 1
+	_elevated_height = float(planet.get("elevatedHeight", 0.1 * _radius))
+	_lanes = {}
+	var lanes: Array = planet.get("lanes", [])
+	for lane: Dictionary in lanes:
+		_lanes[str(lane.get("id", ""))] = deg_to_rad(float(lane.get("bearingDeg", 0.0)))
+	# Spawns keep their lane id; their bearing follows the planet's lanes.
+	for w: Dictionary in _waves:
+		var spawns: Array = w.get("spawns", [])
+		for sp: Dictionary in spawns:
+			if sp.has("lane"):
+				sp["bearing"] = float(_lanes.get(str(sp["lane"]), float(sp.get("bearing", 0.0))))
+
+
 func get_debug_stats() -> Dictionary:
 	return {
 		"ms_per_tick": _ms_per_tick, "enemies": _e_pos.size(),
@@ -1423,8 +1492,9 @@ func _load_json_content(errors: PackedStringArray) -> void:
 		errors.append("mock: no wave set under %s, using the built-in sample" % _content_dir)
 		return
 	var wave_set: Dictionary = waves_list[0]
-	var planet: Dictionary = _read_json(
-		_content_dir.path_join("planets/%s.json" % str(wave_set.get("planet", "medium"))))
+	_default_planet = str(wave_set.get("planet", "medium"))
+	_planets = _read_dir("planets")  # M2.8: all home planets for the picker
+	var planet: Dictionary = _find_planet(_default_planet)
 	var sun: Dictionary = _read_json(
 		_content_dir.path_join("sun/%s.json" % str(wave_set.get("sun", "default"))))
 	var rules: Dictionary = _read_json(_content_dir.path_join("rules.json"))
@@ -1435,21 +1505,7 @@ func _load_json_content(errors: PackedStringArray) -> void:
 	_surface_ease = float(rules.get("surfaceTimeEaseSeconds", 0.3))
 	_elevated_bonus = float(rules.get("elevatedRangeBonus", 0.15))
 	if not planet.is_empty():
-		_radius = float(planet.get("radius", 100.0))
-		_slot_count = int(planet.get("slots", 36))
-		_hp_max = float(planet.get("hp", 100.0))
-		_rot_max = deg_to_rad(float(planet.get("rotMaxSpeed", 90.0)))
-		_rot_accel = deg_to_rad(float(planet.get("rotAccel", 360.0)))
-		_rot_damping = float(planet.get("rotDamping", 4.0))
-		_start_stardust = float(planet.get("startStardust", 150.0))
-		_sell_refund = float(planet.get("sellRefund", 0.7))
-		_surface_time_scale = float(planet.get("surfaceTimeScale", 0.75))
-		_layer_count = 2 if bool(planet.get("elevatedLayer", true)) else 1
-		_elevated_height = float(planet.get("elevatedHeight", 0.1 * _radius))
-		_lanes = {}
-		var lanes: Array = planet.get("lanes", [])
-		for lane: Dictionary in lanes:
-			_lanes[str(lane.get("id", ""))] = deg_to_rad(float(lane.get("bearingDeg", 0.0)))
+		_apply_planet(planet)
 	if not sun.is_empty():
 		_sun_start = deg_to_rad(float(sun.get("startDeg", 0.0)))
 		_sun_speed = deg_to_rad(float(sun.get("speedDegPerSec", 1.5)))
@@ -1537,6 +1593,7 @@ func _load_json_content(errors: PackedStringArray) -> void:
 			spawns.append({
 				"enemy": enemy_ids[enemy_id], "count": int(sp.get("count", 1)),
 				"bearing": float(_lanes.get(str(sp.get("lane", "")), 0.0)),
+				"lane": str(sp.get("lane", "")),
 			})
 		_waves.append({
 			"light_mult": float(w.get("lightMult", 1.0)),

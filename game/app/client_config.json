@@ -2,6 +2,8 @@
   "_comment": "Client-only tunables (camera bands, gestures, HUD). Sim numbers live in content/.",
   "bands": {
     "surfacePlanetFrac": 0.24,
+    "surfaceRingMargin": 30,
+    "surfaceRefRadius": 100,
     "surfaceOffsetPx": 6,
     "orbitViewRadius": 520,
     "transitionSeconds": 0.45,

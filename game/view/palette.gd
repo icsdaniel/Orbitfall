@@ -15,7 +15,9 @@ const NAMED: Dictionary[String, Color] = {
 	"tower.cannon": Color(0.93, 0.55, 0.25),
 	"tower.gatling": Color(0.45, 0.85, 0.95),
 	"building.solar_panel": Color(0.35, 0.55, 1.0),
+	"planet.small": Color(0.22, 0.27, 0.36),  # M2.8
 	"planet.medium": Color(0.17, 0.22, 0.33),
+	"planet.large": Color(0.15, 0.20, 0.30),  # M2.8
 	"enemy.eclipser": Color(0.24, 0.13, 0.34),  # dark violet: reads against the night sky
 	"projectile": Color(1.0, 0.92, 0.55),
 }

@@ -24,6 +24,13 @@ var camera: OrbitCamera
 var viewport_size_override: Vector2 = Vector2.ZERO
 
 var surface_planet_frac: float = 0.36
+## M2.8: the Build view fits the slot rings (ground and M2.1 elevated), which
+## reach this many world units past the surface, so every planet size shows its
+## whole periphery.
+## surfacePlanetFrac is the planet's share of the screen height for a planet of
+## surfaceRefRadius; other sizes keep the ring at the same share of the screen.
+var surface_ring_margin: float = 30.0
+var surface_ref_radius: float = 100.0
 var orbit_view_radius: float = 400.0
 ## The planet sits this many pixels below the screen centre in Surface (HUD room).
 var surface_offset_px: float = 22.0
@@ -46,6 +53,8 @@ var _pinch_from: int = -1
 
 func configure(config: ClientConfig) -> void:
 	surface_planet_frac = config.num("bands", "surfacePlanetFrac", surface_planet_frac)
+	surface_ring_margin = config.num("bands", "surfaceRingMargin", surface_ring_margin)
+	surface_ref_radius = config.num("bands", "surfaceRefRadius", surface_ref_radius)
 	orbit_view_radius = config.num("bands", "orbitViewRadius", orbit_view_radius)
 	fade_width = config.num("bands", "fadeWidth", fade_width)
 	surface_offset_px = config.num("bands", "surfaceOffsetPx", surface_offset_px)
@@ -72,10 +81,13 @@ func _process(_delta: float) -> void:
 	update()
 
 
-## Zoom at which the planet radius takes `surfacePlanetFrac` of the screen height.
+## Zoom of the Build view: the slot ring (planet radius + surfaceRingMargin) takes
+## the same share of the screen height on every planet; on the reference planet the
+## radius takes `surfacePlanetFrac` of it (M1.13 framing, M2.8 fit).
 func surface_zoom() -> float:
-	var r: float = float(sim.get_planet_radius()) if sim != null else 100.0
-	return _viewport_size().y * surface_planet_frac / maxf(r, 1.0)
+	var r: float = float(sim.get_planet_radius()) if sim != null else surface_ref_radius
+	var ring_frac: float = surface_planet_frac * (surface_ref_radius + surface_ring_margin) / maxf(surface_ref_radius, 1.0)
+	return _viewport_size().y * ring_frac / maxf(r + surface_ring_margin, 1.0)
 
 
 ## Zoom at which `orbitViewRadius` world units fit in half the screen height.
