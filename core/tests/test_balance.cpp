@@ -1,5 +1,5 @@
 // Balance regression suite (BRIEF §8.2 targets) on the shipped content: four
-// deterministic strategy bots (balance_bots.h) play whole runs. If a content
+// deterministic strategy bots (core/bots/bots.h) play whole runs. If a content
 // change breaks one of these, either the change or the target is wrong; say
 // which in the PR.
 //
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "balance_bots.h"
+#include "bots/bots.h"
 #include "content/content_loader.h"
 #include "doctest/doctest.h"
 
