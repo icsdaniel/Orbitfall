@@ -54,8 +54,9 @@ func _init() -> void:
 	_build.pressed.connect(_on_build_pressed)
 	_box.add_child(_build)
 	# Keyboard path: W/Up (InputRouter); the key is named where there is a keyboard.
-	var above_text: String = "Build above" if DisplayServer.is_touchscreen_available() \
-		else "Build above (W)"
+	var phone: bool = OS.has_feature("mobile") or OS.has_feature("web_android") \
+		or OS.has_feature("web_ios")
+	var above_text: String = "Build above" if phone else "Build above (W)"
 	_above = UiKit.button(above_text, Vector2(230.0, 68.0), Color(0.14, 0.36, 0.42))
 	_above.name = "BuildAbove"
 	_above.pressed.connect(_on_above_pressed)

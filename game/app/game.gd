@@ -5,7 +5,7 @@ extends Node2D
 ## OrbitCamera, PlanetView, EntityView (BatchRenderer), InputRouter, BandController
 ## and the HUD, and turns UI intents into SimServer commands.
 ## User args (after `--`): --mock, --seed=N, --band=surface|orbit, --demo (scripted
-## mid-wave state on the mock), --select=SLOT, --debug, --end=won|lost (mock),
+## mid-wave state on the mock), --demo-placement (M2.1 layout), --select=SITE, --debug, --end=won|lost (mock),
 ## --screenshot PATH. Playtest bot (see autoplay.gd): --play=sensible|towers|none keeps
 ## playing live; with --ff-wave=N [--ff-seconds=S], --ff-shadow or --ff-end the run is
 ## first fast-forwarded to that moment (wave N running for S seconds, or its
@@ -71,15 +71,17 @@ func _ready() -> void:
 		bands.auto_switch = false  # screenshots and bots ask for a fixed view
 	if _demo:
 		_setup_demo()
-	if _demo_placement:
+	if _demo_placement and _play == "":
 		_setup_placement_demo()
 	if _play != "":
 		_autoplay = Autoplay.new()
 		_autoplay.setup(sim, _play)
 		_fast_forward()
+		if _demo_placement:
+			_build_above_bot_towers()
 	if _select_arg >= 0:
 		planet_view.sync()
-		_select_slot(_select_arg)
+		_select_site(_select_arg)  # M2.1: a site, so slot + N selects the elevated ring
 	if _debug_arg:
 		hud.set_debug_visible(true)
 
@@ -558,6 +560,32 @@ func _setup_placement_demo() -> void:
 		sim.place_building(12, towers[0], 0.0, 1)
 		sim.place_building(16, towers[towers.size() - 1], 0.0)
 	sim.step_ticks(2)
+	bands.update()
+
+
+## M2.1 screenshots on the real sim (with --play and --ff-*): after the bot's
+## fast-forward, an elevated tower above each ground tower the stardust pays for.
+func _build_above_bot_towers() -> void:
+	var defs: Array[Dictionary] = sim.get_building_defs()
+	var cheapest: int = -1
+	for def: Dictionary in defs:
+		if int(def.get("layer", 0)) != 0 and (cheapest < 0
+				or float(def.get("cost", 0.0)) < float(defs[cheapest].get("cost", 0.0))):
+			cheapest = int(def.get("index", -1))
+	if cheapest < 0:
+		return
+	var slots: PackedInt32Array = sim.get_slot_buildings()
+	var budget: float = float(sim.get_stardust())
+	for slot: int in slots.size():
+		var b: int = slots[slot]
+		if b < 0 or str(defs[b].get("kind", "")) != "tower":
+			continue
+		if budget < float(defs[cheapest].get("cost", 0.0)):
+			break
+		budget -= float(defs[cheapest].get("cost", 0.0))
+		sim.place_building(slot, cheapest, 0.0, 1)
+	sim.step_ticks(2)
+	sim.drain_events()
 	bands.update()
 
 

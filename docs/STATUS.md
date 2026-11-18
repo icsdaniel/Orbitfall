@@ -27,6 +27,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 - [x] M1.13 Build view shows the whole planet and slot ring clear of the HUD (surfacePlanetFrac 0.32 -> 0.24)
 
 ## M2 Depth of defence
+- [x] M2.1 Placement depth: elevated ring (slot i elevated needs a building on ground slot i; elevated towers +15% range, `rules.elevatedRangeBonus`), 1-3 slot footprints, adjacency auras (stat, amount, radius k, kinds) recomputed on layout change. Build view draws the elevated ring, footprints and aura links; tap a ground building -> "Build above" (keys W/Up, S/Down back to the foundation); selling a foundation in use toasts "Sell the building above first". `place_building(slot, building, aim, layer = 0)` plus the M2.1 site getters. Screenshots in `docs/screenshots/m2.1/`
 - [x] M2.3 Damage types and soft-counter matrix (`content/damage.json`), trait bitmask and shader cues, colour tiers, segmented HP bars with shield strip, enemy codex (`?` button or C). Screenshots in `docs/screenshots/m2.3/`
 
 ## Design track
