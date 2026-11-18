@@ -1,0 +1,20 @@
+{
+  "id": "small",
+  "name": "Small",
+  "radius": 80,
+  "slots": 24,
+  "hp": 70,
+  "rotMaxSpeed": 135,
+  "rotAccel": 540,
+  "rotDamping": 4,
+  "startStardust": 150,
+  "lanes": [
+    { "id": "A", "bearingDeg": 30 },
+    { "id": "B", "bearingDeg": 170 }
+  ],
+  "surfaceTimeScale": 0.75,
+  "sellRefund": 0.7,
+  "elevatedLayer": true,
+  "elevatedHeight": 12,
+  "visual": { "shape": "circle", "color": "planet.small" }
+}

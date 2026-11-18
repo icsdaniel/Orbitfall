@@ -33,6 +33,10 @@ struct SimConfig {
   int waveSet = 0;
   int planet = 0;
   int sun = 0;
+  // M2.8 home planets: with a wave set, play it on this planet instead of the
+  // wave set's own (kNoIndex = the wave set's planet). Ignored unless
+  // ContentDB::planet_fits_wave_set says the planet has the wave set's lanes.
+  int planetOverride = kNoIndex;
 };
 
 // Run phase; the values are the binding's get_phase().
@@ -199,7 +203,9 @@ void initWorld(World& world, const SimConfig& config);
 // Content-aware start of a run (what the binding's new_run calls): a world on
 // wave set `waveSet` of `content` with default capacities. `content` must
 // outlive the world. The 64-bit seed is folded to the sim's 32 bits.
-void initWorld(World& world, const ContentDB& content, uint32_t waveSet, uint64_t seed);
+// `planet` (M2.8) picks a home planet other than the wave set's (kNoIndex = its own).
+void initWorld(World& world, const ContentDB& content, uint32_t waveSet, uint64_t seed,
+               int planet = kNoIndex);
 
 // 64-bit hash of the deterministic state. Equal seed + command log => equal hash.
 uint64_t hashWorld(const World& world);

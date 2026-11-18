@@ -91,6 +91,7 @@ struct LaneDef {
 
 struct PlanetDef {
   std::string id;
+  std::string name;  // M2.8: display name for the planet picker (defaults to the id)
   float radius = 0.0f;
   int slots = 0;
   float hp = 0.0f;
@@ -299,6 +300,11 @@ struct ContentDB {
   // Enemy indices from `enemy` down its popsInto chain, itself first
   // (drifter_green -> {green, blue, red}). Empty for an invalid index.
   std::vector<int> layer_chain(int enemy) const;
+
+  // M2.8 home planets: true when `planet` can host wave set `waveSet` in place
+  // of the wave set's own planet. Spawns hold lane INDICES resolved against the
+  // wave set's planet, so the host must have the same lane ids in the same order.
+  bool planet_fits_wave_set(int waveSet, int planet) const;
 
   std::unordered_map<std::string, int> planetIds, sunIds, buildingIds, enemyIds, waveSetIds;
 
