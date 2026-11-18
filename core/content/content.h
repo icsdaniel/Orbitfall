@@ -242,6 +242,10 @@ struct EnemyDef {
   int hpBarSegments = 1;  // M2.3: segments of the HP bar of a large unit
   float shield = 0.0f;    // M2.3: Shielded, damage absorbed before any HP is lost
   int popsInto = kNoIndex;  // enemy index this becomes when a layer pops
+  // M2.4: +- spread around the lane bearing for a lane enemy, rad; < 0 uses
+  // rules.spawnJitter. Bulwarks come in spread wide so a Lance fixed under the
+  // lane catches only some of them: lining up is a rotation decision.
+  float laneJitter = -1.0f;
   bool hasWeakPoint = false;  // M2.4: sets kTraitBulwark
   WeakPointDef weakPoint;
   bool hasHover = false;
