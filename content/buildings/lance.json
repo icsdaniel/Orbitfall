@@ -1,6 +1,6 @@
 {
   "id": "lance", "kind": "tower", "footprint": 1, "layer": "ground", "cost": 45,
-  "arcDeg": 6, "range": 420, "fireRate": 1.25, "aimMount": false, "aimOffsetDeg": 0,
+  "arcDeg": 6, "range": 420, "fireRate": 1, "aimMount": false, "aimOffsetDeg": 0,
   "precision": true,
   "projectile": { "kind": "dot", "speed": 1400, "damage": 2, "type": "pierce", "splash": 0 },
   "falloff": [[0, 1], [1, 1]],

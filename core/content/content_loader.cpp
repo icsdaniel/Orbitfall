@@ -641,6 +641,12 @@ struct Loader {
         }
       }
     }
+    if (o.has("spawnJitterDeg")) {
+      if (e.behavior != EnemyBehavior::Lane)
+        o.field_error("spawnJitterDeg", "only for lane enemies (an Eclipser sets it in 'hover')");
+      else
+        o.angle("spawnJitterDeg", e.laneJitter, Range{0.0, false, 180.0});
+    }
     if ((e.traits & kTraitBulwark) && !e.hasWeakPoint)
       o.field_error("traits", "'bulwark' needs a 'weakPoint' object");
     if (e.hasWeakPoint) e.traits |= kTraitBulwark;
