@@ -18,6 +18,8 @@ inline constexpr int kNoIndex = -1;
 inline constexpr float kHardMinDamageMult = 0.25f;
 // BRIEF §4.4: bent aim is limited to +-60 degrees.
 inline constexpr float kMaxAimOffsetDeg = 60.0f;
+// M2.6: a slow never takes more than this fraction of an enemy's speed.
+inline constexpr float kMaxSlow = 0.9f;
 
 enum class Shape : uint8_t { Circle, Triangle, Square, Hexagon, Star, Diamond, Disc };
 // Support (M2.1): a building that neither shoots nor earns, e.g. an aura source.
@@ -27,8 +29,11 @@ enum class BuildingKind : uint8_t { Tower, Panel, Support, Shield, Count };
 // only, or either.
 enum class BuildingLayer : uint8_t { Ground, Elevated, Any };
 // Stats an adjacency aura can change (M2.1).
-enum class AuraStat : uint8_t { Range, FireRate, Damage, Income, Count };
-enum class ProjectileKind : uint8_t { Dot, Shell };
+// M2.6 appends Detect (reveals camo: removes that fraction of camo misses) and
+// ShieldDamage (+x% damage dealt to enemy shields).
+enum class AuraStat : uint8_t { Range, FireRate, Damage, Income, Detect, ShieldDamage, Count };
+// M2.6: Beam = no projectile entity, a continuous beam on the target (Sun Lens).
+enum class ProjectileKind : uint8_t { Dot, Shell, Beam };
 enum class DamageType : uint8_t { Kinetic, Explosive, Energy, Cryo, Emp, Pierce, Count };
 enum class TargetingMode : uint8_t { First, Strong, Close };
 enum class SunPathType : uint8_t { ConstantDrift, Fixed };
@@ -68,6 +73,9 @@ struct TraitDef {
   std::string effect;      // what it does
   std::string easierWith;  // what answers it
   float mult[kDamageTypeCount] = {1, 1, 1, 1, 1, 1};
+  // M2.6: fraction of the shots of a tower that does not detect it that miss
+  // (camo: "about half of undetected shots miss"); 0 for every other trait.
+  float missChance = 0.0f;
 };
 
 struct DamageRulesDef {
@@ -132,6 +140,32 @@ struct ProjectileDef {
   float damage = 0.0f;
   DamageType type = DamageType::Kinetic;
   float splash = 0.0f;  // radius, 0 = none
+  // M2.6 (optional, default off):
+  int pierce = 0;            // extra enemies a shot passes through (Railgun)
+  float slow = 0.0f;         // speed taken off what it hits, 0..0.9 (Cryo)
+  float slowSeconds = 0.0f;  // how long the slow lasts
+};
+
+// M2.6 Sun Lens beam (ProjectileKind::Beam): damage per second
+// = projectile.damage x ramp x (channelFloor + (1 - channelFloor) x channel),
+// where the ramp climbs from rampStart to 1 over rampSeconds on one target and
+// channel is the lit, unshaded fraction of panel capacity (World::channel).
+struct BeamDef {
+  float rampSeconds = 1.5f;
+  float rampStart = 0.3f;
+  float channelFloor = 0.2f;
+};
+
+// M2.6: an active ability fired by the ActivateBuilding command. It lasts
+// `seconds` and multiplies damage by `damageMult`; it then needs `cooldown`
+// seconds, counted rules.lightChargeMult times faster while the site is lit
+// and unshaded (light-charged actives, PLAN 5.4).
+struct ActiveDef {
+  std::string id;  // "overcharge"
+  std::string name;
+  float cooldown = 0.0f;
+  float seconds = 0.0f;
+  float damageMult = 1.0f;
 };
 
 struct FalloffPoint {
@@ -158,7 +192,13 @@ struct AuraDef {
 inline constexpr int kUpgradePaths = 2;
 inline constexpr int kMaxUpgradeTiers = 4;
 
-enum class UpgradeStat : uint8_t { Damage, FireRate, Range, Arc, Splash, Income, Count };
+// M2.6 appends: Slow (projectile slow), Pierce (extra enemies), AuraAmount
+// (multiplier on every aura amount, base 1), AuraRadius (slots added to every
+// aura radius, base 0), ActiveCooldown (seconds), ActivePower (active damageMult).
+enum class UpgradeStat : uint8_t {
+  Damage, FireRate, Range, Arc, Splash, Income,
+  Slow, Pierce, AuraAmount, AuraRadius, ActiveCooldown, ActivePower, Count
+};
 inline constexpr int kUpgradeStatCount = static_cast<int>(UpgradeStat::Count);
 enum class ModOp : uint8_t { Add, Mul };
 
@@ -216,6 +256,11 @@ struct BuildingDef {
   std::vector<UpgradePathDef> paths;  // M2.2: empty = not upgradable
   // Shields only (M2.10).
   ShieldDef shield;
+  // M2.6 (optional): beam numbers (projectile.kind == Beam) and an active.
+  BeamDef beam;
+  bool hasActive = false;
+  ActiveDef active;
+  std::string name;  // display name; the id capitalised when absent
   VisualDef visual;
 };
 

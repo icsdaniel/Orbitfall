@@ -205,6 +205,11 @@ inline void fill_snapshot(const orbitfall::World& w, const RunStatics& run, Snap
   s.enemyCount = fillEnemyRenderBuffer(w, s.enemyRender.data(), e.count, params);
   detail::copyField(s.enemyVelX, e.velX, s.enemyCount);
   detail::copyField(s.enemyVelY, e.velY, s.enemyCount);
+  for (uint32_t i = 0; i < s.enemyCount; ++i) {  // M2.6: interpolate slowed enemies at their real speed
+    if (e.slowTime[i] <= 0.0f) continue;
+    s.enemyVelX[i] *= speedFactor(e, i);
+    s.enemyVelY[i] *= speedFactor(e, i);
+  }
   // The shader reads custom.w as an outline width override; core puts the
   // layer's hp fraction there, which the placeholder shader has no use for.
   for (uint32_t i = 0; i < s.enemyCount; ++i) s.enemyRender[static_cast<size_t>(i) * 16 + 15] = 0.0f;

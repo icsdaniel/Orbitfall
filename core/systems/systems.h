@@ -33,6 +33,9 @@ void spatialRebuild(World& world, float dt);
 void towerTargeting(World& world, float dt);
 // M1.6: towers with a target and a ready cooldown fire a led shot.
 void towerFire(World& world, float dt);
+// M2.6: Sun Lens beams (continuous damage, ramp, channel) and active abilities.
+void beamFire(World& world, float dt);
+void abilities(World& world, float dt);
 // M1.6: moves projectiles and ages them.
 void projectileMovement(World& world, float dt);
 // M1.6: swept projectile-vs-enemy test through the grid; applies damage

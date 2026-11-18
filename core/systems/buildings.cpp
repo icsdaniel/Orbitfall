@@ -56,6 +56,8 @@ float& statOf(BuildingSlot& b, AuraStat stat) {
     case AuraStat::FireRate: return b.fireRateMult;
     case AuraStat::Damage: return b.damageMult;
     case AuraStat::Income: return b.incomeMult;
+    case AuraStat::Detect: return b.detect;                  // M2.6
+    case AuraStat::ShieldDamage: return b.shieldDamageMult;  // M2.6
     case AuraStat::Range:
     case AuraStat::Count: break;
   }
@@ -79,27 +81,32 @@ void recomputeLayout(World& world) {
   for (uint32_t s = 0; s < sites; ++s) {
     BuildingSlot& b = world.site(s);
     b.rangeMult = b.fireRateMult = b.damageMult = b.incomeMult = 0.0f;
+    b.detect = b.shieldDamageMult = 0.0f;  // M2.6
   }
   for (uint32_t s = 0; s < sites; ++s) {
     const BuildingSlot& src = world.site(s);
     if (src.type < 0) continue;
     const BuildingDef& def = db.buildings[static_cast<size_t>(src.type)];
+    // M2.6: upgrades scale the amounts and widen the reach of every aura.
+    const BuildingStats up = def.auras.empty() ? BuildingStats() : effectiveStats(def, src.tiers);
     for (const AuraDef& aura : def.auras) {
+      const float amount = aura.amount * up.auraAmount;
+      const int radius = aura.radius + static_cast<int>(up.auraRadius + 0.5f);
       for (uint32_t t = 0; t < sites; ++t) {
         BuildingSlot& dst = world.site(t);
         if (t == s || dst.type < 0) continue;
         const BuildingDef& target = db.buildings[static_cast<size_t>(dst.type)];
         if ((aura.kinds & (1u << static_cast<uint32_t>(target.kind))) == 0) continue;
         if (footprintGap(n, static_cast<int>(s) % n, src.width, static_cast<int>(t) % n, dst.width) >
-            aura.radius) {
+            radius) {
           continue;
         }
-        statOf(dst, aura.stat) += aura.amount;
+        statOf(dst, aura.stat) += amount;
         AuraLink link;
         link.source = static_cast<uint16_t>(s);
         link.target = static_cast<uint16_t>(t);
         link.stat = static_cast<uint8_t>(aura.stat);
-        link.amount = aura.amount;
+        link.amount = amount;
         world.auraLinks.push_back(link);
       }
     }
@@ -115,6 +122,8 @@ void recomputeLayout(World& world) {
     b.fireRateMult = finish(b.fireRateMult);
     b.damageMult = finish(b.damageMult);
     b.incomeMult = finish(b.incomeMult);
+    b.shieldDamageMult = finish(b.shieldDamageMult);       // M2.6
+    b.detect = clampf(b.detect, 0.0f, 1.0f);               // M2.6: a fraction
     if (world.siteElevated(s)) b.rangeMult *= 1.0f + db.rules.elevatedRangeBonus;
   }
 }

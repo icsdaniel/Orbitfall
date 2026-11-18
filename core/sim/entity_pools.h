@@ -16,6 +16,8 @@ namespace orbitfall {
   F(float, hp)        /* hit points left on this layer */      \
   F(float, timer)     /* behaviour timer, seconds */           \
   F(float, shield)    /* M2.3: shield points left */           \
+  F(float, slow)      /* M2.6: speed fraction taken off */     \
+  F(float, slowTime)  /* M2.6: seconds the slow still lasts */ \
   F(uint32_t, traits) /* trait bits */                         \
   F(uint16_t, type)   /* enemy definition index */             \
   F(uint16_t, flags)  /* EnemyFlag bits and behaviour state */ \
@@ -32,6 +34,10 @@ ORBITFALL_DECLARE_POOL(EnemyPool, ORBITFALL_ENEMY_FIELDS)
   F(float, life)     /* seconds left before it expires */      \
   F(float, range)    /* M2.2: the firing tower's range */      \
   F(float, splash)   /* M2.2: blast radius, 0 = none */        \
+  F(float, slow)     /* M2.6: slow applied on hit */           \
+  F(float, shieldMult) /* M2.6: x damage dealt to shields */   \
+  F(uint32_t, lastHit) /* M2.6: enemy pierced last, skip it */ \
+  F(uint16_t, pierce) /* M2.6: enemies it may still pass */    \
   F(uint16_t, type)  /* projectile definition index */         \
   F(uint16_t, flags) /* per-entity state bits */
 ORBITFALL_DECLARE_POOL(ProjectilePool, ORBITFALL_PROJECTILE_FIELDS)

@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "content/content.h"
+#include "sim/entity_pools.h"
 
 namespace orbitfall {
 
@@ -43,6 +44,19 @@ uint32_t spawnEnemy(World& world, int enemyType, int lane);
 // Layers left on an enemy of this definition with `hp` on its current layer
 // (BRIEF §6 landing: landDamagePerLayer * remaining layers).
 int remainingLayers(const EnemyDef& def, float hp);
+
+// M2.6: fraction of its speed a (Cryo) slowed enemy keeps right now.
+inline float speedFactor(const EnemyPool& e, uint32_t i) {
+  return e.slowTime[i] > 0.0f ? 1.0f - e.slow[i] : 1.0f;
+}
+
+// M2.6: slows enemy `i` by `slow` (the stronger slow wins) for `seconds`.
+inline void applySlow(EnemyPool& e, uint32_t i, float slow, float seconds) {
+  if (!(slow > 0.0f) || !(seconds > 0.0f)) return;
+  if (slow > kMaxSlow) slow = kMaxSlow;
+  if (e.slowTime[i] <= 0.0f || slow > e.slow[i]) e.slow[i] = slow;
+  if (seconds > e.slowTime[i]) e.slowTime[i] = seconds;
+}
 
 // Hit points an enemy of this definition starts its current layer with.
 inline float layerHp(const EnemyDef& def) {
