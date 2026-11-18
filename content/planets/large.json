@@ -1,9 +1,9 @@
 {
   "id": "large",
   "name": "Large",
-  "radius": 130,
+  "radius": 125,
   "slots": 48,
-  "hp": 140,
+  "hp": 200,
   "rotMaxSpeed": 60,
   "rotAccel": 240,
   "rotDamping": 4,
