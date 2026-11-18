@@ -50,6 +50,7 @@ struct ShieldView {
   bool lit = false;         // charging lightChargeMult times faster
   float halfWidth = 0.0f;   // rad
   float domeRadius = 0.0f;  // world units from the planet centre
+  float localAngle = 0.0f;  // planet-local angle of the site (footprint centre)
 };
 // One telegraphed falling object (within fallingWarnSeconds of impact).
 struct FallingWarningView {
@@ -264,13 +265,14 @@ inline void fill_snapshot(const orbitfall::World& w, const RunStatics& run, Snap
     v.shieldSlot = shieldCovering(w, f.bearing[i]);
     s.warnings.push_back(v);
   }
-  for (size_t i = 0; i < slots; ++i) {
-    const BuildingSlot& b = w.slots[i];
+  for (size_t i = 0; i < sites; ++i) {  // both rings (M2.1)
+    const BuildingSlot& b = w.site(static_cast<uint32_t>(i));
     if (b.type < 0) continue;
     const BuildingDef& def = w.content->buildings[static_cast<size_t>(b.type)];
     if (def.kind != BuildingKind::Shield) continue;
     ShieldView v;
     v.slot = static_cast<int32_t>(i);
+    v.localAngle = w.siteAngle(static_cast<uint32_t>(i));
     v.energy = b.energy;
     v.energyMax = def.shield.energy;
     v.online = (b.flags & kSlotShieldOffline) == 0;

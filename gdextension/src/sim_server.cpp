@@ -1059,11 +1059,10 @@ float SimServer::get_falling_warn_seconds() const {
 TypedArray<Dictionary> SimServer::get_shields() const {
   TypedArray<Dictionary> out;
   const float rotation = get_planet_rotation();
-  const int32_t slots = statics_.slotCount > 0 ? statics_.slotCount : 1;
   for (const orbitfall_binding::ShieldView& v : curr_->shields) {
     Dictionary d;
-    d["slot"] = v.slot;
-    d["angle"] = orbitfall::kTau * static_cast<float>(v.slot) / static_cast<float>(slots) + rotation;
+    d["slot"] = v.slot;  // site index (M2.1)
+    d["angle"] = v.localAngle + rotation;
     d["half_width"] = v.halfWidth;
     d["dome_radius"] = v.domeRadius;
     d["energy"] = v.energy;
