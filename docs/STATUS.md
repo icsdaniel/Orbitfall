@@ -28,6 +28,7 @@ Task checklist from BRIEF.md. Tick a task when its PR merges.
 
 ## M2 Depth of defence
 - [x] M2.3 Damage types and soft-counter matrix (`content/damage.json`), trait bitmask and shader cues, colour tiers, segmented HP bars with shield strip, enemy codex (`?` button or C). Screenshots in `docs/screenshots/m2.3/`
+- [x] M2.9 Headless `tools/sim-runner` (seeded bot runs to CSV, see its README) with the shared strategy bots in `core/bots/` (M1 four plus never-rotate, rotate-to-lane, rotate-to-weak-point, chase-the-light, face-the-threat, balance, bank-and-drill) and the opt-in threat coverage report (`./build/core_tests --no-skip -tc="threat coverage report"`). 1100 runs (11 bots x 100 seeds) in about 82 s; all 8 M1 waves have at least 3 answers
 
 ## Design track
 - [ ] D1 DECISIONS.md
