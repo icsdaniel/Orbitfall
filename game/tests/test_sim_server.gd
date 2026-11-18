@@ -231,21 +231,31 @@ func test_load_content_shipped_content_has_no_errors() -> void:
 	assert_float(server.get_surface_time_ease_seconds()).is_between(0.0, 5.0)
 
 	var buildings: Array[Dictionary] = server.get_building_defs()
-	assert_int(buildings.size()).is_equal(3)
+	assert_int(buildings.size()).is_equal(4)  # M2.4: + lance
 	var ids: Array[String] = []
 	for def: Dictionary in buildings:
 		assert_bool(def.has_all(
 			["index", "id", "name", "cost", "arc", "range", "kind", "shape", "color"])).is_true()
 		assert_int(def["index"]).is_equal(ids.size())
 		ids.append(def["id"])
-	assert_array(ids).contains(["cannon", "gatling", "solar_panel"])
+	assert_array(ids).contains(["cannon", "gatling", "lance", "solar_panel"])
 	var cannon: Dictionary = buildings[ids.find("cannon")]
 	assert_float(cannon["cost"]).is_greater(0.0)
 	assert_float(cannon["arc"]).is_between(0.05, PI)
 	assert_str(cannon["kind"]).is_equal("tower")
 	assert_str(buildings[ids.find("solar_panel")]["kind"]).is_equal("panel")
 	assert_str(buildings[ids.find("solar_panel")]["name"]).is_equal("Solar Panel")
-	assert_int(server.get_enemy_defs().size()).is_equal(5)
+	assert_int(server.get_enemy_defs().size()).is_equal(6)  # M2.4: + bulwark
+	# M2.4: the Lance is the precision tower; the Bulwark has a weak point.
+	assert_bool(buildings[ids.find("lance")]["precision"]).is_true()
+	assert_bool(buildings[ids.find("gatling")]["precision"]).is_false()
+	var bulwark: Dictionary = {}
+	for def: Dictionary in server.get_enemy_defs():
+		if def["id"] == "bulwark":
+			bulwark = def
+	assert_float(float((bulwark["weak_point"] as Dictionary)["mult"])).is_between(3.0, 4.0)
+	assert_float(float((bulwark["weak_point"] as Dictionary)["body_mult"])).is_equal_approx(0.25, 0.001)
+	assert_array(server.get_wave_sets()).is_equal(PackedStringArray(["m1", "trial_bulwark"]))
 
 
 func test_load_content_reports_errors() -> void:

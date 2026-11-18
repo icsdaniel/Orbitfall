@@ -19,6 +19,7 @@
 #include "sim/render_snapshot.h"
 #include "sim/world.h"
 #include "systems/enemies.h"
+#include "systems/combat.h"
 #include "systems/shadows.h"
 
 namespace orbitfall_binding {
@@ -90,6 +91,13 @@ struct Snapshot {
   uint32_t projectileOverflow = 0;
   std::vector<float> projRender, projVelX, projVelY;
   std::vector<LargeUnit> largeUnits;
+  // --- M2.4 weak points ---
+  uint32_t weakPointHits = 0;  // over the run
+  uint32_t bodyHits = 0;
+  bool hasHint = false;        // a precision tower and a weak-point enemy exist
+  orbitfall::WeakPointHint hint;
+  float hintX = 0.0f, hintY = 0.0f, hintVX = 0.0f, hintVY = 0.0f;  // the enemy
+  float hintSiteAngle = 0.0f;  // local angle of the precision tower's site
 };
 
 namespace detail {
@@ -177,6 +185,18 @@ inline void fill_snapshot(const orbitfall::World& w, const RunStatics& run, Snap
   // The shader reads custom.w as an outline width override; core puts the
   // layer's hp fraction there, which the placeholder shader has no use for.
   for (uint32_t i = 0; i < s.enemyCount; ++i) s.enemyRender[static_cast<size_t>(i) * 16 + 15] = 0.0f;
+
+  // M2.4: weak-point stats and the aim hint (what to turn, which way).
+  s.weakPointHits = w.weakPointHits;
+  s.bodyHits = w.bodyHits;
+  s.hasHint = weakPointHint(w, s.hint);
+  if (s.hasHint) {
+    s.hintX = e.posX[s.hint.enemy];
+    s.hintY = e.posY[s.hint.enemy];
+    s.hintVX = e.velX[s.hint.enemy];
+    s.hintVY = e.velY[s.hint.enemy];
+    s.hintSiteAngle = w.siteAngle(static_cast<uint32_t>(s.hint.slot));
+  }
 
   s.largeUnits.clear();
   if (w.content != nullptr && w.planet != nullptr) {

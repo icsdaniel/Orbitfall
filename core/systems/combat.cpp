@@ -177,11 +177,11 @@ bool weakPointHint(const World& world, WeakPointHint& out) {
   const float bearing = std::atan2(e.posY[best], e.posX[best]);
   int32_t bestSlot = -1;
   float bestTurn = 0.0f;
-  const uint32_t n = world.slotCount();
+  const uint32_t n = world.siteCount();  // both rings (M2.1)
   for (uint32_t s = 0; s < n; ++s) {
-    const int16_t type = world.slots[s].type;
+    const int16_t type = world.site(s).type;
     if (type < 0 || !db.buildings[static_cast<size_t>(type)].precision) continue;
-    const float turn = wrapPi(bearing - (world.slotAngle(s) + world.planetRotation));
+    const float turn = wrapPi(bearing - (world.siteAngle(s) + world.planetRotation));
     if (bestSlot < 0 || std::fabs(turn) < std::fabs(bestTurn)) {
       bestSlot = static_cast<int32_t>(s);
       bestTurn = turn;
@@ -325,8 +325,8 @@ void towerFire(World& world, float dt) {
     p.range[k] = stats.range;
     p.splash[k] = stats.splash;
     p.type[k] = static_cast<uint16_t>(b.type);
-    // M2.4: where it was launched from (slot normal, offsets ignored).
-    p.origin[k] = wrapTau(world.slotAngle(s) + world.planetRotation);
+    // M2.4: where it was launched from (site normal, offsets ignored).
+    p.origin[k] = wrapTau(world.siteAngle(s) + world.planetRotation);
   }
 }
 
