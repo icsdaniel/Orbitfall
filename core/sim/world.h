@@ -125,6 +125,9 @@ struct World {
   Phase phase = Phase::Wave;
   uint32_t waveIndex = 0;       // 0-based: the wave being played, or the next one
   uint32_t enemiesSpawned = 0;  // total over the run
+  // M2.4 weak points: hits on enemies that have one, over the run (debug overlay).
+  uint32_t weakPointHits = 0;  // within the window: weakPoint.mult
+  uint32_t bodyHits = 0;       // outside it: weakPoint.bodyMult
   float waveTime = 0.0f;          // sim seconds since the wave started
   float intermissionTime = 0.0f;  // real seconds in this intermission (auto-start)
   std::vector<uint16_t> spawned;  // per spawn entry of the current wave: units out so far

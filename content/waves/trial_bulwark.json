@@ -1,0 +1,22 @@
+{
+  "id": "trial_bulwark",
+  "planet": "medium",
+  "sun": "default",
+  "autoStartSeconds": 0,
+  "waves": [
+    { "wave": 1, "lightMult": 1.0, "spawnSeconds": 14,
+      "spawns": [ {"lane": "A", "enemy": "drifter_blue", "count": 8},
+                  {"lane": "A", "enemy": "bulwark", "count": 2} ],
+      "forecast": {"exactAhead": 1, "iconsAhead": 3} },
+    { "wave": 2, "lightMult": 1.0, "spawnSeconds": 18,
+      "spawns": [ {"lane": "A", "enemy": "drifter_blue", "count": 20},
+                  {"lane": "B", "enemy": "bulwark", "count": 4} ],
+      "forecast": {"exactAhead": 1, "iconsAhead": 3} },
+    { "wave": 3, "lightMult": 1.0, "spawnSeconds": 22,
+      "spawns": [ {"lane": "A", "enemy": "bulwark", "count": 4},
+                  {"lane": "A", "enemy": "dart", "count": 20},
+                  {"lane": "B", "enemy": "bulwark", "count": 4},
+                  {"lane": "B", "enemy": "drifter_green", "count": 30} ],
+      "forecast": {"exactAhead": 1, "iconsAhead": 3} }
+  ]
+}
