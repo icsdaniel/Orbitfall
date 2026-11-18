@@ -706,6 +706,7 @@ struct Loader {
     o.str("planet", pw.planet);
     o.str("sun", pw.sun);
     if (o.has("autoStartSeconds")) o.num("autoStartSeconds", ws.autoStartSeconds, kNonNeg);
+    if (o.has("startStardust")) o.num("startStardust", ws.startStardust, kNonNeg);  // M2.10
     if (const Value* waves = o.array("waves")) {
       if (waves->array.empty()) o.field_error("waves", "must not be empty");
       for (size_t i = 0; i < waves->array.size(); ++i) {

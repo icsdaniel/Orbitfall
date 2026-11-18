@@ -87,6 +87,7 @@ void initWorld(World& world, const SimConfig& config) {
   world.waveIndex = 0;
   world.enemiesSpawned = 0;
   world.stardust = world.planet ? world.planet->startStardust : 0.0f;
+  if (world.waveSet != nullptr && world.waveSet->startStardust >= 0.0f) world.stardust = world.waveSet->startStardust;
   world.slots.assign(world.planet ? static_cast<size_t>(world.planet->slots) : 0, BuildingSlot());
   world.elevated.assign(world.planet && world.planet->elevatedLayer ? world.slots.size() : 0,
                         BuildingSlot());

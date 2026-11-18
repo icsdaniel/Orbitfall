@@ -79,7 +79,7 @@ TEST_CASE("M2.10 falling objects: meteor and bomb") {
   REQUIRE(db.falling_index("meteor") != kNoIndex);
   REQUIRE(db.falling_index("bomb") != kNoIndex);
   const FallingDef& m = db.falling[static_cast<size_t>(db.falling_index("meteor"))];
-  CHECK(m.damage == doctest::Approx(4));
+  CHECK(m.damage == doctest::Approx(2));
   CHECK(m.speed == doctest::Approx(70));
   CHECK(m.size == doctest::Approx(6));
   CHECK(m.spawnRadius == doctest::Approx(650));
@@ -98,10 +98,10 @@ TEST_CASE("M2.10 shield building") {
   REQUIRE(i != kNoIndex);
   const BuildingDef& s = db.buildings[static_cast<size_t>(i)];
   CHECK(s.kind == BuildingKind::Shield);
-  CHECK(s.cost == doctest::Approx(90));
+  CHECK(s.cost == doctest::Approx(50));
   CHECK(s.shield.width == doctest::Approx(60 * kDeg));
   CHECK(s.shield.height == doctest::Approx(40));
-  CHECK(s.shield.energy == doctest::Approx(28));
+  CHECK(s.shield.energy == doctest::Approx(24));
   CHECK(s.shield.rechargeSeconds == doctest::Approx(12));
   CHECK(s.shield.regenPerSec == doctest::Approx(1));
   CHECK(s.shield.upkeepPerSec == doctest::Approx(0));  // DESIGN Q23 default: off in M2
@@ -153,9 +153,11 @@ TEST_CASE("M2.10 demo wave set m2_storm: volleys and a meteor storm, M1 waves un
   for (const WaveDef& w : db.waveSets[static_cast<size_t>(db.wave_set_index("m1"))].waves)
     CHECK(w.volleys.empty());
   const VolleyDef& storm = ws.waves[4].volleys[0];
-  CHECK(storm.bearing == doctest::Approx(300 * kDeg));
+  CHECK(storm.bearing == doctest::Approx(240 * kDeg));
   CHECK(storm.spread == doctest::Approx(20 * kDeg));
-  CHECK(storm.count == 45);
+  CHECK(storm.count == 40);
+  CHECK(ws.startStardust == doctest::Approx(400));  // the demo starts with a purse to build a layout
+  CHECK(db.waveSets[static_cast<size_t>(db.wave_set_index("m1"))].startStardust < 0.0f);  // M1: the planet's
 }
 
 TEST_CASE("M2.10 loader rejects broken falling, shield, bomber and volley samples") {
@@ -163,18 +165,18 @@ TEST_CASE("M2.10 loader rejects broken falling, shield, bomber and volley sample
                     "'speed'"));
   CHECK(anyContains(errorsWith("falling/meteor.json", "\"id\": \"meteor\"", "\"id\": \"rock\""),
                     "falling/meteor.json", "must match the file name"));
-  CHECK(anyContains(errorsWith("buildings/shield.json", "\"energy\": 28, ", ""), "buildings/shield.json",
+  CHECK(anyContains(errorsWith("buildings/shield.json", "\"energy\": 24, ", ""), "buildings/shield.json",
                     "missing field 'energy'"));
   CHECK(anyContains(errorsWith("buildings/shield.json", "\"widthDeg\": 60", "\"widthDeg\": 0"),
                     "buildings/shield.json", "'widthDeg'"));
   CHECK(anyContains(errorsWith("enemies/bomber.json", "\"bomb\": \"bomb\"", "\"bomb\": \"anvil\""),
                     "enemies/bomber.json", "unknown falling object id 'anvil'"));
-  CHECK(anyContains(errorsWith("waves/m2_storm.json", "\"object\": \"meteor\", \"bearingDeg\": 140",
-                               "\"object\": \"comet\", \"bearingDeg\": 140"),
+  CHECK(anyContains(errorsWith("waves/m2_storm.json", "\"object\": \"meteor\", \"bearingDeg\": 100",
+                               "\"object\": \"comet\", \"bearingDeg\": 100"),
                     "waves/m2_storm.json", "unknown falling object id 'comet'"));
   // A volley of objects that have no spawn height (bombs are only dropped).
-  CHECK(anyContains(errorsWith("waves/m2_storm.json", "\"object\": \"meteor\", \"bearingDeg\": 140",
-                               "\"object\": \"bomb\", \"bearingDeg\": 140"),
+  CHECK(anyContains(errorsWith("waves/m2_storm.json", "\"object\": \"meteor\", \"bearingDeg\": 100",
+                               "\"object\": \"bomb\", \"bearingDeg\": 100"),
                     "waves/m2_storm.json", "spawnRadius"));
   // A wave with neither lane spawns nor volleys.
   CHECK(anyContains(errorsWith("waves/m1.json", "[ {\"lane\": \"A\", \"enemy\": \"drifter_red\", \"count\": 14} ]",
@@ -182,7 +184,7 @@ TEST_CASE("M2.10 loader rejects broken falling, shield, bomber and volley sample
                     "waves/m1.json", "'spawns': must not be empty"));
   // ... but a meteor-only wave is fine.
   const std::vector<std::string> ok =
-      errorsWith("waves/m2_storm.json", "[ {\"lane\": \"A\", \"enemy\": \"drifter_red\", \"count\": 10} ]", "[]");
+      errorsWith("waves/m2_storm.json", "[ {\"lane\": \"A\", \"enemy\": \"drifter_red\", \"count\": 6} ]", "[]");
   CHECK_MESSAGE(ok.empty(), joined(ok));
 }
 

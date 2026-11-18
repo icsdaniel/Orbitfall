@@ -1,4 +1,4 @@
 {
-  "id": "meteor", "damage": 4, "speed": 70, "size": 6, "spawnRadius": 650,
+  "id": "meteor", "damage": 2, "speed": 70, "size": 6, "spawnRadius": 650,
   "visual": { "shape": "star", "color": "falling.meteor" }
 }

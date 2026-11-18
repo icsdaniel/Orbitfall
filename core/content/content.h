@@ -315,6 +315,7 @@ struct WaveSetDef {  // one file under content/waves/
   int planet = kNoIndex;
   int sun = kNoIndex;
   float autoStartSeconds = 0.0f;  // 0 = off
+  float startStardust = -1.0f;    // M2.10: < 0 = the planet's startStardust (demo sets may start richer)
   std::vector<WaveDef> waves;
 };
 
