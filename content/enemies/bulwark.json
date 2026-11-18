@@ -1,0 +1,7 @@
+{
+  "id": "bulwark", "behavior": "lane", "layers": 1, "hp": 24,
+  "speed": 24, "size": 13, "landDamage": 6, "bounty": 3,
+  "traits": ["bulwark"], "shadowCaster": false, "hpBar": false, "popsInto": null,
+  "weakPoint": { "mult": 3.5, "bodyMult": 0.25 },
+  "shape": "square", "visual": { "color": "enemy.bulwark" }
+}

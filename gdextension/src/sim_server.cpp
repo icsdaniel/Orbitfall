@@ -36,7 +36,8 @@ const char* const kEventNames[] = {
     "None",        "LayerPopped",   "EnemyKilled",  "PlanetHit",     "StardustChanged",
     "WaveStarted", "WaveCleared",   "ShadowChanged", "GameOver",     "Victory",
     "BuildingPlaced", "BuildingSold", "CommandRejected",
-    "BuildingUpgraded"};  // M2.2
+    "BuildingUpgraded",  // M2.2
+    "WeakPointHit"};     // M2.4
 constexpr int kEventNameCount = static_cast<int>(sizeof(kEventNames) / sizeof(kEventNames[0]));
 static_assert(kEventNameCount == static_cast<int>(orbitfall::EventType::Count), "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::CommandRejected) == 12, "event name table out of date");

@@ -106,9 +106,10 @@ TEST_CASE("every shipped content file loads with zero errors") {
                             db.enemies.size() + db.waveSets.size() + 2);
   CHECK(db.planets.size() == 1);
   CHECK(db.suns.size() == 1);
-  CHECK(db.buildings.size() == 3);
-  CHECK(db.enemies.size() == 5);
-  CHECK(db.waveSets.size() == 1);
+  CHECK(db.buildings.size() == 4);  // M2.4: + lance
+  CHECK(db.enemies.size() == 6);    // M2.4: + bulwark
+  CHECK(db.waveSets.size() == 2);   // M2.4: + trial_bulwark (m1 stays wave set 0)
+  CHECK(db.wave_set_index("m1") == 0);
 }
 
 TEST_CASE("loading from strings matches loading from the directory") {

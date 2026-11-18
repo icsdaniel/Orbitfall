@@ -261,6 +261,7 @@ class Obj {
 struct PendingEnemy {
   std::string where;
   std::string popsInto;
+  bool weakWindowSet = false;  // M2.4: else rules.weakWindowDeg applies
 };
 struct PendingSpawn {
   std::string lane, enemy;
@@ -318,6 +319,7 @@ struct Loader {
     if (o.has("upgradeExclusiveTier"))  // M2.2
       o.integer("upgradeExclusiveTier", r.upgradeExclusiveTier,
                 Range{0.0, false, static_cast<double>(kMaxUpgradeTiers)});
+    if (o.has("weakWindowDeg")) o.angle("weakWindowDeg", r.weakWindow, Range{0.0, true, 45.0});
   }
 
   // {"kinetic": 0.5, ...} -> out[type]. The floor is checked in resolve().
@@ -446,6 +448,7 @@ struct Loader {
         }
       }
       read_falloff(o, b);
+      if (o.has("precision")) o.boolean("precision", b.precision);  // M2.4
     } else if (kindOk && b.kind == BuildingKind::Panel) {
       o.num("panelRate", b.panelRate, kNonNeg);
     }
@@ -624,6 +627,23 @@ struct Loader {
       o.field_error("traits", "'shielded' needs a 'shield' amount > 0");
     if (e.shield > 0.0f) e.traits |= kTraitShielded;
     if (o.has("hpBarSegments")) o.integer("hpBarSegments", e.hpBarSegments, Range{1.0, false, 64.0});
+    PendingEnemy pe;
+    pe.where = o.where();
+    // M2.4: "weakPoint": {"mult": 3.5, "bodyMult": 0.25, "windowDeg": 8 (optional)}.
+    if (o.has("weakPoint")) {
+      const Obj w = o.object("weakPoint");
+      if (w.valid()) {
+        e.hasWeakPoint = true;
+        w.num("mult", e.weakPoint.mult, Range{1.0, false, 10.0});
+        w.num("bodyMult", e.weakPoint.bodyMult, Range{0.0, false, 1.0});
+        if (w.has("windowDeg")) {
+          pe.weakWindowSet = w.angle("windowDeg", e.weakPoint.window, Range{0.0, true, 45.0});
+        }
+      }
+    }
+    if ((e.traits & kTraitBulwark) && !e.hasWeakPoint)
+      o.field_error("traits", "'bulwark' needs a 'weakPoint' object");
+    if (e.hasWeakPoint) e.traits |= kTraitBulwark;
     if (e.behavior == EnemyBehavior::Eclipser) {
       const Obj h = o.object("hover");
       if (h.valid()) {
@@ -637,8 +657,6 @@ struct Loader {
           h.field_error("spawnRadius", "must be >= hoverRadius");
       }
     }
-    PendingEnemy pe;
-    pe.where = o.where();
     if (o.has("popsInto")) o.str("popsInto", pe.popsInto);
     pendingEnemies.push_back(std::move(pe));
     db.enemies.push_back(std::move(e));
@@ -753,6 +771,11 @@ struct Loader {
         const float m = e.damageMult[static_cast<int>(dt.value)];
         if (m < floor)
           err(pe.where, std::string("damageMult: '") + dt.name + "': multiplier " + fmt(m) + floorMsg);
+      }
+      if (e.hasWeakPoint) {  // M2.4
+        if (!pe.weakWindowSet) e.weakPoint.window = db.rules.weakWindow;
+        if (e.weakPoint.bodyMult < floor)
+          err(pe.where, "'weakPoint': 'bodyMult' " + fmt(e.weakPoint.bodyMult) + floorMsg);
       }
       if (!pe.popsInto.empty()) {
         e.popsInto = db.enemy_index(pe.popsInto);

@@ -23,6 +23,7 @@ enum class EventType : uint8_t {
   BuildingSold,     // a = slot, b = building index, value = refund
   CommandRejected,  // a = slot, b = RejectReason, x = CommandType, value = cost (Unaffordable)
   BuildingUpgraded, // M2.2: a = slot, b = path, x = new tier of that path, value = cost paid
+  WeakPointHit,     // M2.4: a = enemy type, b = building index of the shot, x/y, value = damage
   Count
 };
 
