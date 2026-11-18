@@ -1,0 +1,9 @@
+{
+  "id": "shield", "kind": "shield", "footprint": 1, "layer": "ground", "cost": 90,
+  "aimMount": false, "aimOffsetDeg": 0,
+  "shield": { "widthDeg": 60, "height": 40, "energy": 28, "rechargeSeconds": 12,
+              "regenPerSec": 1, "upkeepPerSec": 0 },
+  "targeting": [],
+  "paths": [], "active": null,
+  "visual": { "shape": "hexagon", "color": "building.shield" }
+}

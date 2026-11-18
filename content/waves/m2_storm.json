@@ -1,0 +1,30 @@
+{
+  "id": "m2_storm",
+  "planet": "medium",
+  "sun": "default",
+  "autoStartSeconds": 0,
+  "waves": [
+    { "wave": 1, "lightMult": 1.0, "spawnSeconds": 12,
+      "spawns": [ {"lane": "A", "enemy": "drifter_red", "count": 10} ],
+      "falling": [ {"object": "meteor", "bearingDeg": 140, "spreadDeg": 10, "count": 8, "startSeconds": 4, "seconds": 6} ],
+      "forecast": {"exactAhead": 1, "iconsAhead": 3} },
+    { "wave": 2, "lightMult": 1.0, "spawnSeconds": 14,
+      "spawns": [ {"lane": "B", "enemy": "drifter_blue", "count": 12},
+                  {"lane": "A", "enemy": "bomber", "count": 2} ],
+      "falling": [ {"object": "meteor", "bearingDeg": 250, "spreadDeg": 12, "count": 12, "startSeconds": 3, "seconds": 8} ],
+      "forecast": {"exactAhead": 1, "iconsAhead": 3} },
+    { "wave": 3, "lightMult": 1.0, "spawnSeconds": 14,
+      "spawns": [ {"lane": "A", "enemy": "dart", "count": 10} ],
+      "falling": [ {"object": "meteor", "bearingDeg": 200, "spreadDeg": 15, "count": 30, "startSeconds": 2, "seconds": 12} ],
+      "forecast": {"exactAhead": 1, "iconsAhead": 3} },
+    { "wave": 4, "lightMult": 0.8, "spawnSeconds": 16,
+      "spawns": [ {"lane": "A", "enemy": "bomber", "count": 3},
+                  {"lane": "B", "enemy": "drifter_blue", "count": 20} ],
+      "falling": [ {"object": "meteor", "bearingDeg": 80, "spreadDeg": 15, "count": 20, "startSeconds": 4, "seconds": 10} ],
+      "forecast": {"exactAhead": 1, "iconsAhead": 3} },
+    { "wave": 5, "lightMult": 1.0, "spawnSeconds": 18,
+      "spawns": [ {"lane": "B", "enemy": "drifter_green", "count": 20} ],
+      "falling": [ {"object": "meteor", "bearingDeg": 300, "spreadDeg": 20, "count": 45, "startSeconds": 3, "seconds": 15} ],
+      "forecast": {"exactAhead": 1, "iconsAhead": 3} }
+  ]
+}
