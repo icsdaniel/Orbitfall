@@ -209,6 +209,7 @@ func _build_scene() -> void:
 	input_router.debug_toggled.connect(hud.toggle_debug)
 	input_router.codex_toggled.connect(hud.toggle_codex)  # M2.3
 	input_router.codex_close_requested.connect(hud.codex.close)
+	input_router.layer_step_requested.connect(_on_layer_step_requested)  # M2.1
 	bands.band_changed.connect(_on_band_changed)
 	hud.debug_toggle_requested.connect(hud.toggle_debug)
 	hud.restart_requested.connect(restart)
@@ -416,6 +417,18 @@ func _on_build_above_requested() -> void:
 	if slot < 0 or not planet_view.can_build_above(slot):
 		return
 	_select_slot(slot, 1)
+
+
+## M2.1 keyboard path (W/Up, S/Down): up from the selected ground building to the
+## elevated slot above it (same as "Build above"), down from an elevated site to
+## its foundation.
+func _on_layer_step_requested(direction: int) -> void:
+	if selected_slot < 0 or not hud.build_menu.is_open():
+		return
+	if direction > 0 and selected_layer == 0:
+		_on_build_above_requested()
+	elif direction < 0 and selected_layer > 0:
+		_select_slot(selected_slot, 0)
 
 
 func _on_sell_requested() -> void:

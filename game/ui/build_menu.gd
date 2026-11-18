@@ -53,7 +53,10 @@ func _init() -> void:
 	_build.name = "Build"
 	_build.pressed.connect(_on_build_pressed)
 	_box.add_child(_build)
-	_above = UiKit.button("Build above", Vector2(230.0, 68.0), Color(0.14, 0.36, 0.42))
+	# Keyboard path: W/Up (InputRouter); the key is named where there is a keyboard.
+	var above_text: String = "Build above" if DisplayServer.is_touchscreen_available() \
+		else "Build above (W)"
+	_above = UiKit.button(above_text, Vector2(230.0, 68.0), Color(0.14, 0.36, 0.42))
 	_above.name = "BuildAbove"
 	_above.pressed.connect(_on_above_pressed)
 	_box.add_child(_above)
@@ -151,7 +154,10 @@ func open_building(
 	_list.visible = false
 	_build.visible = false
 	_sell.visible = true
-	_sell.disabled = carrying
+	# A foundation in use stays pressable: the sim refuses the sale and the HUD
+	# toasts why; the button is only dimmed.
+	_sell.disabled = false
+	_sell.modulate = Color(1.0, 1.0, 1.0, 0.55) if carrying else Color.WHITE
 	_above.visible = bool(extra.get("can_build_above", false))
 	visible = true
 

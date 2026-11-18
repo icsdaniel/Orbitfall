@@ -126,7 +126,7 @@ func test_tap_a_ground_building_then_build_above_places_on_the_elevated_layer() 
 	assert_int(game.selected_layer).is_equal(0)
 
 
-func test_ground_menu_of_a_foundation_in_use_disables_sell_and_hides_build_above() -> void:
+func test_selling_a_foundation_in_use_toasts_the_rejection_and_hides_build_above() -> void:
 	var game: Game = _make_game()
 	var sim: MockSimServer = game.sim as MockSimServer
 	var menu: BuildMenu = game.hud.build_menu
@@ -136,8 +136,15 @@ func test_ground_menu_of_a_foundation_in_use_disables_sell_and_hides_build_above
 	sim.clear_calls()
 	_tap_site(game, 9)
 	assert_bool(menu.above_button().visible).is_false()
-	assert_bool(menu.sell_button().disabled).is_true()
 	assert_str(menu.info_text()).contains("sell that one first")
+	# Sell stays pressable: the sim refuses and the HUD says why.
+	assert_bool(menu.sell_button().disabled).is_false()
+	menu.sell_button().pressed.emit()
+	assert_array(sim.calls_to(&"sell_building")[0]).contains_exactly([9])
+	game._handle_events()
+	assert_str(game.hud._hint.text).is_equal("Sell the building above first")
+	assert_int(sim.get_slot_buildings()[9]).is_equal(gatling)
+	assert_int(sim.get_site_buildings()[N + 9]).is_equal(gatling)
 	# Tapping the elevated marker selects the elevated building; selling it
 	# sends its site index.
 	_tap_site(game, N + 9)
@@ -146,12 +153,48 @@ func test_ground_menu_of_a_foundation_in_use_disables_sell_and_hides_build_above
 	assert_str(menu.info_text()).contains("+15% range")
 	assert_bool(menu.sell_button().disabled).is_false()
 	menu.sell_button().pressed.emit()
-	assert_array(sim.calls_to(&"sell_building")[0]).contains_exactly([N + 9])
+	assert_array(sim.calls_to(&"sell_building")[1]).contains_exactly([N + 9])
 	assert_int(sim.get_site_buildings()[N + 9]).is_equal(-1)
 	# Now the foundation can go.
 	_tap_site(game, 9)
 	assert_bool(menu.above_button().visible).is_true()
 	assert_bool(menu.sell_button().disabled).is_false()
+
+
+func test_keyboard_w_and_s_step_between_a_foundation_and_the_slot_above() -> void:
+	var game: Game = _make_game()
+	var sim: MockSimServer = game.sim as MockSimServer
+	var menu: BuildMenu = game.hud.build_menu
+	var gatling: int = _building(game, "gatling")
+	sim.place_building(7, gatling)
+	sim.clear_calls()
+	# Nothing selected: W does nothing.
+	game.input_router.handle_event(key(KEY_W, true))
+	game.input_router.handle_event(key(KEY_W, false))
+	assert_bool(menu.is_open()).is_false()
+	# Click the ground building, W opens the build list above it (as "Build above").
+	_tap_site(game, 7)
+	game.input_router.handle_event(key(KEY_W, true))
+	game.input_router.handle_event(key(KEY_W, false))
+	assert_int(game.selected_slot).is_equal(7)
+	assert_int(game.selected_layer).is_equal(1)
+	assert_int(menu.layer).is_equal(1)
+	assert_bool(menu.build_button().visible).is_true()
+	menu.building_button(gatling).pressed.emit()  # preview
+	menu.building_button(gatling).pressed.emit()  # build
+	assert_array(sim.calls_to(&"place_building")[0]).contains_exactly([7, gatling, 0.0, 1])
+	# Select the elevated tower; Down goes back to its foundation.
+	_tap_site(game, N + 7)
+	assert_int(game.selected_layer).is_equal(1)
+	game.input_router.handle_event(key(KEY_DOWN, true))
+	game.input_router.handle_event(key(KEY_DOWN, false))
+	assert_int(game.selected_layer).is_equal(0)
+	assert_int(menu.layer).is_equal(0)
+	assert_bool(menu.sell_button().visible).is_true()
+	# Up on a foundation already carrying a building does not open anything new.
+	game.input_router.handle_event(key(KEY_UP, true))
+	game.input_router.handle_event(key(KEY_UP, false))
+	assert_int(game.selected_layer).is_equal(0)
 
 
 func test_elevated_marker_is_only_tappable_above_a_foundation() -> void:
