@@ -2,6 +2,7 @@
 
 #include "sim/mathx.h"
 #include "sim/world.h"
+#include "systems/upgrades.h"
 
 namespace orbitfall {
 namespace {
@@ -189,7 +190,9 @@ bool sellBuilding(World& world, int32_t slot) {
     }
   }
   const int32_t building = world.site(site).type;
-  const float refund = def->cost * world.planet->sellRefund;
+  // M2.2: the refund also covers what was spent on upgrades.
+  const float refund =
+      (def->cost + upgradeSpent(*def, world.site(site).tiers)) * world.planet->sellRefund;
   for (uint32_t k = 0; k < width; ++k) world.site(base + (first + k) % n) = BuildingSlot();
   recomputeLayout(world);
   addStardust(world, refund);

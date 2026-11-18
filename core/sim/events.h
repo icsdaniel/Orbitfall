@@ -22,6 +22,7 @@ enum class EventType : uint8_t {
   BuildingPlaced,   // a = slot (site index, see World), b = building index, value = cost paid
   BuildingSold,     // a = slot, b = building index, value = refund
   CommandRejected,  // a = slot, b = RejectReason, x = CommandType, value = cost (Unaffordable)
+  BuildingUpgraded, // M2.2: a = slot, b = path, x = new tier of that path, value = cost paid
   Count
 };
 
@@ -39,6 +40,7 @@ enum class RejectReason : int32_t {
   NoFoundation,      // elevated slot without a building on the ground slot below
   WrongLayer,        // the building may not stand on that layer
   SupportsElevated,  // selling a foundation that carries an elevated building
+  UpgradeBlocked,   // M2.2: no such path, top tier reached, or capped by the other path
 };
 
 // Generic payload; each emitting system documents which fields it fills.

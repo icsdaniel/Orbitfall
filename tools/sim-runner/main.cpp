@@ -142,7 +142,7 @@ void writeCsv(std::FILE* f, const ContentDB& db, const WaveSetDef& set, const st
               const std::vector<uint32_t>& seeds, const std::vector<RunResult>& runs) {
   std::fprintf(f, "wave_set,planet,seed,bot,family,outcome,waves_survived,waves_total,hp_left,hp_max,"
                   "stardust_earned,stardust_from_panels,stardust_spent,stardust_left,run_seconds,ticks,"
-                  "kills,leaks,leak_damage,towers,panels,rejected,hash");
+                  "kills,leaks,leak_damage,towers,panels,upgrades,rejected,hash");
   for (const EnemyDef& e : db.enemies) std::fprintf(f, ",leaks_%s", e.id.c_str());
   for (const WaveDef& w : set.waves) std::fprintf(f, ",wave%d_hp_lost", w.wave);
   std::fprintf(f, "\n");
@@ -151,10 +151,10 @@ void writeCsv(std::FILE* f, const ContentDB& db, const WaveSetDef& set, const st
     const RunResult& r = runs[i];
     float damage = 0.0f;
     for (float d : r.leakDamageByEnemy) damage += d;
-    std::fprintf(f, "%s,%s,%u,%s,%s,%s,%u,%u,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.2f,%u,%u,%u,%.1f,%u,%u,%u,%016llx",
+    std::fprintf(f, "%s,%s,%u,%s,%s,%s,%u,%u,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.2f,%u,%u,%u,%.1f,%u,%u,%u,%u,%016llx",
                  set.id.c_str(), planet.c_str(), seeds[i], strategyId(who[i]), strategyFamily(who[i]), outcome(r),
                  r.wavesCleared, r.wavesTotal, r.hp, r.hpMax, r.earned, r.fromPanels, r.spent, r.stardust,
-                 r.waveSeconds, r.ticks, r.kills, r.totalLeaks(), damage, r.towers, r.panels, r.rejected,
+                 r.waveSeconds, r.ticks, r.kills, r.totalLeaks(), damage, r.towers, r.panels, r.upgrades, r.rejected,
                  static_cast<unsigned long long>(r.hash));
     for (uint32_t n : r.leaksByEnemy) std::fprintf(f, ",%u", n);
     // Empty = the run never reached that wave.

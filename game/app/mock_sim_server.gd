@@ -38,6 +38,13 @@ const LAYER_ANY: int = 2
 const LAYER_NAMES: Dictionary[String, int] = {"ground": 0, "elevated": 1, "any": 2}
 const KIND_BITS: Dictionary[String, int] = {"tower": 1, "panel": 2, "support": 4}
 const AURA_STATS: Dictionary[String, int] = {"range": 0, "fireRate": 1, "damage": 2, "income": 3}
+const REJECT_UPGRADE_BLOCKED: int = 11  # M2.2
+## M2.2: paths per building, and the stats an upgrade tier may modify (JSON name -> key).
+const UPGRADE_PATHS: int = 2
+const UPGRADE_STATS: Dictionary[String, String] = {
+	"damage": "damage", "fireRate": "fire_rate", "range": "range", "arc": "arc",
+	"splash": "splash", "income": "income",
+}
 const SHAPES: Dictionary[String, int] = {
 	"circle": 0, "triangle": 1, "square": 2, "hexagon": 3, "star": 4,
 	"diamond": 5, "disc": 6,
@@ -113,6 +120,9 @@ var _elevated_bonus: float = 0.15
 var _site_owner: PackedInt32Array = PackedInt32Array()
 var _site_mods: PackedFloat32Array = PackedFloat32Array()
 var _links: PackedInt32Array = PackedInt32Array()
+## M2.2: bought tiers, UPGRADE_PATHS entries per site.
+var _slot_tiers: PackedInt32Array = PackedInt32Array()
+var _exclusive_tier: int = 2
 
 var _e_pos: PackedVector2Array = PackedVector2Array()
 var _e_prev: PackedVector2Array = PackedVector2Array()
@@ -237,6 +247,7 @@ func place_building(slot: int, building: int, aim_offset: float = 0.0, layer: in
 	_slot_cooldown[site] = 0.0
 	for k: int in width:
 		_site_owner[base + (first + k) % _slot_count] = site
+	_set_tiers(site, [0, 0])  # M2.2
 	_recompute_layout()
 	_emit(&"BuildingPlaced", site, building)
 	_emit(&"StardustChanged", int(_stardust), 0)
@@ -262,15 +273,216 @@ func sell_building(slot: int) -> void:
 			if _site_owner[_slot_count + (first + k) % _slot_count] >= 0:
 				_emit(&"CommandRejected", slot, REJECT_SUPPORTS_ELEVATED)
 				return
-	var cost: float = _buildings[building]["cost"]
+	# M2.2: the refund covers the upgrades too.
+	var cost: float = float(_buildings[building]["cost"]) + _upgrade_spent(_buildings[building], _tiers(site))
 	_stardust += floorf(cost * _sell_refund)
 	_emit(&"BuildingSold", site, building)
 	_slot_building[site] = -1
+	_set_tiers(site, [0, 0])
 	for k: int in width:
 		_site_owner[base + (first + k) % _slot_count] = -1
 	_recompute_layout()
 	_emit(&"StardustChanged", int(_stardust), 0)
 	_update_light()
+
+
+# --- M2.2 upgrade paths (begin) ---
+
+func upgrade_building(slot: int, path: int) -> void:
+	_record(&"upgrade_building", [slot, path])
+	var preview: Dictionary = get_upgrade_preview(slot, path)
+	if preview.is_empty() or _phase >= PHASE_WON or not bool(preview["can_upgrade"]):
+		# b as core RejectReason: Unaffordable or UpgradeBlocked (empty: EmptySlot).
+		var unaffordable: bool = not preview.is_empty() and bool(preview["has_next"]) \
+			and not bool(preview["locked"]) and not bool(preview["affordable"])
+		var reason: int = REJECT_UPGRADE_BLOCKED
+		if _anchor(slot) < 0:
+			reason = REJECT_EMPTY_SLOT if slot >= 0 and slot < _slot_building.size() else REJECT_INVALID_SLOT
+		elif unaffordable and _phase < PHASE_WON:
+			reason = REJECT_UNAFFORDABLE
+		_emit(&"CommandRejected", slot, reason)
+		return
+	var site: int = _anchor(slot)
+	var tiers: Array[int] = _tiers(site)
+	tiers[path] += 1
+	_set_tiers(site, tiers)
+	_stardust -= float(preview["cost"])
+	_emit(&"BuildingUpgraded", site, path, Vector2(float(tiers[path]), 0.0))
+	_emit(&"StardustChanged", int(_stardust), 0)
+	_update_light()
+
+
+func get_slot_tiers(slot: int) -> PackedInt32Array:
+	var site: int = _anchor(slot)
+	return PackedInt32Array(_tiers(site) if site >= 0 else [0, 0])
+
+
+func get_upgrade_preview(slot: int, path: int) -> Dictionary:
+	slot = _anchor(slot)
+	if slot < 0:
+		return {}
+	var def: Dictionary = _buildings[_slot_building[slot]]
+	var paths: Array = def.get("paths", [])
+	if path < 0 or path >= mini(paths.size(), UPGRADE_PATHS):
+		return {}
+	var tiers: Array[int] = _tiers(slot)
+	var pd: Dictionary = paths[path]
+	var tier_defs: Array = pd["tiers"]
+	var tier: int = tiers[path]
+	var cap: int = tier_defs.size()
+	for other: int in mini(paths.size(), UPGRADE_PATHS):
+		if other != path and tiers[other] > _exclusive_tier:
+			cap = mini(cap, _exclusive_tier)
+	var has_next: bool = tier < tier_defs.size()
+	var before: Dictionary = _site_stats(def, tiers, slot)
+	var after: Dictionary = before
+	var cost: float = 0.0
+	var next_name: String = ""
+	if has_next:
+		var next: Array[int] = tiers.duplicate()
+		next[path] += 1
+		after = _site_stats(def, next, slot)
+		cost = float(tier_defs[tier]["cost"])
+		next_name = str(tier_defs[tier]["name"])
+	var changes: Array[Dictionary] = []
+	for key: String in before:
+		if not is_equal_approx(float(before[key]), float(after[key])):
+			changes.append({"stat": key, "before": before[key], "after": after[key]})
+	var affordable: bool = has_next and _stardust >= cost
+	return {
+		"path": path, "id": pd["id"], "name": pd["name"], "tier": tier,
+		"max_tier": tier_defs.size(), "cap": cap, "has_next": has_next, "next_name": next_name,
+		"cost": cost, "affordable": affordable, "can_upgrade": affordable and tier < cap,
+		"locked": has_next and tier >= cap, "before": before, "after": after, "changes": changes,
+	}
+
+
+func get_slot_upgrades(slot: int) -> Dictionary:
+	slot = _anchor(slot)
+	if slot < 0:
+		return {}
+	var def: Dictionary = _buildings[_slot_building[slot]]
+	var tiers: Array[int] = _tiers(slot)
+	var spent: float = _upgrade_spent(def, tiers)
+	var paths: Array[Dictionary] = []
+	var path_defs: Array = def.get("paths", [])
+	for path: int in mini(path_defs.size(), UPGRADE_PATHS):
+		paths.append(get_upgrade_preview(slot, path))
+	return {
+		"slot": slot, "building": _slot_building[slot], "tiers": PackedInt32Array(tiers),
+		"stats": _site_stats(def, tiers, slot), "spent": spent,
+		"sell_refund": (float(def["cost"]) + spent) * _sell_refund, "paths": paths,
+	}
+
+
+## M2.1: the anchor site of the building covering `slot` (either ring), or -1.
+func _anchor(slot: int) -> int:
+	if slot < 0 or slot >= _site_owner.size():
+		return -1
+	var site: int = _site_owner[slot]
+	return site if site >= 0 and _slot_building[site] >= 0 else -1
+
+
+## Upgraded stats times the site's M2.1 multipliers (elevated bonus, auras).
+func _site_stats(def: Dictionary, tiers: Array[int], site: int) -> Dictionary:
+	var stats: Dictionary = _stats(def, tiers)
+	if 4 * site + 3 < _site_mods.size():
+		stats["range"] = float(stats["range"]) * _site_mods[4 * site]
+		stats["fire_rate"] = float(stats["fire_rate"]) * _site_mods[4 * site + 1]
+		stats["damage"] = float(stats["damage"]) * _site_mods[4 * site + 2]
+		stats["income"] = float(stats["income"]) * _site_mods[4 * site + 3]
+	return stats
+
+
+func _tiers(slot: int) -> Array[int]:
+	var out: Array[int] = []
+	for path: int in UPGRADE_PATHS:
+		var i: int = slot * UPGRADE_PATHS + path
+		out.append(_slot_tiers[i] if slot >= 0 and i < _slot_tiers.size() else 0)
+	return out
+
+
+func _set_tiers(slot: int, tiers: Array) -> void:
+	for path: int in UPGRADE_PATHS:
+		_slot_tiers[slot * UPGRADE_PATHS + path] = int(tiers[path])
+
+
+## As core: effective = (base + adds) * muls over every bought tier of both paths.
+func _stats(def: Dictionary, tiers: Array[int]) -> Dictionary:
+	var stats: Dictionary = {
+		"damage": float(def["damage"]), "fire_rate": float(def["fire_rate"]),
+		"range": float(def["range"]), "arc": float(def["arc"]),
+		"splash": float(def["splash"]), "income": float(def["panel_rate"]),
+	}
+	var mul: Dictionary = {}
+	var paths: Array = def.get("paths", [])
+	for path: int in mini(paths.size(), UPGRADE_PATHS):
+		var tier_defs: Array = paths[path]["tiers"]
+		for t: int in mini(tiers[path], tier_defs.size()):
+			var mods: Array = tier_defs[t]["mods"]
+			for mod: Dictionary in mods:
+				var key: String = mod["stat"]
+				if str(mod["op"]) == "mul":
+					mul[key] = float(mul.get(key, 1.0)) * float(mod["value"])
+				else:
+					stats[key] = float(stats[key]) + float(mod["value"])
+	for key: String in mul:
+		stats[key] = float(stats[key]) * float(mul[key])
+	for key: String in stats:
+		stats[key] = maxf(float(stats[key]), 0.0)
+	stats["arc"] = minf(float(stats["arc"]), PI)
+	return stats
+
+
+func _upgrade_spent(def: Dictionary, tiers: Array[int]) -> float:
+	var spent: float = 0.0
+	var paths: Array = def.get("paths", [])
+	for path: int in mini(paths.size(), UPGRADE_PATHS):
+		var tier_defs: Array = paths[path]["tiers"]
+		for t: int in mini(tiers[path], tier_defs.size()):
+			spent += float(tier_defs[t]["cost"])
+	return spent
+
+
+## JSON "paths" -> [{id, name, tiers: [{name, cost, mods: [{stat, op, value}]}]}] with
+## stat keys as in the stats dictionaries and arc adds in radians.
+func _read_paths(raw: Variant) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if not raw is Array:
+		return out
+	for p: Variant in raw as Array:
+		if not p is Dictionary or out.size() >= UPGRADE_PATHS:
+			continue
+		var pd: Dictionary = p
+		var tiers: Array[Dictionary] = []
+		var raw_tiers: Array = pd.get("tiers", [])
+		for t: Variant in raw_tiers:
+			if not t is Dictionary:
+				continue
+			var td: Dictionary = t
+			var mods: Array[Dictionary] = []
+			var raw_mods: Array = td.get("mods", [])
+			for m: Variant in raw_mods:
+				if not m is Dictionary:
+					continue
+				var md: Dictionary = m
+				var stat: String = str(md.get("stat", ""))
+				if not UPGRADE_STATS.has(stat):
+					continue
+				var op: String = str(md.get("op", "mul"))
+				var value: float = float(md.get("value", 1.0))
+				if stat == "arc" and op == "add":
+					value = deg_to_rad(value)
+				mods.append({"stat": UPGRADE_STATS[stat], "op": op, "value": value})
+			tiers.append({
+				"name": str(td.get("name", "Tier %d" % (tiers.size() + 1))),
+				"cost": float(td.get("cost", 0.0)), "mods": mods,
+			})
+		var id: String = str(pd.get("id", "path%d" % out.size()))
+		out.append({"id": id, "name": str(pd.get("name", id)), "tiers": tiers})
+	return out
+
+# --- M2.2 upgrade paths (end) ---
 
 
 func set_aim(slot: int, offset: float) -> void:
@@ -747,6 +959,8 @@ func _reset_run() -> void:
 	_slot_cooldown.fill(0.0)
 	_slot_aim.resize(sites)
 	_slot_aim.fill(0.0)
+	_slot_tiers.resize(sites * UPGRADE_PATHS)
+	_slot_tiers.fill(0)
 	_site_owner.resize(sites)
 	_site_owner.fill(-1)
 	_recompute_layout()
@@ -986,7 +1200,7 @@ func _update_light() -> void:
 			panels += 1
 			if flags & FLAG_LIT and not flags & FLAG_SHADED:
 				lit_panels += 1
-				_income += float(_buildings[b]["panel_rate"]) * strength * _site_mods[4 * slot + 3]
+				_income += float(_stats(_buildings[b], _tiers(slot))["income"]) * strength * _site_mods[4 * slot + 3]
 	_lit_fraction = float(lit_panels) / float(panels) if panels > 0 else 0.0
 
 
@@ -1001,15 +1215,16 @@ func _step_towers() -> void:
 		if b < 0:
 			continue
 		var def: Dictionary = _buildings[b]
-		var fire_rate: float = float(def["fire_rate"]) * _site_mods[4 * slot + 1]
+		var stats: Dictionary = _stats(def, _tiers(slot))  # M2.2: with upgrades
+		var fire_rate: float = float(stats["fire_rate"]) * _site_mods[4 * slot + 1]
 		if fire_rate <= 0.0:
 			continue
 		var angle: float = _site_angle(slot) + _rot
 		var origin: Vector2 = Vector2.from_angle(angle) * _site_radius(slot)
 		var axis: Vector2 = Vector2.from_angle(angle + _slot_aim[slot])
-		var arc: float = def["arc"]
-		var tower_range: float = float(def["range"]) * _site_mods[4 * slot]
-		var hit: float = float(def["damage"]) * _site_mods[4 * slot + 2]
+		var arc: float = stats["arc"]
+		var tower_range: float = float(stats["range"]) * _site_mods[4 * slot]
+		var hit: float = float(stats["damage"]) * _site_mods[4 * slot + 2]
 		var best: int = -1
 		var best_dist: float = INF
 		for i: int in _e_pos.size():
@@ -1030,7 +1245,7 @@ func _step_towers() -> void:
 			continue
 		_slot_cooldown[slot] = 1.0 / fire_rate
 		var target: Vector2 = _e_pos[best]
-		var splash: float = def["splash"]
+		var splash: float = stats["splash"]
 		if splash > 0.0:
 			for i: int in _e_pos.size():
 				if _e_pos[i].distance_to(target) <= splash:
@@ -1216,6 +1431,7 @@ func _load_json_content(errors: PackedStringArray) -> void:
 	_min_damage_mult = maxf(float(rules.get("minDamageMult", 0.25)), 0.25)
 	_load_damage_rules()
 	_spawn_radius = float(rules.get("spawnRadius", 900.0))
+	_exclusive_tier = int(rules.get("upgradeExclusiveTier", 2))  # M2.2
 	_surface_ease = float(rules.get("surfaceTimeEaseSeconds", 0.3))
 	_elevated_bonus = float(rules.get("elevatedRangeBonus", 0.15))
 	if not planet.is_empty():
@@ -1273,6 +1489,7 @@ func _load_json_content(errors: PackedStringArray) -> void:
 					"radius": int(raw.get("radius", 1)), "kinds": kinds,
 				})
 			b["auras"] = auras
+			b["paths"] = _read_paths(d.get("paths", []))  # M2.2
 			_buildings.append(b)
 	var enemy_ids: Dictionary[String, int] = {}
 	var enemy_list: Array[Dictionary] = _read_dir("enemies")

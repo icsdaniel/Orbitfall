@@ -4,6 +4,19 @@
   "projectile": { "kind": "dot", "speed": 900, "damage": 1, "type": "kinetic", "splash": 0 },
   "falloff": [[0, 1], [1, 1]],
   "targeting": ["first", "strong", "close"],
-  "paths": [], "active": null,
+  "paths": [
+    { "id": "rapid", "name": "Rapid Fire", "tiers": [
+      { "name": "Oiled Feed", "cost": 35, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.3 }] },
+      { "name": "Twin Barrels", "cost": 55, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.3 }] },
+      { "name": "Belt Feed", "cost": 85, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.35 }] },
+      { "name": "Storm Drum", "cost": 130, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.4 }, { "stat": "arc", "op": "add", "value": 10 }] }
+    ] },
+    { "id": "reach", "name": "Long Reach", "tiers": [
+      { "name": "Long Barrel", "cost": 35, "mods": [{ "stat": "range", "op": "mul", "value": 1.15 }] },
+      { "name": "Wide Mount", "cost": 55, "mods": [{ "stat": "arc", "op": "add", "value": 10 }] },
+      { "name": "Heavy Rounds", "cost": 85, "mods": [{ "stat": "damage", "op": "add", "value": 1 }, { "stat": "range", "op": "mul", "value": 1.1 }] },
+      { "name": "Sentinel", "cost": 130, "mods": [{ "stat": "damage", "op": "add", "value": 1 }, { "stat": "range", "op": "mul", "value": 1.2 }, { "stat": "arc", "op": "add", "value": 15 }] }
+    ] }
+  ], "active": null,
   "visual": { "shape": "triangle", "color": "tower.gatling" }
 }

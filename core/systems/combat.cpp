@@ -9,6 +9,7 @@
 #include "systems/buildings.h"
 #include "systems/enemies.h"
 #include "systems/systems.h"
+#include "systems/upgrades.h"
 
 namespace orbitfall {
 namespace {
@@ -84,13 +85,16 @@ TowerAim towerAim(const World& world, uint32_t slot) {
   return aim;
 }
 
-bool canTarget(const TowerAim& aim, const BuildingDef& def, float ex, float ey, float rangeMult) {
+bool canTarget(const TowerAim& aim, float range, float arc, float ex, float ey) {
   const float dx = ex - aim.x, dy = ey - aim.y;
   const float d2 = dx * dx + dy * dy;
-  const float range = def.range * rangeMult;
   if (d2 > range * range) return false;
   // angle <= arc  <=>  dot >= |d| * cos(arc)
-  return dx * aim.ax + dy * aim.ay >= std::sqrt(d2) * std::cos(def.arc);
+  return dx * aim.ax + dy * aim.ay >= std::sqrt(d2) * std::cos(arc);
+}
+
+bool canTarget(const TowerAim& aim, const BuildingDef& def, float ex, float ey, float rangeMult) {
+  return canTarget(aim, def.range * rangeMult, def.arc, ex, ey);
 }
 
 float falloffAt(const BuildingDef& def, float t) {
@@ -196,14 +200,15 @@ void towerTargeting(World& world, float /*dt*/) {
     if (def == nullptr) continue;
 
     const TowerAim aim = towerAim(world, s);
+    const BuildingStats stats = slotStats(*def, b);  // M2.2 upgrades x M2.1 elevated/auras
     const TargetingMode mode = static_cast<TargetingMode>(b.mode);
     uint32_t best = kInvalidIndex;
     float bestKey = 0.0f, bestTie = 0.0f;
-    const float range = def->range * b.rangeMult;  // elevated bonus and auras (M2.1)
-    world.grid.query(aim.x - range, aim.y - range, aim.x + range, aim.y + range, [&](uint32_t i) {
+    world.grid.query(aim.x - stats.range, aim.y - stats.range, aim.x + stats.range,
+                     aim.y + stats.range, [&](uint32_t i) {
       if (e.flags[i] & kEnemyDead) return;
       const float ex = e.posX[i], ey = e.posY[i];
-      if (!canTarget(aim, *def, ex, ey, b.rangeMult)) return;
+      if (!canTarget(aim, stats.range, stats.arc, ex, ey)) return;
       // Lower key wins; ties go to the enemy nearest the planet, then the lower index.
       const float toPlanet = ex * ex + ey * ey;
       float key = toPlanet;
@@ -242,8 +247,10 @@ void towerFire(World& world, float dt) {
       if (b.cooldown < 0.0f) b.cooldown = 0.0f;  // ready, waiting
       continue;
     }
-    if (b.cooldown > 0.0f || !(def->fireRate > 0.0f) || !(def->projectile.speed > 0.0f)) continue;
-    b.cooldown += 1.0f / (def->fireRate * b.fireRateMult);  // keeps the remainder, so the average rate is exact
+    if (b.cooldown > 0.0f || !(def->projectile.speed > 0.0f)) continue;
+    const BuildingStats stats = slotStats(*def, b);  // M2.2 upgrades x M2.1 elevated/auras
+    if (!(stats.fireRate > 0.0f)) continue;
+    b.cooldown += 1.0f / stats.fireRate;  // keeps the remainder, so the average rate is exact
     if (b.cooldown < 0.0f) b.cooldown = 0.0f;
 
     const TowerAim aim = towerAim(world, s);
@@ -256,10 +263,10 @@ void towerFire(World& world, float dt) {
     p.posY[k] = aim.y;
     p.velX[k] = dirX * def->projectile.speed;
     p.velY[k] = dirY * def->projectile.speed;
-    const float range = def->range * b.rangeMult;
-    p.damage[k] = def->projectile.damage * b.damageMult;
-    p.life[k] = range / def->projectile.speed;
-    p.range[k] = range;
+    p.damage[k] = stats.damage;
+    p.life[k] = stats.range / def->projectile.speed;
+    p.range[k] = stats.range;
+    p.splash[k] = stats.splash;
     p.type[k] = static_cast<uint16_t>(b.type);
   }
 }
@@ -310,11 +317,12 @@ void collisions(World& world, float dt) {
     const float hx = ax + (bx - ax) * hitT, hy = ay + (by - ay) * hitT;
     // Distance flown at impact as a fraction of range, for the falloff curve.
     const float speed = source.projectile.speed;
+    // M2.2: range and splash are the shot's own (the tower's upgrades when it fired).
     const float range = p.range[i];
     const float flown = range - (p.life[i] + (1.0f - hitT) * dt) * speed;
     const float fraction = range > 0.0f ? flown / range : 0.0f;
     const float damage = p.damage[i];
-    const float splash = source.projectile.splash;
+    const float splash = p.splash[i];
     if (splash > 0.0f) {
       const float reach = splash + pad;
       world.grid.query(hx - reach, hy - reach, hx + reach, hy + reach, [&](uint32_t k) {

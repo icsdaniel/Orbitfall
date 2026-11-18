@@ -44,6 +44,7 @@ var _demo: bool = false
 var _demo_placement: bool = false
 var _start_band: String = ""
 var _tap_switched_view: bool = false
+var _upgrade_key: String = ""  # M2.2: what the open upgrade panel was built from
 var _select_arg: int = -1
 var _debug_arg: bool = false
 var _end_arg: String = ""
@@ -98,6 +99,7 @@ func _process(delta: float) -> void:
 	input_router.planet_radius_px = float(sim.get_planet_radius()) * zoom
 	_handle_events()
 	_track_phase()
+	_refresh_upgrades()
 	_forecast_timer -= delta
 	if _forecast_timer <= 0.0:
 		_refresh_forecast()
@@ -142,6 +144,7 @@ func clear_selection() -> void:
 	planet_view.selected_slot = -1
 	planet_view.selected_layer = 0
 	planet_view.ghost_building = -1
+	planet_view.selected_stats = {}
 	if hud.build_menu.is_open():
 		hud.build_menu.close()
 
@@ -219,6 +222,7 @@ func _build_scene() -> void:
 	hud.build_menu.build_requested.connect(_on_build_requested)
 	hud.build_menu.sell_requested.connect(_on_sell_requested)
 	hud.build_menu.build_above_requested.connect(_on_build_above_requested)
+	hud.build_menu.upgrade_requested.connect(_on_upgrade_requested)
 	hud.build_menu.closed.connect(_on_menu_closed)
 
 
@@ -264,6 +268,9 @@ func _handle_events() -> void:
 	for event: Dictionary in events:
 		if str(event.get("type", "")) == "CommandRejected":
 			hud.toast(_reject_text(int(event.get("b", 0))))
+		elif str(event.get("type", "")) == "BuildingUpgraded":  # M2.2
+			planet_view.sync()
+			_refresh_upgrades(true)
 
 
 func _refresh_forecast() -> void:
@@ -326,6 +333,7 @@ func _select_slot(slot: int, layer: int = 0) -> void:
 	selected_layer = layer
 	planet_view.selected_slot = slot
 	planet_view.selected_layer = layer
+	_refresh_upgrades(true)
 
 
 ## M2.1 details for the menu of the building anchored on `owner`, tapped at
@@ -438,6 +446,35 @@ func _on_sell_requested() -> void:
 		return
 	sim.sell_building(planet_view.site_of(selected_slot, selected_layer))
 	clear_selection()
+
+
+## M2.2: keeps the open building's upgrade paths current (tiers, affordability,
+## Build view only). Rebuilt only when something it shows changed.
+func _refresh_upgrades(force: bool = false) -> void:
+	if selected_slot < 0 or not hud.build_menu.is_open() or not sim.has_method(&"get_slot_upgrades"):
+		_upgrade_key = ""
+		planet_view.selected_stats = {}
+		return
+	# M2.1: the selected site (either ring); any slot of a footprint means its building.
+	var site: int = planet_view.site_of(selected_slot, selected_layer)
+	if planet_view.site_owner(site) < 0:
+		planet_view.selected_stats = {}
+		return
+	var build_view: bool = bands.band == BandController.Band.SURFACE
+	var key: String = "%d|%s|%d|%s" % [
+		site, str(sim.get_slot_tiers(site)), floori(float(sim.get_stardust())), build_view]
+	if key == _upgrade_key and not force:
+		return
+	_upgrade_key = key
+	var info: Dictionary = sim.get_slot_upgrades(site)
+	planet_view.selected_stats = info.get("stats", {})
+	hud.build_menu.show_upgrades(info, build_view)
+
+
+func _on_upgrade_requested(path: int) -> void:
+	if selected_slot < 0 or bands.band != BandController.Band.SURFACE:
+		return
+	sim.upgrade_building(planet_view.site_of(selected_slot, selected_layer), path)
 
 
 func _on_menu_closed() -> void:

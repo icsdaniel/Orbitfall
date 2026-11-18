@@ -3,6 +3,7 @@
 // balance targets.
 #include "bots/bots.h"
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -14,6 +15,7 @@
 #include "sim/sim.h"
 #include "systems/enemies.h"
 #include "systems/sun.h"
+#include "systems/upgrades.h"
 
 namespace orbitfall_bots {
 
@@ -40,6 +42,7 @@ const StrategyInfo kInfo[kStrategyCount] = {
     {Strategy::FaceTheThreat, "face-the-threat", "face-the-threat (battery to the most damage)", "rotation", true},
     {Strategy::Balance, "balance", "balance (weighs light against threat)", "mixed", true},
     {Strategy::BankAndDrill, "bank-and-drill", "bank-and-drill (banks before dim waves)", "economy", true},
+    {Strategy::Upgrader, "upgrader", "upgrader (sensible, upgrades not extras)", "mixed", true},
 };
 
 const StrategyInfo& info(Strategy s) {
@@ -278,9 +281,49 @@ struct Bot {
       if (slot < 0 || !buy(slot, panel)) break;
       ++lit;
     }
+    if (strategy == Strategy::Upgrader) {
+      buyUpgrades();
+      return;
+    }
     for (int guard = 0; guard < 8; ++guard) {
       const bool a = towersOn(laneA) <= towersOn(laneB);
       if (!buyTower(a ? laneA : laneB) && !buyTower(a ? laneB : laneA)) break;
+    }
+  }
+
+  // M2.2: spends the budget on the cheapest next tier of a standing tower
+  // (either ring), committing each tower to path 0 (path 1 then stops at the
+  // exclusive tier).
+  void buyUpgrades() {
+    World& w = world();
+    const uint32_t sites = w.siteCount();
+    std::vector<std::array<uint8_t, kUpgradePaths>> tiers(sites);
+    for (uint32_t i = 0; i < sites; ++i) {
+      for (int p = 0; p < kUpgradePaths; ++p) tiers[i][static_cast<size_t>(p)] = w.site(i).tiers[p];
+    }
+    for (int guard = 0; guard < 64; ++guard) {
+      int bestSite = -1, bestPath = 0;
+      float bestCost = 0.0f;
+      for (uint32_t i = 0; i < sites; ++i) {
+        const int32_t type = w.site(i).type;
+        if (type < 0) continue;
+        const BuildingDef& def = db.buildings[static_cast<size_t>(type)];
+        if (def.kind != BuildingKind::Tower) continue;
+        for (int p = 0; p < kUpgradePaths; ++p) {
+          const UpgradePreview pv = upgradePreview(db.rules, def, tiers[i].data(), p, budget);
+          if (pv.reason != RejectReason::None) continue;
+          if (bestSite < 0 || pv.cost < bestCost) {
+            bestSite = static_cast<int>(i);
+            bestPath = p;
+            bestCost = pv.cost;
+          }
+          break;  // path 0 first; path 1 only once path 0 is done
+        }
+      }
+      if (bestSite < 0) return;
+      budget -= bestCost;
+      ++tiers[static_cast<size_t>(bestSite)][static_cast<size_t>(bestPath)];
+      sim.push(cmd::upgradeBuilding(sim.tick(), bestSite, bestPath));
     }
   }
 
@@ -571,7 +614,8 @@ struct Bot {
       case Strategy::Never: break;
       case Strategy::Towers: planTowers(); break;
       case Strategy::Chaser: planChaser(); break;
-      case Strategy::Sensible: planSensible(); break;
+      case Strategy::Sensible:
+      case Strategy::Upgrader: planSensible(); break;
       case Strategy::NeverRotate: planLanes(false); break;
       case Strategy::BankAndDrill: planLanes(true); break;
       case Strategy::Balance: planLanes(false); break;
@@ -764,7 +808,8 @@ struct Bot {
       out = wrapTau(w.sunBearing + 8.0f * kDeg);
       return true;
     }
-    if (strategy == Strategy::Sensible || strategy == Strategy::BankAndDrill) {
+    if (strategy == Strategy::Sensible || strategy == Strategy::Upgrader ||
+        strategy == Strategy::BankAndDrill) {
       // Mean local angle of the panels still worth lighting, as an offset from
       // the sun; turn toward it but never more than the towers' arcs forgive.
       float sx = 0.0f, sy = 0.0f;
@@ -913,6 +958,10 @@ RunResult play(const ContentDB& db, Strategy strategy, const RunOptions& options
           break;
         case EventType::CommandRejected: ++r.rejected; break;
         case EventType::BuildingPlaced: spent += e.value; break;
+        case EventType::BuildingUpgraded:  // M2.2
+          spent += e.value;
+          ++r.upgrades;
+          break;
         case EventType::BuildingSold: refunded += e.value; break;
         default: break;
       }

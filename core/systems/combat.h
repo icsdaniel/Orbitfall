@@ -21,6 +21,8 @@ TowerAim towerAim(const World& world, uint32_t slot);  // slot = site index
 // bonus and adjacency auras).
 bool canTarget(const TowerAim& aim, const BuildingDef& def, float ex, float ey,
                float rangeMult = 1.0f);
+// M2.2: the same test with explicit (upgraded) range and arc half-angle.
+bool canTarget(const TowerAim& aim, float range, float arc, float ex, float ey);
 
 // Damage multiplier of the falloff curve at `t` = distance / range in [0, 1].
 float falloffAt(const BuildingDef& def, float t);

@@ -30,7 +30,8 @@ ORBITFALL_DECLARE_POOL(EnemyPool, ORBITFALL_ENEMY_FIELDS)
   F(float, velY)                                               \
   F(float, damage)                                             \
   F(float, life)     /* seconds left before it expires */      \
-  F(float, range)    /* range it was fired with (falloff) */   \
+  F(float, range)    /* M2.2: the firing tower's range */      \
+  F(float, splash)   /* M2.2: blast radius, 0 = none */        \
   F(uint16_t, type)  /* projectile definition index */         \
   F(uint16_t, flags) /* per-entity state bits */
 ORBITFALL_DECLARE_POOL(ProjectilePool, ORBITFALL_PROJECTILE_FIELDS)

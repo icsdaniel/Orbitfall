@@ -2,6 +2,19 @@
   "id": "solar_panel", "kind": "panel", "footprint": 1, "layer": "ground", "cost": 50,
   "panelRate": 3, "aimMount": false, "aimOffsetDeg": 0,
   "targeting": [],
-  "paths": [], "active": null,
+  "paths": [
+    { "id": "efficiency", "name": "Efficiency", "tiers": [
+      { "name": "Clean Cells", "cost": 30, "mods": [{ "stat": "income", "op": "mul", "value": 1.25 }] },
+      { "name": "Tuned Cells", "cost": 45, "mods": [{ "stat": "income", "op": "mul", "value": 1.25 }] },
+      { "name": "Mirror Coating", "cost": 70, "mods": [{ "stat": "income", "op": "mul", "value": 1.3 }] },
+      { "name": "Prism Stack", "cost": 110, "mods": [{ "stat": "income", "op": "mul", "value": 1.4 }] }
+    ] },
+    { "id": "array", "name": "Wide Array", "tiers": [
+      { "name": "Extra Cell", "cost": 30, "mods": [{ "stat": "income", "op": "add", "value": 0.5 }] },
+      { "name": "Side Wings", "cost": 45, "mods": [{ "stat": "income", "op": "add", "value": 0.75 }] },
+      { "name": "Fold-out Sails", "cost": 70, "mods": [{ "stat": "income", "op": "add", "value": 1 }] },
+      { "name": "Sun Sail", "cost": 110, "mods": [{ "stat": "income", "op": "add", "value": 1.5 }] }
+    ] }
+  ], "active": null,
   "visual": { "shape": "diamond", "color": "building.solar_panel" }
 }

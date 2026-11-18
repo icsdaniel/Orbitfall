@@ -147,6 +147,37 @@ struct AuraDef {
   uint32_t kinds = ~0u;  // bit per BuildingKind it affects
 };
 
+// --- M2.2 upgrade paths -------------------------------------------------------
+// A building may declare up to kUpgradePaths paths of up to kMaxUpgradeTiers
+// tiers. Each tier lists stat modifiers and a stardust cost. With every bought
+// tier of both paths taken together:
+//   effective stat = (base + sum of "add" values) * product of "mul" values
+// so the order tiers were bought in never matters (systems/upgrades.h).
+inline constexpr int kUpgradePaths = 2;
+inline constexpr int kMaxUpgradeTiers = 4;
+
+enum class UpgradeStat : uint8_t { Damage, FireRate, Range, Arc, Splash, Income, Count };
+inline constexpr int kUpgradeStatCount = static_cast<int>(UpgradeStat::Count);
+enum class ModOp : uint8_t { Add, Mul };
+
+struct StatModifier {
+  UpgradeStat stat = UpgradeStat::Damage;
+  ModOp op = ModOp::Mul;
+  float value = 1.0f;  // Arc + Add is in radians in memory (degrees in JSON)
+};
+
+struct UpgradeTierDef {
+  std::string name;
+  float cost = 0.0f;  // stardust
+  std::vector<StatModifier> mods;
+};
+
+struct UpgradePathDef {
+  std::string id;
+  std::string name;
+  std::vector<UpgradeTierDef> tiers;  // tiers[0] is tier 1
+};
+
 struct BuildingDef {
   std::string id;
   BuildingKind kind = BuildingKind::Tower;
@@ -166,6 +197,7 @@ struct BuildingDef {
   std::vector<TargetingMode> targeting;  // first entry is the default mode
   // Panels only.
   float panelRate = 0.0f;  // stardust per second at beamStrength 1
+  std::vector<UpgradePathDef> paths;  // M2.2: empty = not upgradable
   VisualDef visual;
 };
 
@@ -243,6 +275,9 @@ struct RulesDef {  // content/rules.json: global tunables
   float spawnJitter = 0.0f;   // rad, +- around the lane bearing for lane enemies
   float surfaceTimeEaseSeconds = 0.0f;
   float elevatedRangeBonus = 0.15f;  // M2.1: +15% range on the elevated ring
+  // M2.2: once any path of a building is above this tier, every other path
+  // is capped at it (default 2: one path may reach the top, the other stops at 2).
+  int upgradeExclusiveTier = 2;
 };
 
 struct ContentDB {

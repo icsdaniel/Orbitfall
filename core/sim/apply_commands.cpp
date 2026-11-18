@@ -3,6 +3,7 @@
 #include "sim/pipeline.h"
 #include "sim/world.h"
 #include "systems/buildings.h"
+#include "systems/upgrades.h"
 #include "systems/waves.h"
 
 namespace orbitfall {
@@ -60,6 +61,9 @@ void apply(World& world, const Command& c) {
       break;
     case CommandType::SetTargeting:
       if (!runOver(world, c)) setTargeting(world, c.slot, c.mode);
+      break;
+    case CommandType::UpgradeBuilding:  // M2.2
+      if (!runOver(world, c)) upgradeBuilding(world, c.slot, c.id);
       break;
     case CommandType::StartWave:
       if (world.content != nullptr && !startWave(world)) {

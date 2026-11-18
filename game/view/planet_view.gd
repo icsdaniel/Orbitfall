@@ -33,6 +33,9 @@ var selected_slot: int = -1
 var selected_layer: int = 0
 ## Building def index previewed on the selected empty slot, or -1.
 var ghost_building: int = -1
+## M2.2: upgraded stats of the selected building (get_slot_upgrades "stats"); its
+## arc and range replace the definition's when drawing the selected sector.
+var selected_stats: Dictionary = {}
 ## Latest forecast (get_forecast); entry 0 drives lane markers and ghost arcs.
 var forecast: Array[Dictionary] = []
 
@@ -522,7 +525,10 @@ func _draw_selection() -> void:
 		var color: Color = Palette.color_of(def.get("color", Color.WHITE))
 		var arc: float = Palette.angle_of(def.get("arc", 0.0))
 		var tower_range: float = float(def.get("range", 0.0))
-		if owner >= 0:
+		if owner >= 0 and not selected_stats.is_empty():  # M2.2: upgrades x M2.1 bonuses
+			arc = float(selected_stats.get("arc", arc))
+			tower_range = float(selected_stats.get("range", tower_range))
+		elif owner >= 0:
 			tower_range *= site_modifier(owner, 0)
 		elif selected_layer > 0:
 			tower_range *= 1.0 + elevated_range_bonus

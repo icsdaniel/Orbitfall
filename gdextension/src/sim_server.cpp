@@ -15,6 +15,7 @@
 #include "content/content_loader.h"
 #include "sim/mathx.h"
 #include "systems/combat.h"
+#include "systems/upgrades.h"
 #include "systems/waves.h"
 #include "sim/version.h"
 
@@ -34,10 +35,12 @@ constexpr size_t kLogHeaderBytes = 20;       // magic, seed, wave set, end tick,
 const char* const kEventNames[] = {
     "None",        "LayerPopped",   "EnemyKilled",  "PlanetHit",     "StardustChanged",
     "WaveStarted", "WaveCleared",   "ShadowChanged", "GameOver",     "Victory",
-    "BuildingPlaced", "BuildingSold", "CommandRejected"};
+    "BuildingPlaced", "BuildingSold", "CommandRejected",
+    "BuildingUpgraded"};  // M2.2
 constexpr int kEventNameCount = static_cast<int>(sizeof(kEventNames) / sizeof(kEventNames[0]));
 static_assert(kEventNameCount == static_cast<int>(orbitfall::EventType::Count), "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::CommandRejected) == 12, "event name table out of date");
+static_assert(static_cast<int>(orbitfall::EventType::BuildingUpgraded) == 13, "event name table out of date");
 
 String to_gd(const std::string& s) { return String::utf8(s.c_str(), static_cast<int64_t>(s.size())); }
 
@@ -177,6 +180,12 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("drain_events"), &SimServer::drain_events);
   ClassDB::bind_method(D_METHOD("get_surface_time_scale"), &SimServer::get_surface_time_scale);
   ClassDB::bind_method(D_METHOD("get_surface_time_ease_seconds"), &SimServer::get_surface_time_ease_seconds);
+
+  // --- M2.2 upgrade paths ---
+  ClassDB::bind_method(D_METHOD("upgrade_building", "slot", "path"), &SimServer::upgrade_building);
+  ClassDB::bind_method(D_METHOD("get_slot_tiers", "slot"), &SimServer::get_slot_tiers);
+  ClassDB::bind_method(D_METHOD("get_upgrade_preview", "slot", "path"), &SimServer::get_upgrade_preview);
+  ClassDB::bind_method(D_METHOD("get_slot_upgrades", "slot"), &SimServer::get_slot_upgrades);
 
   ClassDB::bind_method(D_METHOD("set_palette", "colors"), &SimServer::set_palette);
   ClassDB::bind_method(D_METHOD("set_debug_scenario", "on"), &SimServer::set_debug_scenario);
@@ -703,6 +712,153 @@ TypedArray<Dictionary> SimServer::get_building_defs() const {
   }
   return out;
 }
+
+// ----------------------------------------------------------------------------
+// M2.2 upgrade paths (begin)
+// ----------------------------------------------------------------------------
+
+namespace {
+
+const char* const kStatKeys[orbitfall::kUpgradeStatCount] = {"damage", "fire_rate", "range",
+                                                             "arc",    "splash",    "income"};
+
+Dictionary stats_dict(const orbitfall::BuildingStats& s) {
+  Dictionary d;
+  for (int i = 0; i < orbitfall::kUpgradeStatCount; ++i)
+    d[String(kStatKeys[i])] = s.get(static_cast<orbitfall::UpgradeStat>(i));
+  return d;
+}
+
+// M2.1 multipliers of a site (range, fire rate, damage, income), applied to
+// the upgraded stats so the UI shows what the building really uses.
+struct SiteMods {
+  float range = 1.0f, fireRate = 1.0f, damage = 1.0f, income = 1.0f;
+  void apply(orbitfall::BuildingStats& st) const {
+    st.range *= range;
+    st.fireRate *= fireRate;
+    st.damage *= damage;
+    st.income *= income;
+  }
+};
+
+Dictionary preview_dict(const orbitfall::RulesDef& rules, const orbitfall::BuildingDef& def,
+                        const uint8_t tiers[orbitfall::kUpgradePaths], int path, float stardust,
+                        const SiteMods& mods) {
+  const orbitfall::UpgradePathDef& pd = def.paths[static_cast<size_t>(path)];
+  orbitfall::UpgradePreview pv = orbitfall::upgradePreview(rules, def, tiers, path, stardust);
+  mods.apply(pv.before);
+  mods.apply(pv.after);
+  Dictionary d;
+  d["path"] = path;
+  d["id"] = to_gd(pd.id);
+  d["name"] = to_gd(pd.name);
+  d["tier"] = pv.tier;
+  d["max_tier"] = pv.maxTier;
+  d["cap"] = pv.cap;
+  d["has_next"] = pv.hasNext;
+  d["next_name"] = pv.hasNext ? to_gd(pd.tiers[static_cast<size_t>(pv.tier)].name) : String();
+  d["cost"] = pv.cost;
+  d["affordable"] = pv.hasNext && stardust >= pv.cost;
+  d["can_upgrade"] = pv.reason == orbitfall::RejectReason::None;
+  d["locked"] = pv.hasNext && pv.tier >= pv.cap;
+  d["before"] = stats_dict(pv.before);
+  d["after"] = stats_dict(pv.after);
+  TypedArray<Dictionary> changes;
+  for (int i = 0; i < orbitfall::kUpgradeStatCount; ++i) {
+    const orbitfall::UpgradeStat stat = static_cast<orbitfall::UpgradeStat>(i);
+    if (pv.before.get(stat) == pv.after.get(stat)) continue;
+    Dictionary c;
+    c["stat"] = String(kStatKeys[i]);
+    c["before"] = pv.before.get(stat);
+    c["after"] = pv.after.get(stat);
+    changes.push_back(c);
+  }
+  d["changes"] = changes;
+  return d;
+}
+
+// The building covering site `slot` (M2.1: either ring, any slot of a
+// footprint) from a latched snapshot: its definition, anchor site, tiers and
+// M2.1 multipliers; nullptr when the slot is empty or invalid.
+const orbitfall::BuildingDef* slot_def(const orbitfall::ContentDB& content, const Snapshot& s,
+                                       int64_t slot, uint8_t tiers[orbitfall::kUpgradePaths],
+                                       int64_t* anchorOut = nullptr, SiteMods* modsOut = nullptr) {
+  for (int p = 0; p < orbitfall::kUpgradePaths; ++p) tiers[p] = 0;
+  if (slot < 0 || slot >= static_cast<int64_t>(s.siteOwners.size())) return nullptr;
+  const int32_t anchor = s.siteOwners[static_cast<size_t>(slot)];
+  if (anchor < 0 || anchor >= static_cast<int32_t>(s.siteBuildings.size())) return nullptr;
+  const int32_t building = s.siteBuildings[static_cast<size_t>(anchor)];
+  if (building < 0 || building >= static_cast<int32_t>(content.buildings.size())) return nullptr;
+  const size_t base = static_cast<size_t>(anchor) * orbitfall::kUpgradePaths;
+  for (int p = 0; p < orbitfall::kUpgradePaths; ++p) {
+    if (base + static_cast<size_t>(p) < s.slotTiers.size())
+      tiers[p] = static_cast<uint8_t>(s.slotTiers[base + static_cast<size_t>(p)]);
+  }
+  if (anchorOut != nullptr) *anchorOut = anchor;
+  if (modsOut != nullptr && 4 * static_cast<size_t>(anchor) + 3 < s.siteModifiers.size()) {
+    const float* m = &s.siteModifiers[4 * static_cast<size_t>(anchor)];
+    modsOut->range = m[0];
+    modsOut->fireRate = m[1];
+    modsOut->damage = m[2];
+    modsOut->income = m[3];
+  }
+  return &content.buildings[static_cast<size_t>(building)];
+}
+
+}  // namespace
+
+void SimServer::upgrade_building(int64_t slot, int64_t path) {
+  queue(orbitfall::cmd::upgradeBuilding(0, static_cast<int32_t>(slot), static_cast<int32_t>(path)));
+}
+
+PackedInt32Array SimServer::get_slot_tiers(int64_t slot) const {
+  uint8_t tiers[orbitfall::kUpgradePaths];
+  slot_def(content_, *curr_, slot, tiers);
+  PackedInt32Array out;
+  for (const uint8_t t : tiers) out.push_back(t);
+  return out;
+}
+
+Dictionary SimServer::get_upgrade_preview(int64_t slot, int64_t path) const {
+  uint8_t tiers[orbitfall::kUpgradePaths];
+  SiteMods mods;
+  const orbitfall::BuildingDef* def = slot_def(content_, *curr_, slot, tiers, nullptr, &mods);
+  if (def == nullptr || path < 0 || path >= static_cast<int64_t>(def->paths.size()) ||
+      path >= orbitfall::kUpgradePaths) {
+    return Dictionary();
+  }
+  return preview_dict(content_.rules, *def, tiers, static_cast<int>(path), curr_->stardust, mods);
+}
+
+Dictionary SimServer::get_slot_upgrades(int64_t slot) const {
+  uint8_t tiers[orbitfall::kUpgradePaths];
+  int64_t anchor = -1;
+  SiteMods mods;
+  const orbitfall::BuildingDef* def = slot_def(content_, *curr_, slot, tiers, &anchor, &mods);
+  Dictionary d;
+  if (def == nullptr) return d;
+  d["slot"] = anchor;  // M2.1: the anchor site of the building covering `slot`
+  d["building"] = static_cast<int64_t>(curr_->siteBuildings[static_cast<size_t>(anchor)]);
+  PackedInt32Array tierArray;
+  for (const uint8_t t : tiers) tierArray.push_back(t);
+  d["tiers"] = tierArray;
+  orbitfall::BuildingStats stats = orbitfall::effectiveStats(*def, tiers);
+  mods.apply(stats);  // M2.1 elevated bonus and auras
+  d["stats"] = stats_dict(stats);
+  const float spent = orbitfall::upgradeSpent(*def, tiers);
+  d["spent"] = spent;
+  const orbitfall::PlanetDef* planet = sim_->world().planet;  // fixed for the run
+  d["sell_refund"] = (def->cost + spent) * (planet ? planet->sellRefund : 0.0f);
+  TypedArray<Dictionary> paths;
+  for (int p = 0; p < static_cast<int>(def->paths.size()) && p < orbitfall::kUpgradePaths; ++p)
+    paths.push_back(preview_dict(content_.rules, *def, tiers, p, curr_->stardust, mods));
+  d["paths"] = paths;
+  return d;
+}
+
+// ----------------------------------------------------------------------------
+// M2.2 upgrade paths (end)
+// ----------------------------------------------------------------------------
 
 TypedArray<Dictionary> SimServer::get_enemy_defs() const {
   TypedArray<Dictionary> out;
