@@ -30,6 +30,9 @@ struct RunStatics {
   float planetRadius = 0.0f;
   float planetHpMax = 0.0f;
   int32_t slotCount = 0;
+  // M2.1
+  int32_t layerCount = 1;
+  float elevatedHeight = 0.0f;
   // RGBA per enemy definition (content order) from the client palette; may be null.
   const float* enemyColors = nullptr;
   float projectileColor[4] = {1.0f, 0.92f, 0.55f, 1.0f};
@@ -65,6 +68,12 @@ struct Snapshot {
   float planetAngVel = 0.0f;    // rad/s
   std::vector<int32_t> slotBuildings;  // building index or -1, one per slot
   std::vector<int32_t> slotFlags;      // bit0 lit, bit1 shaded, bit2 has target in arc
+  // M2.1: one entry per site (ground ring, then the elevated ring).
+  std::vector<int32_t> siteBuildings;  // building index on anchors, else -1
+  std::vector<int32_t> siteFlags;
+  std::vector<int32_t> siteOwners;     // anchor site of the building covering the slot, -1 = free
+  std::vector<float> siteModifiers;    // 4 per site: range, fire rate, damage, income multipliers
+  std::vector<int32_t> auraLinks;      // triples: source site, target site, stat
   // --- sun ---
   float sunBearing = 0.0f;
   float beamWidth = 0.0f;
@@ -110,10 +119,30 @@ inline void fill_snapshot(const orbitfall::World& w, const RunStatics& run, Snap
   s.slotBuildings.resize(slots);
   s.slotFlags.resize(slots);
   uint32_t panels = 0, earning = 0;
-  for (size_t i = 0; i < slots; ++i) {
-    const BuildingSlot& b = w.slots[i];
-    s.slotBuildings[i] = b.type;
-    s.slotFlags[i] = b.flags;
+  const size_t sites = w.siteCount();
+  s.siteBuildings.resize(sites);
+  s.siteFlags.resize(sites);
+  s.siteOwners.resize(sites);
+  s.siteModifiers.resize(sites * 4);
+  s.auraLinks.resize(w.auraLinks.size() * 3);
+  for (size_t i = 0; i < w.auraLinks.size(); ++i) {
+    s.auraLinks[3 * i] = w.auraLinks[i].source;
+    s.auraLinks[3 * i + 1] = w.auraLinks[i].target;
+    s.auraLinks[3 * i + 2] = w.auraLinks[i].stat;
+  }
+  for (size_t i = 0; i < sites; ++i) {
+    const BuildingSlot& b = w.site(static_cast<uint32_t>(i));
+    if (i < slots) {
+      s.slotBuildings[i] = b.type;
+      s.slotFlags[i] = b.flags;
+    }
+    s.siteBuildings[i] = b.type;
+    s.siteFlags[i] = b.flags;
+    s.siteOwners[i] = b.anchor;
+    s.siteModifiers[4 * i] = b.rangeMult;
+    s.siteModifiers[4 * i + 1] = b.fireRateMult;
+    s.siteModifiers[4 * i + 2] = b.damageMult;
+    s.siteModifiers[4 * i + 3] = b.incomeMult;
     if (b.type < 0 || w.content == nullptr) continue;
     if (w.content->buildings[static_cast<size_t>(b.type)].kind != BuildingKind::Panel) continue;
     ++panels;

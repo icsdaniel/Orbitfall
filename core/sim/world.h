@@ -48,12 +48,33 @@ enum SlotFlag : uint8_t {
 // One entry per slot of the planet's ring. Buildings are few, so this is a
 // plain array indexed by slot (BRIEF §5.3), in planet-local order: slot i sits
 // at local angle 2*pi*i/N.
+//
+// M2.1: a building of footprint w anchored on slot i covers slots i..i+w-1
+// (wrapping). Only the anchor holds `type`; every covered slot holds `anchor`.
+// A "site" index addresses both rings: site = slot + layer * ringSlots, so the
+// ground ring keeps its M1 indices and elevated slot i is site N + i.
 struct BuildingSlot {
-  int16_t type = -1;       // index into ContentDB::buildings, -1 = empty
+  int16_t type = -1;       // index into ContentDB::buildings, -1 = empty or not the anchor
   uint8_t mode = 0;        // TargetingMode
   uint8_t flags = 0;       // SlotFlag bits, refreshed every tick
   float aimOffset = 0.0f;  // rad, added to the slot normal to get the aim axis
   float cooldown = 0.0f;   // seconds until the next shot
+  int16_t anchor = -1;     // site of the building covering this slot, -1 = free
+  uint8_t width = 0;       // anchors only: the building's footprint
+  // Derived by recomputeLayout whenever the layout changes (not hashed):
+  // elevated bonus and adjacency auras, as multipliers on the definition.
+  float rangeMult = 1.0f;
+  float fireRateMult = 1.0f;
+  float damageMult = 1.0f;
+  float incomeMult = 1.0f;
+};
+
+// One adjacency link (M2.1), for the Build view: `source` buffs `target`.
+struct AuraLink {
+  uint16_t source = 0;  // site of the aura building
+  uint16_t target = 0;  // site of the building it affects
+  uint8_t stat = 0;     // AuraStat
+  float amount = 0.0f;
 };
 
 struct SunPath;
@@ -110,12 +131,35 @@ struct World {
 
   // --- economy and buildings ---
   float stardust = 0.0f;
-  std::vector<BuildingSlot> slots;  // sized to the planet's slot count in initWorld
+  std::vector<BuildingSlot> slots;  // ground ring, sized to the planet's slot count in initWorld
+  std::vector<BuildingSlot> elevated;  // M2.1 elevated ring: same size, or empty without that layer
+  std::vector<AuraLink> auraLinks;     // derived by recomputeLayout (not hashed)
 
+  // Slots per ring.
   uint32_t slotCount() const { return static_cast<uint32_t>(slots.size()); }
   // Local angle of a slot's centre.
   float slotAngle(uint32_t slot) const {
     return 6.28318530717958647692f * static_cast<float>(slot) / static_cast<float>(slots.size());
+  }
+
+  // Sites: both rings in one index space (ground first).
+  uint32_t siteCount() const { return static_cast<uint32_t>(slots.size() + elevated.size()); }
+  bool siteElevated(uint32_t site) const { return site >= slots.size(); }
+  BuildingSlot& site(uint32_t i) { return i < slots.size() ? slots[i] : elevated[i - slots.size()]; }
+  const BuildingSlot& site(uint32_t i) const {
+    return i < slots.size() ? slots[i] : elevated[i - slots.size()];
+  }
+  // Local angle of a site: the centre of the footprint for an anchor, else the
+  // centre of the slot.
+  float siteAngle(uint32_t i) const {
+    const uint32_t n = slotCount();
+    const uint8_t width = site(i).width;
+    const float extra = width > 1 ? 0.5f * static_cast<float>(width - 1) : 0.0f;
+    return 6.28318530717958647692f * (static_cast<float>(i % n) + extra) / static_cast<float>(n);
+  }
+  // Distance of a site from the planet's centre.
+  float siteRadius(uint32_t i) const {
+    return planet->radius + (siteElevated(i) ? planet->elevatedHeight : 0.0f);
   }
 
   // --- determinism bookkeeping ---

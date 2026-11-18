@@ -5,7 +5,7 @@ extends Node2D
 ## OrbitCamera, PlanetView, EntityView (BatchRenderer), InputRouter, BandController
 ## and the HUD, and turns UI intents into SimServer commands.
 ## User args (after `--`): --mock, --seed=N, --band=surface|orbit, --demo (scripted
-## mid-wave state on the mock), --select=SLOT, --debug, --end=won|lost (mock),
+## mid-wave state on the mock), --demo-placement (M2.1 layout), --select=SITE, --debug, --end=won|lost (mock),
 ## --screenshot PATH. Playtest bot (see autoplay.gd): --play=sensible|towers|none keeps
 ## playing live; with --ff-wave=N [--ff-seconds=S], --ff-shadow or --ff-end the run is
 ## first fast-forwarded to that moment (wave N running for S seconds, or its
@@ -30,6 +30,8 @@ var hud: Hud
 var run_seed: int = 0
 
 var selected_slot: int = -1
+## Layer of the selection: 0 ground, 1 elevated (M2.1).
+var selected_layer: int = 0
 var _last_building: int = -1
 var _phase: int = -1
 var _forecast_timer: float = 0.0
@@ -37,6 +39,9 @@ var _frame: int = 0
 ## Set before the node enters the tree (or pass --mock) to skip the real SimServer.
 var force_mock: bool = false
 var _demo: bool = false
+## --demo-placement: an M2.1 layout for screenshots (elevated towers; on the
+## mock also a wide building and an aura building, which M1 content lacks).
+var _demo_placement: bool = false
 var _start_band: String = ""
 var _tap_switched_view: bool = false
 var _select_arg: int = -1
@@ -66,13 +71,17 @@ func _ready() -> void:
 		bands.auto_switch = false  # screenshots and bots ask for a fixed view
 	if _demo:
 		_setup_demo()
+	if _demo_placement and _play == "":
+		_setup_placement_demo()
 	if _play != "":
 		_autoplay = Autoplay.new()
 		_autoplay.setup(sim, _play)
 		_fast_forward()
+		if _demo_placement:
+			_build_above_bot_towers()
 	if _select_arg >= 0:
 		planet_view.sync()
-		_select_slot(_select_arg)
+		_select_site(_select_arg)  # M2.1: a site, so slot + N selects the elevated ring
 	if _debug_arg:
 		hud.set_debug_visible(true)
 
@@ -117,13 +126,21 @@ func slot_screen_position(slot: int) -> Vector2:
 	return world_to_screen(Vector2.from_angle(planet_view.slot_world_angle(slot)) * r)
 
 
+## Screen position of a site's marker (M2.1; site = slot + layer * slot count).
+func site_screen_position(site: int) -> Vector2:
+	planet_view.sync()
+	return world_to_screen(planet_view.site_position(site))
+
+
 func restart() -> void:
 	_start_run(_new_seed())
 
 
 func clear_selection() -> void:
 	selected_slot = -1
+	selected_layer = 0
 	planet_view.selected_slot = -1
+	planet_view.selected_layer = 0
 	planet_view.ghost_building = -1
 	if hud.build_menu.is_open():
 		hud.build_menu.close()
@@ -194,12 +211,14 @@ func _build_scene() -> void:
 	input_router.debug_toggled.connect(hud.toggle_debug)
 	input_router.codex_toggled.connect(hud.toggle_codex)  # M2.3
 	input_router.codex_close_requested.connect(hud.codex.close)
+	input_router.layer_step_requested.connect(_on_layer_step_requested)  # M2.1
 	bands.band_changed.connect(_on_band_changed)
 	hud.debug_toggle_requested.connect(hud.toggle_debug)
 	hud.restart_requested.connect(restart)
 	hud.build_menu.preview_changed.connect(_on_preview_changed)
 	hud.build_menu.build_requested.connect(_on_build_requested)
 	hud.build_menu.sell_requested.connect(_on_sell_requested)
+	hud.build_menu.build_above_requested.connect(_on_build_above_requested)
 	hud.build_menu.closed.connect(_on_menu_closed)
 
 
@@ -244,7 +263,7 @@ func _handle_events() -> void:
 	var events: Array[Dictionary] = sim.drain_events()
 	for event: Dictionary in events:
 		if str(event.get("type", "")) == "CommandRejected":
-			hud.toast("Can't do that (not enough stardust?)")
+			hud.toast(_reject_text(int(event.get("b", 0))))
 
 
 func _refresh_forecast() -> void:
@@ -255,30 +274,89 @@ func _refresh_forecast() -> void:
 	hud.show_forecast(forecast)
 
 
+## Why the sim refused a command (RejectReason in core/sim/events.h).
+func _reject_text(reason: int) -> String:
+	match reason:
+		3:
+			return "No room there"
+		4:
+			return "Not enough stardust"
+		8:
+			return "Needs a building below"
+		9:
+			return "That can't be built on this layer"
+		10:
+			return "Sell the building above first"
+	return "Can't do that"
+
+
 func _slot_at_screen(screen_pos: Vector2) -> int:
 	planet_view.sync()
 	var world: Vector2 = camera.screen_to_world(screen_pos)
 	return planet_view.slot_at(world, _slot_pick_px / maxf(camera.get_zoom_value(), 0.01))
 
 
-func _select_slot(slot: int) -> void:
-	if slot < 0 or slot >= planet_view.slot_count or _phase >= PHASE_WON:
+## M2.1: the site (either ring) under a screen position, or -1.
+func _site_at_screen(screen_pos: Vector2) -> int:
+	planet_view.sync()
+	var world: Vector2 = camera.screen_to_world(screen_pos)
+	return planet_view.site_at(world, _slot_pick_px / maxf(camera.get_zoom_value(), 0.01))
+
+
+func _select_slot(slot: int, layer: int = 0) -> void:
+	planet_view.sync()
+	if (slot < 0 or slot >= planet_view.slot_count or layer < 0
+			or layer >= planet_view.layer_count or _phase >= PHASE_WON):
 		clear_selection()
 		return
-	selected_slot = slot
-	planet_view.selected_slot = slot
-	var building: int = planet_view.slot_buildings[slot]
-	if building >= 0:
+	var site: int = planet_view.site_of(slot, layer)
+	var owner: int = planet_view.site_owner(site)
+	if owner >= 0:
 		planet_view.ghost_building = -1
-		var flags: int = planet_view.slot_flags[slot]
-		hud.build_menu.open_building(slot, planet_view.building_def(building),
-			(flags & PlanetView.FLAG_LIT) != 0, (flags & PlanetView.FLAG_SHADED) != 0)
+		var flags: int = planet_view.site_flags[owner]
+		hud.build_menu.open_building(slot, planet_view.building_def(planet_view.site_building(owner)),
+			(flags & PlanetView.FLAG_LIT) != 0, (flags & PlanetView.FLAG_SHADED) != 0,
+			_building_extra(slot, layer, owner))
 	else:
 		hud.build_menu.open_empty(
-			slot, planet_view.building_defs, float(sim.get_stardust()), _last_building)
+			slot, planet_view.building_defs, float(sim.get_stardust()), _last_building,
+			layer, planet_view.elevated_range_bonus)
 	# open_* may have reset the selection through the menu's `closed` signal.
 	selected_slot = slot
+	selected_layer = layer
 	planet_view.selected_slot = slot
+	planet_view.selected_layer = layer
+
+
+## M2.1 details for the menu of the building anchored on `owner`, tapped at
+## `slot`: can something be built above this slot, is it a foundation in use,
+## and which bonuses it has.
+func _building_extra(slot: int, layer: int, owner: int) -> Dictionary:
+	var notes: Array[String] = []
+	var kind: String = str(planet_view.building_def(planet_view.site_building(owner)).get("kind", ""))
+	for stat: int in PlanetView.STAT_NAMES.size():
+		if (stat == 3) != (kind == "panel") or kind == "support":
+			continue  # towers show range, fire rate, damage; panels show income
+		var mult: float = planet_view.site_modifier(owner, stat)
+		if absf(mult - 1.0) > 0.001:
+			notes.append("%+d%% %s" % [roundi((mult - 1.0) * 100.0), PlanetView.STAT_NAMES[stat]])
+	var carrying: bool = false
+	if layer == 0 and planet_view.layer_count > 1:
+		var first: int = planet_view.site_slot(owner)
+		for k: int in planet_view.site_width(owner):
+			if planet_view.site_owner(planet_view.site_of(first + k, 1)) >= 0:
+				carrying = true
+	return {
+		"layer": layer, "notes": notes, "carrying": carrying,
+		"can_build_above": layer == 0 and planet_view.can_build_above(slot),
+	}
+
+
+func _select_site(site: int) -> void:
+	if site < 0:
+		clear_selection()
+		return
+	_select_slot(planet_view.site_slot(site), planet_view.site_layer(site))
 
 
 func _on_tapped(screen_pos: Vector2) -> void:
@@ -292,14 +370,14 @@ func _on_tapped(screen_pos: Vector2) -> void:
 			_tap_switched_view = true
 		return
 	_tap_switched_view = false
-	_select_slot(_slot_at_screen(screen_pos))
+	_select_site(_site_at_screen(screen_pos))
 
 
 func _on_long_pressed(screen_pos: Vector2) -> void:
 	# Long-press inspects in any band.
-	var slot: int = _slot_at_screen(screen_pos)
-	if slot >= 0:
-		_select_slot(slot)
+	var site: int = _site_at_screen(screen_pos)
+	if site >= 0:
+		_select_site(site)
 
 
 func _on_double_tapped(_screen_pos: Vector2) -> void:
@@ -328,20 +406,45 @@ func _on_build_requested(building: int) -> void:
 	if selected_slot < 0:
 		return
 	_last_building = building
-	sim.place_building(selected_slot, building, 0.0)
+	if selected_layer > 0:
+		sim.place_building(selected_slot, building, 0.0, selected_layer)
+	else:
+		sim.place_building(selected_slot, building, 0.0)
 	clear_selection()
+
+
+## M2.1: from a ground building's menu to the build list of the slot above it.
+func _on_build_above_requested() -> void:
+	var slot: int = selected_slot
+	if slot < 0 or not planet_view.can_build_above(slot):
+		return
+	_select_slot(slot, 1)
+
+
+## M2.1 keyboard path (W/Up, S/Down): up from the selected ground building to the
+## elevated slot above it (same as "Build above"), down from an elevated site to
+## its foundation.
+func _on_layer_step_requested(direction: int) -> void:
+	if selected_slot < 0 or not hud.build_menu.is_open():
+		return
+	if direction > 0 and selected_layer == 0:
+		_on_build_above_requested()
+	elif direction < 0 and selected_layer > 0:
+		_select_slot(selected_slot, 0)
 
 
 func _on_sell_requested() -> void:
 	if selected_slot < 0:
 		return
-	sim.sell_building(selected_slot)
+	sim.sell_building(planet_view.site_of(selected_slot, selected_layer))
 	clear_selection()
 
 
 func _on_menu_closed() -> void:
 	selected_slot = -1
+	selected_layer = 0
 	planet_view.selected_slot = -1
+	planet_view.selected_layer = 0
 	planet_view.ghost_building = -1
 
 
@@ -355,6 +458,8 @@ func _parse_args() -> void:
 			force_mock = true
 		elif arg == "--demo":
 			_demo = true
+		elif arg == "--demo-placement":
+			_demo_placement = true
 		elif arg == "--debug":
 			_debug_arg = true
 		elif arg.begins_with("--seed="):
@@ -417,6 +522,70 @@ func _setup_demo() -> void:
 		elif _end_arg == "lost":
 			mock.debug_set_planet_hp(0.0)
 			mock.debug_set_phase(PHASE_LOST)
+	bands.update()
+
+
+## M2.1 screenshot layout, between waves: towers with towers above them, and on
+## the mock a 3-slot building and an aura building with its links.
+func _setup_placement_demo() -> void:
+	var mock: MockSimServer = sim as MockSimServer
+	if mock != null:
+		mock.debug_set_stardust(3000.0)
+	var panel: int = -1
+	var towers: Array[int] = []
+	for def: Dictionary in sim.get_building_defs():
+		if str(def.get("kind", "")) == "panel":
+			panel = int(def.get("index", -1))
+		elif str(def.get("kind", "")) == "tower":
+			towers.append(int(def.get("index", -1)))
+	if towers.is_empty():
+		return
+	var n: int = sim.get_slot_count()
+	for slot: int in [n - 2, n - 1, 0, 1]:
+		if panel >= 0:
+			sim.place_building(slot, panel, 0.0)
+	for k: int in 5:
+		sim.place_building(3 + k, towers[k % towers.size()], 0.0)
+	for slot: int in [3, 4, 6]:
+		sim.place_building(slot, towers[0], 0.0, 1)
+	if mock != null:
+		var amp: int = mock.debug_add_building("amplifier", {
+			"cost": 80.0, "color": "building.amplifier",
+			"auras": [{"stat": 0, "amount": 0.2, "radius": 2, "kinds": 1}]})
+		var wide: int = mock.debug_add_building("depot", {
+			"cost": 60.0, "footprint": 3, "layer": 0, "shape": 1, "color": "building.depot"})
+		planet_view.building_defs = sim.get_building_defs()
+		sim.place_building(8, amp, 0.0)
+		sim.place_building(11, wide, 0.0)
+		sim.place_building(12, towers[0], 0.0, 1)
+		sim.place_building(16, towers[towers.size() - 1], 0.0)
+	sim.step_ticks(2)
+	bands.update()
+
+
+## M2.1 screenshots on the real sim (with --play and --ff-*): after the bot's
+## fast-forward, an elevated tower above each ground tower the stardust pays for.
+func _build_above_bot_towers() -> void:
+	var defs: Array[Dictionary] = sim.get_building_defs()
+	var cheapest: int = -1
+	for def: Dictionary in defs:
+		if int(def.get("layer", 0)) != 0 and (cheapest < 0
+				or float(def.get("cost", 0.0)) < float(defs[cheapest].get("cost", 0.0))):
+			cheapest = int(def.get("index", -1))
+	if cheapest < 0:
+		return
+	var slots: PackedInt32Array = sim.get_slot_buildings()
+	var budget: float = float(sim.get_stardust())
+	for slot: int in slots.size():
+		var b: int = slots[slot]
+		if b < 0 or str(defs[b].get("kind", "")) != "tower":
+			continue
+		if budget < float(defs[cheapest].get("cost", 0.0)):
+			break
+		budget -= float(defs[cheapest].get("cost", 0.0))
+		sim.place_building(slot, cheapest, 0.0, 1)
+	sim.step_ticks(2)
+	sim.drain_events()
 	bands.update()
 
 

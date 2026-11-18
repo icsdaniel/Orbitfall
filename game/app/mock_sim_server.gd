@@ -22,6 +22,22 @@ const TRAIT_IDS: PackedStringArray = [
 	"camo", "armored", "shielded", "fast", "regrow", "splitter", "heat_resistant",
 	"burrower", "orbiter", "healer", "bulwark", "carrier", "layered"]
 const TRAIT_LAYERED: int = 1 << 12
+# CommandRejected reasons (Event b), as core/sim/events.h.
+const REJECT_INVALID_SLOT: int = 1
+const REJECT_INVALID_BUILDING: int = 2
+const REJECT_OCCUPIED: int = 3
+const REJECT_UNAFFORDABLE: int = 4
+const REJECT_EMPTY_SLOT: int = 5
+const REJECT_WRONG_PHASE: int = 7
+const REJECT_NO_FOUNDATION: int = 8
+const REJECT_WRONG_LAYER: int = 9
+const REJECT_SUPPORTS_ELEVATED: int = 10
+const LAYER_GROUND: int = 0
+const LAYER_ELEVATED: int = 1
+const LAYER_ANY: int = 2
+const LAYER_NAMES: Dictionary[String, int] = {"ground": 0, "elevated": 1, "any": 2}
+const KIND_BITS: Dictionary[String, int] = {"tower": 1, "panel": 2, "support": 4}
+const AURA_STATS: Dictionary[String, int] = {"range": 0, "fireRate": 1, "damage": 2, "income": 3}
 const SHAPES: Dictionary[String, int] = {
 	"circle": 0, "triangle": 1, "square": 2, "hexagon": 3, "star": 4,
 	"diamond": 5, "disc": 6,
@@ -89,6 +105,14 @@ var _slot_building: PackedInt32Array = PackedInt32Array()
 var _slot_flags: PackedInt32Array = PackedInt32Array()
 var _slot_cooldown: PackedFloat32Array = PackedFloat32Array()
 var _slot_aim: PackedFloat32Array = PackedFloat32Array()
+# M2.1. The _slot_* arrays above are indexed by site (ground ring, then the
+# elevated ring); site = slot + layer * _slot_count.
+var _layer_count: int = 2
+var _elevated_height: float = 10.0
+var _elevated_bonus: float = 0.15
+var _site_owner: PackedInt32Array = PackedInt32Array()
+var _site_mods: PackedFloat32Array = PackedFloat32Array()
+var _links: PackedInt32Array = PackedInt32Array()
 
 var _e_pos: PackedVector2Array = PackedVector2Array()
 var _e_prev: PackedVector2Array = PackedVector2Array()
@@ -169,40 +193,89 @@ func rotate_input(v: float) -> void:
 	_rot_input = clampf(v, -1.0, 1.0)
 
 
-func place_building(slot: int, building: int, aim_offset: float = 0.0) -> void:
-	_record(&"place_building", [slot, building, aim_offset])
-	if slot < 0 or slot >= _slot_count or building < 0 or building >= _buildings.size():
-		_emit(&"CommandRejected", slot, building)
+func place_building(slot: int, building: int, aim_offset: float = 0.0, layer: int = 0) -> void:
+	# The M1 three-argument form is recorded as it was called.
+	_record(&"place_building",
+		[slot, building, aim_offset] if layer == 0 else [slot, building, aim_offset, layer])
+	var site: int = slot
+	if layer != 0:
+		site = slot + _slot_count if (layer == 1 and slot >= 0 and slot < _slot_count) else -1
+	if site < 0 or site >= _slot_building.size():
+		_emit(&"CommandRejected", site, REJECT_INVALID_SLOT)
 		return
-	var cost: float = _buildings[building]["cost"]
-	if _slot_building[slot] != -1 or cost > _stardust or _phase >= PHASE_WON:
-		_emit(&"CommandRejected", slot, building)
+	if building < 0 or building >= _buildings.size():
+		_emit(&"CommandRejected", site, REJECT_INVALID_BUILDING)
+		return
+	if _phase >= PHASE_WON:
+		_emit(&"CommandRejected", site, REJECT_WRONG_PHASE)
+		return
+	var def: Dictionary = _buildings[building]
+	var elevated: bool = site >= _slot_count
+	var base: int = _slot_count if elevated else 0
+	var first: int = site - base
+	var width: int = clampi(int(def["footprint"]), 1, 3)
+	for k: int in width:
+		if _site_owner[base + (first + k) % _slot_count] >= 0:
+			_emit(&"CommandRejected", site, REJECT_OCCUPIED)
+			return
+	var allowed: int = int(def["layer"])
+	if allowed != LAYER_ANY and (allowed == LAYER_ELEVATED) != elevated:
+		_emit(&"CommandRejected", site, REJECT_WRONG_LAYER)
+		return
+	if elevated:
+		for k: int in width:
+			if _site_owner[(first + k) % _slot_count] < 0:
+				_emit(&"CommandRejected", site, REJECT_NO_FOUNDATION)
+				return
+	var cost: float = def["cost"]
+	if cost > _stardust:
+		_emit(&"CommandRejected", site, REJECT_UNAFFORDABLE)
 		return
 	_stardust -= cost
-	_slot_building[slot] = building
-	_slot_aim[slot] = aim_offset
-	_slot_cooldown[slot] = 0.0
-	_emit(&"BuildingPlaced", slot, building)
+	_slot_building[site] = building
+	_slot_aim[site] = aim_offset
+	_slot_cooldown[site] = 0.0
+	for k: int in width:
+		_site_owner[base + (first + k) % _slot_count] = site
+	_recompute_layout()
+	_emit(&"BuildingPlaced", site, building)
 	_emit(&"StardustChanged", int(_stardust), 0)
 	_update_light()
 
 
+## `slot` is a site index and may be any slot the building covers.
 func sell_building(slot: int) -> void:
 	_record(&"sell_building", [slot])
-	if slot < 0 or slot >= _slot_count or _slot_building[slot] == -1:
-		_emit(&"CommandRejected", slot, -1)
+	if slot < 0 or slot >= _slot_building.size():
+		_emit(&"CommandRejected", slot, REJECT_INVALID_SLOT)
 		return
-	var cost: float = _buildings[_slot_building[slot]]["cost"]
+	var site: int = _site_owner[slot]
+	if site < 0:
+		_emit(&"CommandRejected", slot, REJECT_EMPTY_SLOT)
+		return
+	var building: int = _slot_building[site]
+	var base: int = _slot_count if site >= _slot_count else 0
+	var first: int = site - base
+	var width: int = clampi(int(_buildings[building]["footprint"]), 1, 3)
+	if base == 0 and _layer_count > 1:
+		for k: int in width:
+			if _site_owner[_slot_count + (first + k) % _slot_count] >= 0:
+				_emit(&"CommandRejected", slot, REJECT_SUPPORTS_ELEVATED)
+				return
+	var cost: float = _buildings[building]["cost"]
 	_stardust += floorf(cost * _sell_refund)
-	_emit(&"BuildingSold", slot, _slot_building[slot])
-	_slot_building[slot] = -1
+	_emit(&"BuildingSold", site, building)
+	_slot_building[site] = -1
+	for k: int in width:
+		_site_owner[base + (first + k) % _slot_count] = -1
+	_recompute_layout()
 	_emit(&"StardustChanged", int(_stardust), 0)
 	_update_light()
 
 
 func set_aim(slot: int, offset: float) -> void:
 	_record(&"set_aim", [slot, offset])
-	if slot >= 0 and slot < _slot_count:
+	if slot >= 0 and slot < _slot_aim.size():
 		_slot_aim[slot] = offset
 
 
@@ -300,11 +373,47 @@ func get_slot_count() -> int:
 
 
 func get_slot_buildings() -> PackedInt32Array:
-	return _slot_building
+	return _slot_building.slice(0, _slot_count)
 
 
 func get_slot_flags() -> PackedInt32Array:
+	return _slot_flags.slice(0, _slot_count)
+
+
+# ---- M2.1 placement depth ----
+
+func get_layer_count() -> int:
+	return _layer_count
+
+
+func get_elevated_height() -> float:
+	return _elevated_height
+
+
+func get_elevated_range_bonus() -> float:
+	return _elevated_bonus
+
+
+func get_site_buildings() -> PackedInt32Array:
+	return _slot_building
+
+
+func get_site_flags() -> PackedInt32Array:
 	return _slot_flags
+
+
+func get_site_owners() -> PackedInt32Array:
+	return _site_owner
+
+
+func get_site_modifiers() -> PackedFloat32Array:
+	return _site_mods
+
+
+func get_adjacency_links() -> PackedInt32Array:
+	return _links
+
+# ---- end M2.1 ----
 
 
 func get_sun_bearing() -> float:
@@ -389,7 +498,8 @@ func get_building_defs() -> Array[Dictionary]:
 		out.append({
 			"index": b["index"], "id": b["id"], "name": b["name"], "cost": b["cost"],
 			"arc": b["arc"], "range": b["range"], "kind": b["kind"], "shape": b["shape"],
-			"color": b["color"],
+			"color": b["color"], "footprint": b["footprint"], "layer": b["layer"],
+			"auras": b["auras"], "fire_rate": b["fire_rate"], "panel_rate": b["panel_rate"],
 			# M2.3
 			"damage_type": b["damage_type"], "damage_type_name": b["damage_type_name"],
 			"damage": b["damage"], "splash": b["splash"],
@@ -560,6 +670,18 @@ func clear_calls() -> void:
 	calls.clear()
 
 
+## Test helper (M2.1): adds a building definition for this run, e.g. an aura
+## building that M1 content does not have. `extra` overrides fields of a plain
+## 1-slot support building. Returns its index.
+func debug_add_building(id: String, extra: Dictionary) -> int:
+	var b: Dictionary = _building(
+		_buildings.size(), id, "support", 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "hexagon")
+	b["layer"] = LAYER_ANY
+	b.merge(extra, true)
+	_buildings.append(b)
+	return _buildings.size() - 1
+
+
 ## Test/screenshot helper: drop an enemy of the given def id at a world position.
 func debug_spawn(enemy_id: String, pos: Vector2) -> void:
 	for e: Dictionary in _enemies:
@@ -616,14 +738,18 @@ func _reset_run() -> void:
 	_sun = _sun_start
 	_income = 0.0
 	_accumulator = 0.0
-	_slot_building.resize(_slot_count)
+	var sites: int = _slot_count * _layer_count
+	_slot_building.resize(sites)
 	_slot_building.fill(-1)
-	_slot_flags.resize(_slot_count)
+	_slot_flags.resize(sites)
 	_slot_flags.fill(0)
-	_slot_cooldown.resize(_slot_count)
+	_slot_cooldown.resize(sites)
 	_slot_cooldown.fill(0.0)
-	_slot_aim.resize(_slot_count)
+	_slot_aim.resize(sites)
 	_slot_aim.fill(0.0)
+	_site_owner.resize(sites)
+	_site_owner.fill(-1)
+	_recompute_layout()
 	_e_pos.clear()
 	_e_prev.clear()
 	_e_def.clear()
@@ -638,6 +764,60 @@ func _reset_run() -> void:
 	_spawn_queue.clear()
 	_events.clear()
 	_update_light()
+
+
+## Local angle of a site: the centre of its footprint for an anchor.
+func _site_angle(site: int) -> float:
+	var extra: float = 0.0
+	var b: int = _slot_building[site]
+	if b >= 0:
+		extra = 0.5 * float(clampi(int(_buildings[b]["footprint"]), 1, 3) - 1)
+	return TAU * (float(site % _slot_count) + extra) / float(_slot_count)
+
+
+func _site_radius(site: int) -> float:
+	return _radius + (_elevated_height if site >= _slot_count else 0.0)
+
+
+func _footprint_gap(a: int, wa: int, b: int, wb: int) -> int:
+	var best: int = _slot_count
+	for i: int in wa:
+		for j: int in wb:
+			var d: int = posmod(a + i - b - j, _slot_count)
+			best = mini(best, mini(d, _slot_count - d))
+	return best
+
+
+## M2.1: elevated range bonus and adjacency auras, on layout changes only.
+func _recompute_layout() -> void:
+	var sites: int = _slot_building.size()
+	_site_mods.resize(sites * 4)
+	_site_mods.fill(0.0)
+	_links = PackedInt32Array()
+	for s: int in sites:
+		var sb: int = _slot_building[s]
+		if sb < 0:
+			continue
+		var auras: Array = _buildings[sb]["auras"]
+		var sw: int = int(_buildings[sb]["footprint"])
+		for aura: Dictionary in auras:
+			for t: int in sites:
+				var tb: int = _slot_building[t]
+				if t == s or tb < 0:
+					continue
+				var target: Dictionary = _buildings[tb]
+				if (int(aura["kinds"]) & int(KIND_BITS.get(str(target["kind"]), 0))) == 0:
+					continue
+				if _footprint_gap(s % _slot_count, sw, t % _slot_count,
+						int(target["footprint"])) > int(aura["radius"]):
+					continue
+				_site_mods[4 * t + int(aura["stat"])] += float(aura["amount"])
+				_links.append_array(PackedInt32Array([s, t, int(aura["stat"])]))
+	for s: int in sites:
+		for k: int in 4:
+			_site_mods[4 * s + k] = maxf(1.0 + _site_mods[4 * s + k], 0.1)
+		if s >= _slot_count:
+			_site_mods[4 * s] *= 1.0 + _elevated_bonus
 
 
 func _light_mult(wave: int) -> float:
@@ -788,9 +968,9 @@ func _update_light() -> void:
 	var panels: int = 0
 	var lit_panels: int = 0
 	_income = 0.0
-	for slot: int in _slot_count:
+	for slot: int in _slot_building.size():
 		var flags: int = _slot_flags[slot] & FLAG_TARGET
-		var phi: float = TAU * float(slot) / float(_slot_count) + _rot
+		var phi: float = _site_angle(slot) + _rot
 		var d: float = phi - _sun
 		var y: float = _radius * sin(d)
 		if cos(d) > 0.0 and absf(y) <= half_w:
@@ -806,7 +986,7 @@ func _update_light() -> void:
 			panels += 1
 			if flags & FLAG_LIT and not flags & FLAG_SHADED:
 				lit_panels += 1
-				_income += float(_buildings[b]["panel_rate"]) * strength
+				_income += float(_buildings[b]["panel_rate"]) * strength * _site_mods[4 * slot + 3]
 	_lit_fraction = float(lit_panels) / float(panels) if panels > 0 else 0.0
 
 
@@ -815,20 +995,21 @@ func _interval_before(a: Vector2, b: Vector2) -> bool:
 
 
 func _step_towers() -> void:
-	for slot: int in _slot_count:
+	for slot: int in _slot_building.size():
 		var b: int = _slot_building[slot]
 		_slot_flags[slot] &= ~FLAG_TARGET
 		if b < 0:
 			continue
 		var def: Dictionary = _buildings[b]
-		var fire_rate: float = def["fire_rate"]
+		var fire_rate: float = float(def["fire_rate"]) * _site_mods[4 * slot + 1]
 		if fire_rate <= 0.0:
 			continue
-		var angle: float = TAU * float(slot) / float(_slot_count) + _rot
-		var origin: Vector2 = Vector2.from_angle(angle) * _radius
+		var angle: float = _site_angle(slot) + _rot
+		var origin: Vector2 = Vector2.from_angle(angle) * _site_radius(slot)
 		var axis: Vector2 = Vector2.from_angle(angle + _slot_aim[slot])
 		var arc: float = def["arc"]
-		var tower_range: float = def["range"]
+		var tower_range: float = float(def["range"]) * _site_mods[4 * slot]
+		var hit: float = float(def["damage"]) * _site_mods[4 * slot + 2]
 		var best: int = -1
 		var best_dist: float = INF
 		for i: int in _e_pos.size():
@@ -853,9 +1034,9 @@ func _step_towers() -> void:
 		if splash > 0.0:
 			for i: int in _e_pos.size():
 				if _e_pos[i].distance_to(target) <= splash:
-					_damage(i, float(def["damage"]))
+					_damage(i, hit)
 		else:
-			_damage(best, float(def["damage"]))
+			_damage(best, hit)
 		_p_from.append(origin)
 		_p_to.append(target)
 		_p_t.append(0.0)
@@ -976,6 +1157,8 @@ func _building(
 		# M2.3: towers declare a damage type (default Kinetic), -1 for non-shooters.
 		"damage_type": 0 if kind == "tower" else -1,
 		"damage_type_name": "kinetic" if kind == "tower" else "",
+		# M2.1: slots covered, where it may stand, adjacency auras.
+		"footprint": 1, "layer": LAYER_ANY if kind == "tower" else LAYER_GROUND, "auras": [],
 	}
 
 
@@ -1034,6 +1217,7 @@ func _load_json_content(errors: PackedStringArray) -> void:
 	_load_damage_rules()
 	_spawn_radius = float(rules.get("spawnRadius", 900.0))
 	_surface_ease = float(rules.get("surfaceTimeEaseSeconds", 0.3))
+	_elevated_bonus = float(rules.get("elevatedRangeBonus", 0.15))
 	if not planet.is_empty():
 		_radius = float(planet.get("radius", 100.0))
 		_slot_count = int(planet.get("slots", 36))
@@ -1044,6 +1228,8 @@ func _load_json_content(errors: PackedStringArray) -> void:
 		_start_stardust = float(planet.get("startStardust", 150.0))
 		_sell_refund = float(planet.get("sellRefund", 0.7))
 		_surface_time_scale = float(planet.get("surfaceTimeScale", 0.75))
+		_layer_count = 2 if bool(planet.get("elevatedLayer", true)) else 1
+		_elevated_height = float(planet.get("elevatedHeight", 0.1 * _radius))
 		_lanes = {}
 		var lanes: Array = planet.get("lanes", [])
 		for lane: Dictionary in lanes:
@@ -1072,6 +1258,21 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				var type_name: String = str(shot.get("type", "kinetic"))
 				b["damage_type"] = maxi(DAMAGE_TYPES.find(type_name), 0)
 				b["damage_type_name"] = DAMAGE_TYPES[int(b["damage_type"])]
+			b["footprint"] = clampi(int(d.get("footprint", 1)), 1, 3)
+			b["layer"] = int(LAYER_NAMES.get(str(d.get("layer", "ground")), LAYER_GROUND))
+			var auras: Array[Dictionary] = []
+			var raw_auras: Array = d.get("auras", [])
+			for raw: Dictionary in raw_auras:
+				var kinds: int = 0
+				var affects: Array = raw.get("affects", ["tower", "panel", "support"])
+				for kind_name: Variant in affects:
+					kinds |= int(KIND_BITS.get(str(kind_name), 0))
+				auras.append({
+					"stat": int(AURA_STATS.get(str(raw.get("stat", "range")), 0)),
+					"amount": float(raw.get("amount", 0.0)),
+					"radius": int(raw.get("radius", 1)), "kinds": kinds,
+				})
+			b["auras"] = auras
 			_buildings.append(b)
 	var enemy_ids: Dictionary[String, int] = {}
 	var enemy_list: Array[Dictionary] = _read_dir("enemies")

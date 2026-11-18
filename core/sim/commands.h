@@ -11,7 +11,7 @@ namespace orbitfall {
 enum class CommandType : uint8_t {
   None = 0,
   RotateInput,    // value = input in [-1, 1]
-  PlaceBuilding,  // slot, id = building index (content order), value = aimOffset (rad)
+  PlaceBuilding,  // slot (site index: slot + layer * ring slots), id = building index, value = aimOffset (rad)
   SellBuilding,   // slot
   SetAim,         // slot, value = aimOffset (rad)
   SetTargeting,   // slot, mode = targeting mode index

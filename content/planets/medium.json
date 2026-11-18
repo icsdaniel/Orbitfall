@@ -13,5 +13,7 @@
   ],
   "surfaceTimeScale": 0.75,
   "sellRefund": 0.7,
+  "elevatedLayer": true,
+  "elevatedHeight": 12,
   "visual": { "shape": "circle", "color": "planet.medium" }
 }

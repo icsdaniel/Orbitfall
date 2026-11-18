@@ -7,9 +7,13 @@ extends PanelContainer
 signal preview_changed(building: int)
 signal build_requested(building: int)
 signal sell_requested
+## M2.1: "Build above" on a ground building whose elevated slot is free.
+signal build_above_requested
 signal closed
 
 var slot: int = -1
+## Layer the menu is open for: 0 ground, 1 elevated (M2.1).
+var layer: int = 0
 var previewed: int = -1
 
 var _box: VBoxContainer
@@ -18,6 +22,7 @@ var _info: Label
 var _list: VBoxContainer
 var _build: Button
 var _sell: Button
+var _above: Button
 var _buttons: Dictionary[int, Button] = {}
 var _costs: Dictionary[int, float] = {}
 var _names: Dictionary[int, String] = {}
@@ -48,6 +53,14 @@ func _init() -> void:
 	_build.name = "Build"
 	_build.pressed.connect(_on_build_pressed)
 	_box.add_child(_build)
+	# Keyboard path: W/Up (InputRouter); the key is named where there is a keyboard.
+	var phone: bool = OS.has_feature("mobile") or OS.has_feature("web_android") \
+		or OS.has_feature("web_ios")
+	var above_text: String = "Build above" if phone else "Build above (W)"
+	_above = UiKit.button(above_text, Vector2(230.0, 68.0), Color(0.14, 0.36, 0.42))
+	_above.name = "BuildAbove"
+	_above.pressed.connect(_on_above_pressed)
+	_box.add_child(_above)
 	_sell = UiKit.button("Sell", Vector2(230.0, 68.0), Color(0.45, 0.20, 0.16))
 	_sell.name = "Sell"
 	_sell.pressed.connect(_on_sell_pressed)
@@ -59,18 +72,32 @@ func is_open() -> bool:
 
 
 ## Opens the menu for an empty slot. `preferred` is previewed first (last used).
-func open_empty(for_slot: int, defs: Array[Dictionary], stardust: float, preferred: int = -1) -> void:
+## M2.1: `for_layer` 1 lists only what may stand on the elevated ring and shows
+## its range bonus; buildings wider than one slot say so.
+func open_empty(
+		for_slot: int, defs: Array[Dictionary], stardust: float, preferred: int = -1,
+		for_layer: int = 0, range_bonus: float = 0.0
+) -> void:
 	slot = for_slot
+	layer = for_layer
 	_stardust = stardust
-	_title.text = "Build on slot %d" % for_slot
+	_title.text = ("Build above slot %d" if for_layer > 0 else "Build on slot %d") % for_slot
 	_info.text = "Tap to preview, tap again to build"
+	if for_layer > 0:
+		_info.text = "Elevated: %+d%% range\n%s" % [roundi(range_bonus * 100.0), _info.text]
 	_clear_list()
 	for def: Dictionary in defs:
+		# Def "layer": 0 ground only, 1 elevated only, 2 either (absent = ground).
+		var allowed: int = int(def.get("layer", 0))
+		if allowed != 2 and allowed != for_layer:
+			continue
 		var index: int = int(def.get("index", _buttons.size()))
 		var cost: float = float(def.get("cost", 0.0))
-		var b: Button = UiKit.button(
-			"%s   %d" % [str(def.get("name", def.get("id", "?"))), roundi(cost)],
-			Vector2(230.0, 62.0))
+		var label: String = "%s   %d" % [str(def.get("name", def.get("id", "?"))), roundi(cost)]
+		var footprint: int = int(def.get("footprint", 1))
+		if footprint > 1:
+			label += "  (%d slots)" % footprint
+		var b: Button = UiKit.button(label, Vector2(230.0, 62.0))
 		b.name = "Building%d" % index
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -93,6 +120,7 @@ func open_empty(for_slot: int, defs: Array[Dictionary], stardust: float, preferr
 	_list.visible = true
 	_build.visible = true
 	_sell.visible = false
+	_above.visible = false
 	visible = true
 	previewed = -1
 	if _buttons.has(preferred):
@@ -103,16 +131,35 @@ func open_empty(for_slot: int, defs: Array[Dictionary], stardust: float, preferr
 
 
 ## Opens the info/sell view for an occupied slot.
-func open_building(for_slot: int, def: Dictionary, lit: bool, shaded: bool) -> void:
+## M2.1 `extra` (all optional): "layer" (1 = elevated), "can_build_above" (shows
+## the Build above button), "carrying" (a building stands on it: Sell is off),
+## "notes" (lines such as "+20% range (linked)").
+func open_building(
+		for_slot: int, def: Dictionary, lit: bool, shaded: bool, extra: Dictionary = {}
+) -> void:
 	slot = for_slot
+	layer = int(extra.get("layer", 0))
 	previewed = -1
 	_clear_list()
 	_title.text = str(def.get("name", def.get("id", "Building")))
 	var light: String = "shaded" if shaded else ("in the beam" if lit else "in the dark")
-	_info.text = "Slot %d, %s\nCost %d" % [for_slot, light, roundi(float(def.get("cost", 0.0)))]
+	var where: String = "Above slot %d" if layer > 0 else "Slot %d"
+	_info.text = "%s, %s\nCost %d" % [
+		where % for_slot, light, roundi(float(def.get("cost", 0.0)))]
+	var notes: Array = extra.get("notes", [])
+	for note: Variant in notes:
+		_info.text += "\n" + str(note)
+	var carrying: bool = bool(extra.get("carrying", false))
+	if carrying:
+		_info.text += "\nCarries a building: sell that one first"
 	_list.visible = false
 	_build.visible = false
 	_sell.visible = true
+	# A foundation in use stays pressable: the sim refuses the sale and the HUD
+	# toasts why; the button is only dimmed.
+	_sell.disabled = false
+	_sell.modulate = Color(1.0, 1.0, 1.0, 0.55) if carrying else Color.WHITE
+	_above.visible = bool(extra.get("can_build_above", false))
 	visible = true
 
 
@@ -149,6 +196,14 @@ func build_button() -> Button:
 
 func sell_button() -> Button:
 	return _sell
+
+
+func above_button() -> Button:
+	return _above
+
+
+func info_text() -> String:
+	return _info.text
 
 
 func _clear_list() -> void:
@@ -197,3 +252,7 @@ func _on_build_pressed() -> void:
 
 func _on_sell_pressed() -> void:
 	sell_requested.emit()
+
+
+func _on_above_pressed() -> void:
+	build_above_requested.emit()

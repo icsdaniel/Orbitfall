@@ -9,7 +9,8 @@ extends Node
 ##  - pinch -> `zoom_requested` live, then `pinch_ended`; wheel notch or trackpad
 ##    magnify -> `view_step_requested(+1 closer / -1 wider)`
 ##  - keys: A/Q and D/E rotate, Space start_wave, backtick -> `debug_toggled`,
-##    C -> `codex_toggled`, Escape -> `codex_close_requested`
+##    C -> `codex_toggled`, Escape -> `codex_close_requested`,
+##    W/Up -> `layer_step_requested(+1)`, S/Down -> `layer_step_requested(-1)` (M2.1)
 ## Commands go straight to the sim; everything else is a signal for Game.
 
 signal tapped(screen_pos: Vector2)
@@ -22,6 +23,9 @@ signal debug_toggled
 ## M2.3: C toggles the codex, Escape closes it (keyboard path of the "?" button).
 signal codex_toggled
 signal codex_close_requested
+## M2.1: keyboard path of "Build above": +1 from the selected ground building to
+## the elevated slot above it, -1 from an elevated site back to its foundation.
+signal layer_step_requested(direction: int)
 
 const PHASE_INTERMISSION: int = 0
 
@@ -244,6 +248,12 @@ func _key(key: InputEventKey) -> void:
 		KEY_ESCAPE:
 			if key.pressed:
 				codex_close_requested.emit()
+		KEY_W, KEY_UP:
+			if key.pressed:
+				layer_step_requested.emit(1)
+		KEY_S, KEY_DOWN:
+			if key.pressed:
+				layer_step_requested.emit(-1)
 
 
 ## Planet rotation (rad) that moving a finger from `a` to `b` asks for: the change

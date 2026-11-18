@@ -78,7 +78,11 @@ void initWorld(World& world, const SimConfig& config) {
   world.enemiesSpawned = 0;
   world.stardust = world.planet ? world.planet->startStardust : 0.0f;
   world.slots.assign(world.planet ? static_cast<size_t>(world.planet->slots) : 0, BuildingSlot());
-  world.slotTargets.assign(world.slots.size(), kInvalidIndex);
+  world.elevated.assign(world.planet && world.planet->elevatedLayer ? world.slots.size() : 0,
+                        BuildingSlot());
+  world.slotTargets.assign(world.siteCount(), kInvalidIndex);
+  world.auraLinks.clear();
+  world.auraLinks.reserve(world.siteCount() * 4);
   world.rng.seed(config.seed);
   world.commandsApplied = 0;
   world.commandDigest = 0;
@@ -148,12 +152,14 @@ uint64_t hashWorld(const World& world) {
   h.add(world.intermissionTime);
   h.array(world.spawned.data(), world.spawned.size());
   h.add(world.stardust);
-  for (const BuildingSlot& b : world.slots) {
+  for (uint32_t s = 0; s < world.siteCount(); ++s) {
+    const BuildingSlot& b = world.site(s);
     h.add(b.type);
     h.add(b.mode);
     h.add(b.flags);
     h.add(b.aimOffset);
     h.add(b.cooldown);
+    h.add(b.anchor);
   }
   h.array(world.rng.s, 4);
   h.add(world.commandsApplied);
