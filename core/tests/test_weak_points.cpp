@@ -13,7 +13,7 @@
 #include "systems/combat.h"
 #include "systems/enemies.h"
 #include "tiny_content.h"
-#include "weak_point_bot.h"
+#include "bots/bots.h"
 
 using namespace orbitfall;
 using namespace orbitfall_test;
@@ -258,11 +258,10 @@ TEST_CASE("weak point acceptance: a never-rotating bot kills Bulwarks at under 2
     sim.push(cmd::placeBuilding(sim.tick(), 17, gatling, 0.0f));
     sim.step();
     w.planetHp = w.planetHpMax = 1.0e6f;  // measures kills, not survival
-    orbitfall_bots::WeakPointAimer aimer;
     Outcome o;
     for (int t = 0; t < 120 * 30; ++t) {
       if (t < 90 * 30 && t % (6 * 30) == 0 && spawnEnemy(w, bulwark, laneA) != kInvalidIndex) ++o.spawned;
-      if (rotate) sim.push(cmd::rotateInput(sim.tick(), aimer.input(w)));
+      if (rotate) sim.push(cmd::rotateInput(sim.tick(), orbitfall_bots::weakPointRotateInput(w)));
       w.events.clear();
       sim.step();
       for (const Event& ev : w.events.items)
@@ -290,4 +289,46 @@ TEST_CASE("weak point acceptance: a never-rotating bot kills Bulwarks at under 2
   }
   CHECK(turningKills > 0);
   CHECK(static_cast<float>(stillKills) < 0.25f * static_cast<float>(turningKills));
+}
+
+// Whole runs of the Bulwark trial wave set (waves/trial_bulwark.json) with the
+// shared M2.9 strategy bots: never-rotate (the sensible build, hands off)
+// against rotate-to-weak-point (a battery with Lances, turned so a Lance sits
+// under the nearest Bulwark). Rate = Bulwarks killed per second of wave time.
+// Reported for the balance log; the strict 25% acceptance is the scripted
+// scenario above, because in mixed waves never-rotate's lane Gatlings sit
+// under the lane and score weak-point hits on the Bulwarks that come in close
+// to it (about half the rotating bot's rate today, see docs/STATUS.md).
+TEST_CASE("weak point: strategy bots on the Bulwark trial (report)") {
+  ContentDB db;
+  std::vector<std::string> errors;
+  REQUIRE(load_content(ORBITFALL_CONTENT_DIR, db, errors));
+  const int bulwark = db.enemy_index("bulwark");
+  orbitfall_bots::RunOptions opts;
+  opts.waveSet = db.wave_set_index("trial_bulwark");
+  REQUIRE(opts.waveSet != kNoIndex);
+  uint32_t killsStill = 0, killsTurning = 0;
+  float secondsStill = 0.0f, secondsTurning = 0.0f;
+  for (uint32_t seed = 1; seed <= 4; ++seed) {
+    opts.seed = seed;
+    const orbitfall_bots::RunResult still = orbitfall_bots::play(db, orbitfall_bots::Strategy::NeverRotate, opts);
+    const orbitfall_bots::RunResult turning =
+        orbitfall_bots::play(db, orbitfall_bots::Strategy::RotateToWeakPoint, opts);
+    const uint32_t ks = still.killsByEnemy[static_cast<size_t>(bulwark)];
+    const uint32_t kt = turning.killsByEnemy[static_cast<size_t>(bulwark)];
+    MESSAGE("seed " << seed << ": never-rotate " << ks << " Bulwarks in " << still.waveSeconds << " s (waves "
+                    << still.wavesCleared << "), rotate-to-weak-point " << kt << " in " << turning.waveSeconds
+                    << " s (waves " << turning.wavesCleared << ")");
+    killsStill += ks;
+    killsTurning += kt;
+    secondsStill += still.waveSeconds;
+    secondsTurning += turning.waveSeconds;
+  }
+  REQUIRE(secondsStill > 0.0f);
+  REQUIRE(secondsTurning > 0.0f);
+  const float rateStill = static_cast<float>(killsStill) / secondsStill;
+  const float rateTurning = static_cast<float>(killsTurning) / secondsTurning;
+  MESSAGE("Bulwark kill rate: never-rotate " << rateStill << "/s, rotate-to-weak-point " << rateTurning << "/s");
+  CHECK(killsTurning > 0);
+  CHECK(rateTurning > rateStill);
 }
