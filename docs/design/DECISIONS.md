@@ -96,6 +96,10 @@ Small choices an agent had to make where the brief was silent. Each is data, not
 | 2026-11-15 | M2.3 | Shielded: `shield` on the enemy is the damage absorbed first; overflow goes on to the hit points; the shield never regenerates, carries over a popped layer, and the glow ring disappears when it breaks. The 0.25 floor applies to the multipliers, not to the absorb (PLAN 5.5 lists it as a soft effect) | `core/systems/combat.cpp` |
 | 2026-11-15 | M2.3 | `layered` is a trait bit (bit 12) derived by the loader from `layers > 1`, not authored; its cue is the colour tier only | `core/content/content_loader.cpp` |
 | 2026-11-15 | M2.3 | HP bar segments are data (`hpBarSegments`, Eclipser 4); the codex opens with the `?` button (touch/mouse) or C, Escape closes it; it does not pause the sim | `content/enemies/eclipser.json`, `game/ui/codex_panel.gd` |
+| 2026-11-18 | M2.4 | A weak-point hit is judged from the tower's world angle when the shot was fired (stored on the projectile) against the enemy's bearing at impact; any tower can score one (the rule is geometric), the Lance is the one built for it. Weak 3.5x, body 0.25x, window from `rules.weakWindowDeg` (8) unless the enemy sets `windowDeg` | `core/systems/combat.cpp`, `content/enemies/bulwark.json` |
+| 2026-11-18 | M2.4 | Bulwarks come in spread ±25° around their lane (new optional `spawnJitterDeg` on lane enemies): with the ±8° lane jitter a Lance fixed under the lane caught nearly all of them and rotation did not matter. Bulwark 32 HP, speed 24, size 13, land 6, bounty 3 | `content/enemies/bulwark.json` |
+| 2026-11-18 | M2.4 | Lance: ±6°, range 420, 1 shot/s of 2 Pierce, cost 45 (cheapest tower, lowest DPS), no aim mount, `precision: true` (what the aim assist and the bot line up). No slot bonuses exist yet to opt out of | `content/buildings/lance.json` |
+| 2026-11-18 | M2.4 | Bulwarks appear only in a separate wave set `trial_bulwark` (3 waves) so M1 balance is untouched; play it with `--waves=trial_bulwark` or the debug overlay | `content/waves/trial_bulwark.json` |
 
 ## 4. Entry template
 
