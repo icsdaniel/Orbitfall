@@ -43,6 +43,7 @@ var _select_arg: int = -1
 var _debug_arg: bool = false
 var _end_arg: String = ""
 var _screenshot_path: String = ""
+var _codex_arg: bool = false
 var _slot_pick_px: float = 44.0
 var _play: String = ""
 var _autoplay: Autoplay
@@ -91,6 +92,8 @@ func _process(delta: float) -> void:
 	_forecast_timer -= delta
 	if _forecast_timer <= 0.0:
 		_refresh_forecast()
+	if _codex_arg and _frame == 2 and not hud.codex.visible:
+		hud.toggle_codex()
 	if _screenshot_path != "" and _frame == SCREENSHOT_FRAME:
 		_save_screenshot()
 
@@ -189,6 +192,8 @@ func _build_scene() -> void:
 	input_router.pinch_ended.connect(bands.settle)
 	input_router.view_step_requested.connect(bands.step)
 	input_router.debug_toggled.connect(hud.toggle_debug)
+	input_router.codex_toggled.connect(hud.toggle_codex)  # M2.3
+	input_router.codex_close_requested.connect(hud.codex.close)
 	bands.band_changed.connect(_on_band_changed)
 	hud.debug_toggle_requested.connect(hud.toggle_debug)
 	hud.restart_requested.connect(restart)
@@ -370,6 +375,8 @@ func _parse_args() -> void:
 			_ff_end = true
 		elif arg.begins_with("--end="):
 			_end_arg = arg.get_slice("=", 1)
+		elif arg == "--codex":  # M2.3: start with the codex open (screenshots)
+			_codex_arg = true
 		elif arg == "--screenshot" and i + 1 < args.size():
 			i += 1
 			_screenshot_path = args[i]

@@ -37,6 +37,11 @@ const GOOD: Color = Color(0.35, 0.90, 0.50)
 const TEXT: Color = Color(0.93, 0.95, 1.0)
 const TEXT_DIM: Color = Color(0.62, 0.68, 0.80)
 const PANEL_BG: Color = Color(0.06, 0.08, 0.14, 0.88)
+# M2.3 trait cue colours (same as the SDF shader uniforms).
+const SHIELD: Color = Color(0.45, 0.85, 1.0)
+const ARMOR: Color = Color(0.62, 0.64, 0.68)
+const HEAT: Color = Color(1.0, 0.55, 0.12)
+const REGROW: Color = Color(0.45, 1.0, 0.55)
 
 
 static func tier(index: int) -> Color:

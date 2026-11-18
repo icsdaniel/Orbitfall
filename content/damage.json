@@ -1,0 +1,47 @@
+{
+  "shieldMult": { "emp": 2 },
+  "traits": {
+    "camo": {
+      "name": "Camo", "cue": "dashed, translucent",
+      "effect": "About half of undetected shots miss",
+      "easierWith": "Radar, Scanner satellite"
+    },
+    "armored": {
+      "name": "Armored", "cue": "thick grey outline",
+      "effect": "Kinetic damage halved",
+      "easierWith": "Explosive, Energy, Pierce",
+      "mult": { "kinetic": 0.5, "pierce": 1.5 }
+    },
+    "shielded": {
+      "name": "Shielded", "cue": "glow ring",
+      "effect": "A shield absorbs the first damage; EMP strips it twice as fast",
+      "easierWith": "EMP, Tesla"
+    },
+    "fast": {
+      "name": "Fast", "cue": "elongated, trail",
+      "effect": "Outruns slow shots",
+      "easierWith": "Cryo, slow fields, hitscan"
+    },
+    "layered": {
+      "name": "Layered", "cue": "colour tier changes",
+      "effect": "Each layer popped drops it one colour tier",
+      "easierWith": "High fire rate"
+    },
+    "regrow": {
+      "name": "Regrow", "cue": "plus badge",
+      "effect": "Regains layers over time",
+      "easierWith": "Burst, burn"
+    },
+    "splitter": {
+      "name": "Splitter", "cue": "notched",
+      "effect": "Splits into 2 to 4 when killed",
+      "easierWith": "Splash, chain"
+    },
+    "heat_resistant": {
+      "name": "Heat-resistant", "cue": "orange rim",
+      "effect": "Energy damage halved",
+      "easierWith": "Kinetic, Cryo",
+      "mult": { "energy": 0.5, "cryo": 1.5 }
+    }
+  }
+}

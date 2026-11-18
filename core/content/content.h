@@ -29,6 +29,8 @@ enum class SunPathType : uint8_t { ConstantDrift, Fixed };
 enum class EnemyBehavior : uint8_t { Lane, Eclipser };
 
 inline constexpr int kDamageTypeCount = static_cast<int>(DamageType::Count);
+// M2.3: the JSON name of a damage type ("kinetic"), for the codex and UI.
+const char* damage_type_name(DamageType type);
 
 // Trait bits (BRIEF §4.6). EnemyDef::traits is an OR of these.
 enum Trait : uint32_t {
@@ -44,6 +46,28 @@ enum Trait : uint32_t {
   kTraitHealer = 1u << 9,
   kTraitBulwark = 1u << 10,
   kTraitCarrier = 1u << 11,
+  // M2.3. Set by the loader on every enemy with more than one layer; appended
+  // so the M1 bit values (and the shader's bit tests) stay as they were.
+  kTraitLayered = 1u << 12,
+};
+inline constexpr int kTraitCount = 13;
+
+// M2.3 soft-counter matrix (content/damage.json, PLAN §5.5). One row per trait
+// bit: the damage-type multipliers an enemy with that trait takes, plus the
+// texts the codex shows. Every multiplier is >= kHardMinDamageMult.
+struct TraitDef {
+  std::string id;          // JSON name of the bit ("armored")
+  std::string name;        // display name
+  std::string cue;         // how it is drawn
+  std::string effect;      // what it does
+  std::string easierWith;  // what answers it
+  float mult[kDamageTypeCount] = {1, 1, 1, 1, 1, 1};
+};
+
+struct DamageRulesDef {
+  TraitDef traits[kTraitCount];  // index = trait bit number
+  // Multiplier on damage dealt to a shield (the Shielded "first X absorbed").
+  float shieldMult[kDamageTypeCount] = {1, 1, 1, 1, 1, 1};
 };
 
 struct VisualDef {
@@ -148,6 +172,8 @@ struct EnemyDef {
   uint32_t traits = 0;
   bool shadowCaster = false;
   bool hpBar = false;
+  int hpBarSegments = 1;  // M2.3: segments of the HP bar of a large unit
+  float shield = 0.0f;    // M2.3: Shielded, damage absorbed before any HP is lost
   int popsInto = kNoIndex;  // enemy index this becomes when a layer pops
   bool hasHover = false;
   HoverDef hover;
@@ -199,6 +225,7 @@ struct RulesDef {  // content/rules.json: global tunables
 
 struct ContentDB {
   RulesDef rules;
+  DamageRulesDef damage;  // M2.3
   std::vector<PlanetDef> planets;
   std::vector<SunDef> suns;
   std::vector<BuildingDef> buildings;

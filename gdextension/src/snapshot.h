@@ -41,6 +41,9 @@ struct LargeUnit {
   float radius = 0.0f;
   float hpFrac = 1.0f;
   bool shadow = false;  // casting a shadow on the planet right now
+  // M2.3: segmented HP bar and the shield still up, as a fraction of the full shield.
+  int32_t segments = 1;
+  float shieldFrac = 0.0f;
 };
 
 inline constexpr uint32_t kMaxShadePairs = 256;
@@ -156,6 +159,8 @@ inline void fill_snapshot(const orbitfall::World& w, const RunStatics& run, Snap
       u.radius = def.size;
       const float frac = def.hp > 0.0f ? e.hp[i] / def.hp : 0.0f;
       u.hpFrac = frac < 0.0f ? 0.0f : (frac > 1.0f ? 1.0f : frac);
+      u.segments = def.hpBarSegments;
+      u.shieldFrac = def.shield > 0.0f ? e.shield[i] / def.shield : 0.0f;
       ShadeInterval ignored;
       u.shadow = def.shadowCaster && casterInterval(u.x, u.y, def.size, sx, sy, w.planet->radius, ignored);
       s.largeUnits.push_back(u);

@@ -8,7 +8,8 @@ extends Node
 ##  - double-tap -> `double_tapped` (view toggle)
 ##  - pinch -> `zoom_requested` live, then `pinch_ended`; wheel notch or trackpad
 ##    magnify -> `view_step_requested(+1 closer / -1 wider)`
-##  - keys: A/Q and D/E rotate, Space start_wave, backtick -> `debug_toggled`
+##  - keys: A/Q and D/E rotate, Space start_wave, backtick -> `debug_toggled`,
+##    C -> `codex_toggled`, Escape -> `codex_close_requested`
 ## Commands go straight to the sim; everything else is a signal for Game.
 
 signal tapped(screen_pos: Vector2)
@@ -18,6 +19,9 @@ signal zoom_requested(factor: float, screen_pos: Vector2)
 signal pinch_ended
 signal view_step_requested(direction: int)
 signal debug_toggled
+## M2.3: C toggles the codex, Escape closes it (keyboard path of the "?" button).
+signal codex_toggled
+signal codex_close_requested
 
 const PHASE_INTERMISSION: int = 0
 
@@ -234,6 +238,12 @@ func _key(key: InputEventKey) -> void:
 		KEY_QUOTELEFT:
 			if key.pressed:
 				debug_toggled.emit()
+		KEY_C:
+			if key.pressed:
+				codex_toggled.emit()
+		KEY_ESCAPE:
+			if key.pressed:
+				codex_close_requested.emit()
 
 
 ## Planet rotation (rad) that moving a finger from `a` to `b` asks for: the change

@@ -15,6 +15,13 @@ const PHASE_LOST: int = 3
 const FLAG_LIT: int = 1
 const FLAG_SHADED: int = 2
 const FLAG_TARGET: int = 4
+## M2.3: damage types and trait bits, in engine order (core/content/content.h).
+const DAMAGE_TYPES: PackedStringArray = [
+	"kinetic", "explosive", "energy", "cryo", "emp", "pierce"]
+const TRAIT_IDS: PackedStringArray = [
+	"camo", "armored", "shielded", "fast", "regrow", "splitter", "heat_resistant",
+	"burrower", "orbiter", "healer", "bulwark", "carrier", "layered"]
+const TRAIT_LAYERED: int = 1 << 12
 const SHAPES: Dictionary[String, int] = {
 	"circle": 0, "triangle": 1, "square": 2, "hexagon": 3, "star": 4,
 	"diamond": 5, "disc": 6,
@@ -73,6 +80,10 @@ var _surface_ease: float = 0.3
 
 var _buildings: Array[Dictionary] = []
 var _enemies: Array[Dictionary] = []
+## M2.3: trait legend and soft-counter matrix (content/damage.json).
+var _trait_defs: Array[Dictionary] = []
+var _shield_mults: PackedFloat32Array = PackedFloat32Array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+var _min_damage_mult: float = 0.25
 var _waves: Array[Dictionary] = []
 var _slot_building: PackedInt32Array = PackedInt32Array()
 var _slot_flags: PackedInt32Array = PackedInt32Array()
@@ -125,6 +136,7 @@ func load_content(dir: String = "res://content") -> PackedStringArray:
 	_content_dir = dir
 	var errors: PackedStringArray = PackedStringArray()
 	_load_fallback_content()
+	_load_damage_rules()
 	_load_json_content(errors)
 	_reset_run()
 	return errors
@@ -334,7 +346,7 @@ func get_enemy_buffer() -> PackedFloat32Array:
 			(-pos).angle() + PI * 0.5, Vector2(size, size), 0.0, pos)
 		BatchRenderer.write_instance(
 			_enemy_buffer, i, xform, Color.WHITE,
-			BatchRenderer.make_custom(int(def["shape"]), tier, 0))
+			BatchRenderer.make_custom(int(def["shape"]), tier, int(def["traits"])))
 	return _enemy_buffer
 
 
@@ -364,6 +376,9 @@ func get_large_units() -> Array[Dictionary]:
 				"pos": _e_pos[i], "radius": float(def["size"]),
 				"hp_frac": _e_hp[i] / float(def["hp"]),
 				"shadow": bool(def["shadow_caster"]) and _e_pos[i].dot(s) > _radius,
+				# M2.3 (the mock does not simulate shields: up until the unit dies).
+				"segments": int(def["hp_bar_segments"]),
+				"shield_frac": 1.0 if float(def["shield"]) > 0.0 else 0.0,
 			})
 	return out
 
@@ -375,6 +390,9 @@ func get_building_defs() -> Array[Dictionary]:
 			"index": b["index"], "id": b["id"], "name": b["name"], "cost": b["cost"],
 			"arc": b["arc"], "range": b["range"], "kind": b["kind"], "shape": b["shape"],
 			"color": b["color"],
+			# M2.3
+			"damage_type": b["damage_type"], "damage_type_name": b["damage_type_name"],
+			"damage": b["damage"], "splash": b["splash"],
 		})
 	return out
 
@@ -386,8 +404,70 @@ func get_enemy_defs() -> Array[Dictionary]:
 			"index": e["index"], "id": e["id"], "name": e["name"], "shape": e["shape"],
 			"tier": e["tier"], "color": e["color"], "size": e["size"],
 			"shadow_caster": e["shadow_caster"],
+			# M2.3 (codex)
+			"layers": e["layers"], "hp": e["hp"], "speed": e["speed"], "bounty": e["bounty"],
+			"traits": e["traits"], "hp_bar": e["hp_bar"], "pops_into": e["pops_into"],
+			"shield": e["shield"], "hp_bar_segments": e["hp_bar_segments"],
+			"land_damage": float(e["land_damage"]) * float(e["layers"]), "damage_mult": _enemy_mults(e),
 		})
 	return out
+
+
+# --- M2.3 damage types and traits ---
+func get_damage_types() -> PackedStringArray:
+	return DAMAGE_TYPES
+
+
+func get_trait_defs() -> Array[Dictionary]:
+	return _trait_defs.duplicate(true)
+
+
+func get_shield_mults() -> PackedFloat32Array:
+	return _shield_mults
+
+
+## Own damageMult x the row of every trait carried, floored (as core does).
+func _enemy_mults(e: Dictionary) -> PackedFloat32Array:
+	var own: PackedFloat32Array = e["damage_mult"]
+	var out: PackedFloat32Array = own.duplicate()
+	var traits: int = int(e["traits"])
+	for def: Dictionary in _trait_defs:
+		if traits & int(def["mask"]) != 0:
+			var row: PackedFloat32Array = def["mult"]
+			for t: int in out.size():
+				out[t] *= row[t]
+	for t: int in out.size():
+		out[t] = maxf(out[t], _min_damage_mult)
+	return out
+
+
+func _type_mults(raw: Variant) -> PackedFloat32Array:
+	var out: PackedFloat32Array = PackedFloat32Array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+	if raw is Dictionary:
+		var d: Dictionary = raw
+		for key: Variant in d:
+			var t: int = DAMAGE_TYPES.find(str(key))
+			if t >= 0:
+				out[t] = float(d[key])
+	return out
+
+
+func _load_damage_rules() -> void:
+	var doc: Dictionary = _read_json(_content_dir.path_join("damage.json"))
+	var rows: Dictionary = doc.get("traits", {})
+	_shield_mults = _type_mults(doc.get("shieldMult"))
+	for t: int in _shield_mults.size():
+		_shield_mults[t] = maxf(_shield_mults[t], _min_damage_mult)
+	_trait_defs = []
+	for bit: int in TRAIT_IDS.size():
+		var id: String = TRAIT_IDS[bit]
+		var row: Dictionary = rows.get(id, {})
+		_trait_defs.append({
+			"bit": bit, "mask": 1 << bit, "id": id, "name": str(row.get("name", id)),
+			"cue": str(row.get("cue", "")), "effect": str(row.get("effect", "")),
+			"easier_with": str(row.get("easierWith", "")), "mult": _type_mults(row.get("mult")),
+		})
+# --- end M2.3 ---
 
 
 func get_forecast(count: int) -> Array[Dictionary]:
@@ -893,6 +973,9 @@ func _building(
 		"damage": damage, "splash": splash, "shot_speed": maxf(shot_speed, 1.0),
 		"panel_rate": panel_rate, "shape": int(SHAPES.get(shape, 0)),
 		"color": "building." + id if kind == "panel" else "tower." + id,
+		# M2.3: towers declare a damage type (default Kinetic), -1 for non-shooters.
+		"damage_type": 0 if kind == "tower" else -1,
+		"damage_type_name": "kinetic" if kind == "tower" else "",
 	}
 
 
@@ -907,6 +990,10 @@ func _enemy(
 		"hp_per_layer": hp / float(maxi(layers, 1)), "speed": speed, "size": size,
 		"land_damage": land_damage, "bounty": bounty, "shadow_caster": shadow_caster,
 		"hp_bar": shadow_caster,
+		# M2.3
+		"traits": TRAIT_LAYERED if layers > 1 else 0, "shield": 0.0, "pops_into": -1,
+		"hp_bar_segments": 4 if shadow_caster else 1,
+		"damage_mult": PackedFloat32Array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
 	}
 
 
@@ -943,6 +1030,8 @@ func _load_json_content(errors: PackedStringArray) -> void:
 	var sun: Dictionary = _read_json(
 		_content_dir.path_join("sun/%s.json" % str(wave_set.get("sun", "default"))))
 	var rules: Dictionary = _read_json(_content_dir.path_join("rules.json"))
+	_min_damage_mult = maxf(float(rules.get("minDamageMult", 0.25)), 0.25)
+	_load_damage_rules()
 	_spawn_radius = float(rules.get("spawnRadius", 900.0))
 	_surface_ease = float(rules.get("surfaceTimeEaseSeconds", 0.3))
 	if not planet.is_empty():
@@ -979,6 +1068,10 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				float(shot.get("splash", 0.0)), float(shot.get("speed", 0.0)),
 				float(d.get("panelRate", 0.0)), str(visual.get("shape", "square")))
 			b["color"] = str(visual.get("color", ""))
+			if b["kind"] == "tower":
+				var type_name: String = str(shot.get("type", "kinetic"))
+				b["damage_type"] = maxi(DAMAGE_TYPES.find(type_name), 0)
+				b["damage_type_name"] = DAMAGE_TYPES[int(b["damage_type"])]
 			_buildings.append(b)
 	var enemy_ids: Dictionary[String, int] = {}
 	var enemy_list: Array[Dictionary] = _read_dir("enemies")
@@ -995,9 +1088,23 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				float(d.get("landDamagePerLayer", d.get("landDamage", 1.0))),
 				float(d.get("bounty", 1.0)), bool(d.get("shadowCaster", false)))
 			e["hp_bar"] = bool(d.get("hpBar", false))
+			# M2.3
+			var trait_names: Array = d.get("traits", [])
+			for trait_name: Variant in trait_names:
+				var bit: int = TRAIT_IDS.find(str(trait_name))
+				if bit >= 0:
+					e["traits"] = int(e["traits"]) | (1 << bit)
+			e["shield"] = float(d.get("shield", 0.0))
+			if float(e["shield"]) > 0.0:
+				e["traits"] = int(e["traits"]) | (1 << TRAIT_IDS.find("shielded"))
+			e["hp_bar_segments"] = int(d.get("hpBarSegments", 1))
+			e["damage_mult"] = _type_mults(d.get("damageMult"))
+			e["_pops_into_id"] = str(d.get("popsInto", "")) if d.get("popsInto") != null else ""
 			_enemies.append(e)
 	for e: Dictionary in _enemies:
 		enemy_ids[str(e["id"])] = int(e["index"])
+	for e: Dictionary in _enemies:
+		e["pops_into"] = int(enemy_ids.get(str(e.get("_pops_into_id", "")), -1))
 	_waves = []
 	var waves: Array = wave_set.get("waves", [])
 	for w: Dictionary in waves:

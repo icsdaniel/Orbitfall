@@ -86,6 +86,11 @@ Small choices an agent had to make where the brief was silent. Each is data, not
 | 2026-11-13 | M1 integration | `get_forecast` during a wave lists the wave in flight first (exact, no ghost arcs), then the upcoming ones from core `forecast()` | `gdextension/src/sim_server.cpp` |
 | 2026-11-13 | M1 integration | Slow-time numbers (`surfaceTimeScale`, `surfaceTimeEaseSeconds`) are read from content through `SimServer.get_surface_time_scale()` / `get_surface_time_ease_seconds()`; removed from `client_config.json` | `game/app/band_controller.gd` |
 | 2026-11-13 | M1 integration | `load_content` ends the run in progress (a World points into its `ContentDB`); call `new_run` after it | `gdextension/src/sim_server.cpp` |
+| 2026-11-15 | M2.3 | The soft-counter matrix is one file, `content/damage.json`: a row of damage-type multipliers per trait plus the legend texts the codex shows, and `shieldMult` (damage dealt to a shield). An enemy's final multiplier = its own `damageMult` x the row of every trait it has, floored at `minDamageMult`; the loader rejects any single entry below the floor | `content/damage.json`, `core/systems/combat.cpp` |
+| 2026-11-15 | M2.3 | Starter numbers: Armored Kinetic x0.5, Pierce x1.5; Heat-resistant Energy x0.5, Cryo x1.5; EMP x2 against shields (PLAN gives only the two halvings) | `content/damage.json` |
+| 2026-11-15 | M2.3 | Shielded: `shield` on the enemy is the damage absorbed first; overflow goes on to the hit points; the shield never regenerates, carries over a popped layer, and the glow ring disappears when it breaks. The 0.25 floor applies to the multipliers, not to the absorb (PLAN 5.5 lists it as a soft effect) | `core/systems/combat.cpp` |
+| 2026-11-15 | M2.3 | `layered` is a trait bit (bit 12) derived by the loader from `layers > 1`, not authored; its cue is the colour tier only | `core/content/content_loader.cpp` |
+| 2026-11-15 | M2.3 | HP bar segments are data (`hpBarSegments`, Eclipser 4); the codex opens with the `?` button (touch/mouse) or C, Escape closes it; it does not pause the sim | `content/enemies/eclipser.json`, `game/ui/codex_panel.gd` |
 
 ## 4. Entry template
 

@@ -37,6 +37,7 @@ uint32_t spawnEnemy(World& world, int enemyType, int lane) {
   e.velY[i] = -dy * def.speed;
   e.hp[i] = layerHp(def);
   e.traits[i] = def.traits;
+  e.shield[i] = def.shield;
   e.type[i] = static_cast<uint16_t>(enemyType);
   e.lane[i] = static_cast<uint16_t>(lane);
   ++world.enemiesSpawned;

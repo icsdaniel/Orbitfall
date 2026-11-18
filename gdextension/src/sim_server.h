@@ -104,6 +104,16 @@ class SimServer : public Node {
   TypedArray<Dictionary> get_building_defs() const;
   TypedArray<Dictionary> get_enemy_defs() const;
   TypedArray<Dictionary> get_forecast(int64_t count);
+  // --- M2.3 damage types and traits ---
+  // Damage type names in engine order ("kinetic", "explosive", ...).
+  PackedStringArray get_damage_types() const;
+  // Trait legend and soft-counter matrix from content/damage.json, one entry
+  // per trait bit: {bit, mask, id, name, cue, effect, easier_with,
+  // mult: PackedFloat32Array per damage type}.
+  TypedArray<Dictionary> get_trait_defs() const;
+  // Multiplier on damage of each type dealt to a shield.
+  PackedFloat32Array get_shield_mults() const;
+  // --- end M2.3 ---
   Dictionary get_debug_stats() const;
   bool set_tunable(const String& path, float value);
   TypedArray<Dictionary> drain_events();

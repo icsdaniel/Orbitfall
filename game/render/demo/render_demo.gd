@@ -2,7 +2,8 @@ extends Node2D
 ## M0.4 demo: animates N instances through BatchRenderer with an FPS label.
 ## M0.7: OrbitCamera zoom with mouse wheel or pinch; +/- keys step the zoom target.
 ## User args (after `--`): --count=N (default 20000), --zoom=Z, --grid (static legend
-## of every shape, tier and trait), --screenshot <path> (save a PNG after a few
+## of every shape, tier and trait), --traits (M2.3 legend: one column per trait cue,
+## one row per shape), --screenshot <path> (save a PNG after a few
 ## frames and quit), --frames=N (quit after N frames and print timings).
 
 const ARCHETYPE_SHAPES: int = 0
@@ -18,6 +19,7 @@ var _camera: OrbitCamera
 var _label: Label
 var _count: int = 20000
 var _grid: bool = false
+var _traits: bool = false
 var _screenshot_path: String = ""
 var _quit_after_frames: int = 0
 var _start_zoom: float = 0.25
@@ -53,7 +55,9 @@ func _ready() -> void:
 	_label = Label.new()
 	_label.position = Vector2(8.0, 6.0)
 	layer.add_child(_label)
-	if _grid:
+	if _traits:
+		_build_traits()
+	elif _grid:
 		_build_grid()
 	else:
 		_build_field()
@@ -90,6 +94,10 @@ func _parse_args() -> void:
 			_quit_after_frames = arg.get_slice("=", 1).to_int()
 		elif arg == "--grid":
 			_grid = true
+			_start_zoom = 1.0
+		elif arg == "--traits":
+			_traits = true
+			_grid = true  # static, like the grid
 			_start_zoom = 1.0
 		elif arg == "--screenshot" and i + 1 < args.size():
 			i += 1
@@ -129,6 +137,58 @@ func _build_grid() -> void:
 			Color.from_hsv(float(col) / float(cols), 0.7, 1.0),
 			BatchRenderer.make_custom(BatchRenderer.Shape.CIRCLE, -1))
 	_renderer.set_batch(ARCHETYPE_DOTS, _dot_data, _dot_count)
+
+
+## M2.3 trait legend: columns = plain and each trait cue, then combinations;
+## rows = shapes. The last row shows the health colour tiers of a layered enemy.
+func _build_traits() -> void:
+	var columns: Array[int] = [
+		0, BatchRenderer.TRAIT_CAMO, BatchRenderer.TRAIT_ARMORED, BatchRenderer.TRAIT_SHIELDED,
+		BatchRenderer.TRAIT_FAST, BatchRenderer.TRAIT_REGROW, BatchRenderer.TRAIT_SPLITTER,
+		BatchRenderer.TRAIT_HEAT_RESISTANT,
+		BatchRenderer.TRAIT_ARMORED | BatchRenderer.TRAIT_SHIELDED,
+		BatchRenderer.TRAIT_HEAT_RESISTANT | BatchRenderer.TRAIT_REGROW | BatchRenderer.TRAIT_FAST,
+		BatchRenderer.TRAIT_CAMO | BatchRenderer.TRAIT_SPLITTER,
+	]
+	var names: PackedStringArray = PackedStringArray([
+		"plain", "camo", "armored", "shielded", "fast", "regrow", "splitter", "heat-res",
+		"arm+shld", "heat+regr\n+fast", "camo+split"])
+	var tiers: int = _renderer.palette_colors.size()
+	var rows: int = BatchRenderer.SHAPE_COUNT
+	var spacing: Vector2 = Vector2(96.0, 74.0)
+	var origin: Vector2 = -0.5 * Vector2(float(columns.size() - 1), float(rows)) * spacing
+	_shape_count = columns.size() * rows + tiers
+	_shape_data.resize(_shape_count * F)
+	var index: int = 0
+	for shape: int in rows:
+		for col: int in columns.size():
+			BatchRenderer.write_instance(
+				_shape_data, index,
+				Transform2D(0.0, origin + Vector2(float(col), float(shape)) * spacing),
+				Color.WHITE, BatchRenderer.make_custom(shape, shape % tiers, columns[col]))
+			index += 1
+	for tier: int in tiers:
+		BatchRenderer.write_instance(
+			_shape_data, index,
+			Transform2D(0.0, origin + Vector2(float(tier) + 1.5, float(rows)) * spacing),
+			Color.WHITE,
+			BatchRenderer.make_custom(BatchRenderer.Shape.CIRCLE, tiers - 1 - tier,
+				BatchRenderer.TRAIT_LAYERED if tier < tiers - 1 else 0))
+		index += 1
+	_renderer.set_batch(ARCHETYPE_SHAPES, _shape_data, _shape_count)
+	for col: int in columns.size():
+		var label: Label = Label.new()
+		label.text = names[col]
+		label.add_theme_font_size_override(&"font_size", 13)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.position = origin + Vector2(float(col) * spacing.x - 45.0, -64.0)
+		label.size = Vector2(90.0, 20.0)
+		add_child(label)
+	var tier_label: Label = Label.new()
+	tier_label.text = "layered:\ncolour tier\n= health"
+	tier_label.add_theme_font_size_override(&"font_size", 13)
+	tier_label.position = origin + Vector2(-40.0, float(rows) * spacing.y - 28.0)
+	add_child(tier_label)
 
 
 func _build_field() -> void:

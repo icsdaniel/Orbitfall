@@ -1,8 +1,13 @@
 shader_type canvas_item;
 // M0.4 SDF shape shader for BatchRenderer multimesh batches (placeholder visuals).
 // INSTANCE_CUSTOM: x = shape id, y = colour tier (< 0: use instance colour only),
-// z = trait bit flags (bit0 camo, bit1 armored, bit2 shielded), w = outline width
-// override as a fraction of the shape radius (0 = default).
+// z = trait bit flags, w = outline width override as a fraction of the shape
+// radius (0 = default).
+// Trait cues (M2.3, PLAN 5.5; bits as in core/content/content.h):
+//   bit0 camo: dashed outline, translucent fill    bit1 armored: thick grey outline
+//   bit2 shielded: glow ring                       bit3 fast: speed streaks behind
+//   bit4 regrow: green plus badge                  bit5 splitter: notch cut in the tail
+//   bit6 heat-resistant: orange rim                bit12 layered: colour tier (no extra cue)
 
 uniform sampler2D palette : filter_nearest, repeat_disable;
 uniform float palette_size = 8.0;
@@ -14,6 +19,8 @@ uniform float outline_width = 0.14;
 uniform float armored_outline_width = 0.22;
 uniform vec4 armored_color : source_color = vec4(0.62, 0.64, 0.68, 1.0);
 uniform vec4 shield_color : source_color = vec4(0.45, 0.85, 1.0, 1.0);
+uniform vec4 heat_color : source_color = vec4(1.0, 0.55, 0.12, 1.0);
+uniform vec4 regrow_color : source_color = vec4(0.45, 1.0, 0.55, 1.0);
 
 // The quad is QUAD_PAD times larger than the shape so outline and glow fit.
 const float QUAD_PAD = 1.5;
@@ -106,9 +113,18 @@ void fragment() {
 	bool camo = (flags & 1) != 0;
 	bool armored = (flags & 2) != 0;
 	bool shielded = (flags & 4) != 0;
+	bool fast = (flags & 8) != 0;
+	bool regrow = (flags & 16) != 0;
+	bool splitter = (flags & 32) != 0;
+	bool heat = (flags & 64) != 0;
 
 	float px_unit = 2.0 / max(v_px, 1.0); // one screen pixel in shape units
 	float d = shape_sdf(shape, p);
+	if (splitter) {
+		// A V notch cut into the tail (+y is the back of the shape).
+		float notch = (abs(p.x) - (p.y - 0.05) * 0.55) * 0.876;
+		d = max(d, -notch);
+	}
 
 	vec4 tint = COLOR; // instance colour
 	vec3 fill = tint.rgb;
@@ -144,6 +160,26 @@ void fragment() {
 	}
 	float alpha = cover * mix(line_alpha, fill_alpha, inner);
 
+	if (fast) {
+		// Three speed streaks trailing behind the shape.
+		float lx = min(abs(p.x), abs(abs(p.x) - 0.5));
+		float len = abs(p.x) < 0.25 ? 1.45 : 1.25;
+		float streak = (1.0 - smoothstep(0.05, 0.05 + px_unit, lx))
+			* smoothstep(0.5, 0.75, p.y) * (1.0 - smoothstep(0.75, len, p.y));
+		streak *= 0.8 * detail;
+		float total = alpha + streak * (1.0 - alpha);
+		col = mix(mix(fill, vec3(1.0), 0.35), col, alpha / max(total, 1e-4));
+		alpha = total;
+	}
+
+	if (heat) {
+		// A crisp orange rim just outside the outline.
+		float ring = clamp(0.5 - (abs(d - 0.12) - 0.05) / px_unit, 0.0, 1.0) * detail;
+		float total = alpha + ring * (1.0 - alpha);
+		col = mix(heat_color.rgb, col, alpha / max(total, 1e-4));
+		alpha = total;
+	}
+
 	if (shielded) {
 		float od = d;
 		float g = (od - 0.26) / 0.085;
@@ -152,6 +188,16 @@ void fragment() {
 		float total = alpha + glow * (1.0 - alpha);
 		col = mix(shield_color.rgb, col, alpha / max(total, 1e-4));
 		alpha = total;
+	}
+
+	if (regrow) {
+		// Badge: a green plus on a dark dot at the front right corner.
+		vec2 q = p - vec2(0.92, -0.92);
+		float badge = clamp(0.5 - (length(q) - 0.44) / px_unit, 0.0, 1.0) * detail;
+		float plus = min(max(abs(q.x) - 0.29, abs(q.y) - 0.1), max(abs(q.x) - 0.1, abs(q.y) - 0.29));
+		float plus_cover = clamp(0.5 - plus / px_unit, 0.0, 1.0);
+		col = mix(col, mix(vec3(0.03, 0.10, 0.05), regrow_color.rgb, plus_cover), badge);
+		alpha = alpha + badge * (1.0 - alpha);
 	}
 
 	COLOR = vec4(col, alpha * tint.a);
