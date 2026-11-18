@@ -60,7 +60,7 @@ float hitMultiplier(const ContentDB& db, const BuildingDef& source, const EnemyD
 struct WeakPointHint {
   float turn = 0.0f;     // rad, wrapped to (-pi, pi]
   float bearing = 0.0f;  // world angle of the enemy
-  int32_t slot = -1;     // the precision tower to line up
+  int32_t slot = -1;     // site (M2.1 index) of the precision tower to line up
   uint32_t enemy = 0xFFFFFFFFu;
   float distance = 0.0f;  // enemy distance from the planet centre
 };

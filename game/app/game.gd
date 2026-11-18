@@ -24,10 +24,15 @@ var config: ClientConfig
 var camera: OrbitCamera
 var planet_view: PlanetView
 var entity_view: EntityView
+var weak_assist: WeakPointAssist  # M2.4
 var input_router: InputRouter
 var bands: BandController
 var hud: Hud
 var run_seed: int = 0
+## M2.4: wave set played (index into get_wave_sets; 0 = "m1"). --waves=<id> or
+## the debug overlay's wave set button picks another, e.g. "trial_bulwark".
+var wave_set: int = 0
+var _waves_arg: String = ""
 
 var selected_slot: int = -1
 ## Layer of the selection: 0 ground, 1 elevated (M2.1).
@@ -65,6 +70,8 @@ func _ready() -> void:
 	_slot_pick_px = config.num("input", "slotPickPx", _slot_pick_px)
 	_create_sim()
 	_build_scene()
+	if _waves_arg != "":
+		wave_set = maxi(wave_set_ids().find(_waves_arg), 0)
 	_start_run(run_seed)
 	var start_band: String = _start_band if _start_band != "" else config.text("bands", "startBand", "surface")
 	bands.snap_to(BandController.Band.ORBIT if start_band == "orbit" else BandController.Band.SURFACE)
@@ -95,6 +102,7 @@ func _process(delta: float) -> void:
 	planet_view.view_zoom = zoom
 	planet_view.surface_weight = bands.surface_weight
 	entity_view.view_zoom = zoom
+	weak_assist.view_zoom = zoom
 	input_router.planet_centre = world_to_screen(Vector2.ZERO)
 	input_router.planet_radius_px = float(sim.get_planet_radius()) * zoom
 	_handle_events()
@@ -132,6 +140,21 @@ func slot_screen_position(slot: int) -> Vector2:
 func site_screen_position(site: int) -> Vector2:
 	planet_view.sync()
 	return world_to_screen(planet_view.site_position(site))
+
+
+## M2.4: wave set ids in index order (["m1"] when the sim cannot list them).
+func wave_set_ids() -> PackedStringArray:
+	if sim.has_method(&"get_wave_sets"):
+		return sim.get_wave_sets()
+	return PackedStringArray(["m1"])
+
+
+## M2.4: restart on the next wave set (debug overlay button).
+func cycle_wave_set() -> void:
+	var ids: PackedStringArray = wave_set_ids()
+	wave_set = (wave_set + 1) % maxi(ids.size(), 1)
+	hud.toast("Waves: %s" % (ids[wave_set] if wave_set < ids.size() else "?"))
+	restart()
 
 
 func restart() -> void:
@@ -186,6 +209,11 @@ func _build_scene() -> void:
 	add_child(entity_view)
 	entity_view.renderer.camera = camera
 
+	weak_assist = WeakPointAssist.new()
+	weak_assist.name = "WeakPointAssist"
+	weak_assist.sim = sim
+	add_child(weak_assist)
+
 	input_router = InputRouter.new()
 	input_router.name = "InputRouter"
 	input_router.sim = sim
@@ -218,6 +246,7 @@ func _build_scene() -> void:
 	bands.band_changed.connect(_on_band_changed)
 	hud.debug_toggle_requested.connect(hud.toggle_debug)
 	hud.restart_requested.connect(restart)
+	hud.debug_overlay.wave_set_requested.connect(cycle_wave_set)  # M2.4
 	hud.build_menu.preview_changed.connect(_on_preview_changed)
 	hud.build_menu.build_requested.connect(_on_build_requested)
 	hud.build_menu.sell_requested.connect(_on_sell_requested)
@@ -228,7 +257,7 @@ func _build_scene() -> void:
 
 func _start_run(new_seed: int) -> void:
 	run_seed = new_seed
-	sim.new_run(run_seed, 0)
+	sim.new_run(run_seed, wave_set)
 	_phase = -1
 	bands.reset_time_scale()
 	input_router.reset_stats()
@@ -266,11 +295,14 @@ func _track_phase() -> void:
 func _handle_events() -> void:
 	var events: Array[Dictionary] = sim.drain_events()
 	for event: Dictionary in events:
-		if str(event.get("type", "")) == "CommandRejected":
+		var type: String = str(event.get("type", ""))
+		if type == "CommandRejected":
 			hud.toast(_reject_text(int(event.get("b", 0))))
-		elif str(event.get("type", "")) == "BuildingUpgraded":  # M2.2
+		elif type == "BuildingUpgraded":  # M2.2
 			planet_view.sync()
 			_refresh_upgrades(true)
+		elif type == "WeakPointHit":  # M2.4
+			weak_assist.flash(Vector2(float(event.get("x", 0.0)), float(event.get("y", 0.0))))
 
 
 func _refresh_forecast() -> void:
@@ -517,6 +549,8 @@ func _parse_args() -> void:
 			_ff_end = true
 		elif arg.begins_with("--end="):
 			_end_arg = arg.get_slice("=", 1)
+		elif arg.begins_with("--waves="):  # M2.4: wave set id, e.g. trial_bulwark
+			_waves_arg = arg.get_slice("=", 1)
 		elif arg == "--codex":  # M2.3: start with the codex open (screenshots)
 			_codex_arg = true
 		elif arg == "--screenshot" and i + 1 < args.size():

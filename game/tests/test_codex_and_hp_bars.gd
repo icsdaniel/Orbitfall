@@ -95,8 +95,11 @@ func test_codex_trait_legend_comes_from_damage_json() -> void:
 	assert_str(codex.trait_text["armored"]).contains("Kinetic x0.5")
 	assert_str(codex.trait_text["heat_resistant"]).contains("Energy x0.5")
 	assert_str(codex.trait_text["shielded"]).contains("Against the shield: Emp x2")
-	# Traits of later milestones have no legend entry yet and are left out.
-	assert_bool(codex.trait_rows.has("bulwark")).is_false()
+	# M2.4 adds the Bulwark row; traits of later milestones have no legend
+	# entry yet and are left out.
+	assert_bool(codex.trait_rows.has("bulwark")).is_true()
+	assert_str(codex.trait_text["bulwark"]).contains("Looks: " + str(_by_id(traits, "bulwark")["cue"]))
+	assert_bool(codex.trait_rows.has("carrier")).is_false()
 	# No multiplier in the matrix is below the floor.
 	for def: Dictionary in traits:
 		for m: float in (def["mult"] as PackedFloat32Array):
