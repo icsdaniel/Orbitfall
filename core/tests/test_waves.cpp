@@ -469,7 +469,9 @@ TEST_CASE("replay: seed + command log reproduce the hash of a full scripted run"
   Phase end = Phase::Intermission, end2 = Phase::Intermission;
   const uint64_t live = scriptedRun(1234, log, ticks, end);
   CHECK((end == Phase::Won || end == Phase::Lost));  // the run played to its end
-  CHECK(ticks > 3000);
+  // M2.7: the script also picks drills and coolers now (they earn, never
+  // shoot), so it fields fewer towers and loses sooner than with M1 content.
+  CHECK(ticks > 2000);
   CHECK(log.size() > 50);
 
   // The same script again: same hash.

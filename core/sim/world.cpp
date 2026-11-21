@@ -78,6 +78,8 @@ void initWorld(World& world, const SimConfig& config) {
   world.commandLog.reserve(config.commandLogCapacity);
   world.beamStrength = world.sun ? world.sun->baseStrength : 0.0f;
   world.incomePerSecond = 0.0f;
+  world.drillIncomePerSecond = 0.0f;  // M2.7
+  world.instability = world.instabilityLoad = world.cooling = 0.0f;
   world.planetRotation = 0.0f;
   world.planetAngVel = 0.0f;
   world.planetHp = world.planet ? world.planet->hp : 0.0f;
@@ -182,6 +184,8 @@ uint64_t hashWorld(const World& world) {
     for (const uint8_t t : b.tiers) h.add(t);  // M2.2
     h.add(b.energy);
     h.add(b.charge);
+    h.add(b.heat);      // M2.7
+    h.add(b.overheat);  // M2.7
     h.add(b.missAcc);  // M2.6
     h.add(b.ramp);
     h.add(b.beamTarget);

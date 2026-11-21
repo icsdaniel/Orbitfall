@@ -30,6 +30,9 @@ enum class EventType : uint8_t {
   ShieldOffline,   // a = slot
   ShieldOnline,    // a = slot (recharged, full)
   BuildingActivated, // M2.6: a = slot, b = building index, value = cooldown (s, before light)
+  // M2.7 drills (nothing is damaged; only the drill's uptime changes):
+  DrillOverheated,  // a = site, b = building index, x = instability level, value = shutdown seconds
+  DrillRestarted,   // a = site, b = building index, x = instability level after the restart
   Count
 };
 

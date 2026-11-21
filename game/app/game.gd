@@ -5,7 +5,7 @@ extends Node2D
 ## OrbitCamera, PlanetView, EntityView (BatchRenderer), InputRouter, BandController
 ## and the HUD, and turns UI intents into SimServer commands.
 ## User args (after `--`): --mock, --seed=N, --band=surface|orbit, --demo (scripted
-## mid-wave state on the mock), --demo-placement (M2.1 layout), --select=SITE, --debug, --end=won|lost (mock),
+## mid-wave state on the mock), --demo-placement (M2.1 layout), --demo-drills (M2.7), --select=SITE, --debug, --end=won|lost (mock),
 ## --screenshot PATH. Playtest bot (see autoplay.gd): --play=sensible|towers|none keeps
 ## playing live; with --ff-wave=N [--ff-seconds=S], --ff-shadow, --ff-beam=bright|dim (M2.6) or --ff-end the run is
 ## first fast-forwarded to that moment (wave N running for S seconds, or its
@@ -44,6 +44,9 @@ var _frame: int = 0
 ## Set before the node enters the tree (or pass --mock) to skip the real SimServer.
 var force_mock: bool = false
 var _demo: bool = false
+## --demo-drills (M2.7, with --demo): six drills and a cooler on the night side,
+## so the heat rings, an overheated drill and the instability meter show.
+var _demo_drills: bool = false
 ## --demo-placement: an M2.1 layout for screenshots (elevated towers; on the
 ## mock also a wide building and an aura building, which M1 content lacks).
 var _demo_placement: bool = false
@@ -432,6 +435,17 @@ func _building_extra(slot: int, layer: int, owner: int) -> Dictionary:
 	if kind == "shield":  # M2.10: live energy and the recharge rule
 		notes.append(BuildMenu.shield_note(planet_view.building_def(planet_view.site_building(owner)),
 			_shield_state(owner)))
+	# M2.7: a drill's heat or cooldown, a cooler's cooling right now.
+	if kind == "drill":
+		var drill: Dictionary = planet_view.drill_states.get(owner, {})
+		if bool(drill.get("overheated", false)):
+			notes.append("Overheated: restarts in %d s (no damage)" % ceili(float(drill.get("cooldown", 0.0))))
+		else:
+			notes.append("Drilling, heat %d%%" % roundi(float(drill.get("heat", 0.0)) * 100.0))
+	elif kind == "cooler":
+		var flags: int = planet_view.site_flags[owner] if owner < planet_view.site_flags.size() else 0
+		var lit: bool = (flags & (PlanetView.FLAG_LIT | PlanetView.FLAG_SHADED)) == PlanetView.FLAG_LIT
+		notes.append("Cools best in the dark" if lit else "Cooling at full strength (dark side)")
 	# M2.6: auras that are not multipliers (Radar detection, Amplifier shield damage).
 	var links: PackedInt32Array = planet_view.adjacency_links
 	var seen: Dictionary[int, bool] = {}
@@ -625,6 +639,9 @@ func _parse_args() -> void:
 			force_mock = true
 		elif arg == "--demo":
 			_demo = true
+		elif arg == "--demo-drills":  # M2.7
+			_demo = true
+			_demo_drills = true
 		elif arg == "--demo-placement":
 			_demo_placement = true
 		elif arg == "--debug":
@@ -688,11 +705,18 @@ func _setup_demo() -> void:
 	var defs: Array[Dictionary] = sim.get_building_defs()
 	var panel: int = -1
 	var towers: Array[int] = []
+	var drill: int = -1
+	var cooler: int = -1
 	for def: Dictionary in defs:
-		if str(def.get("kind", "")) == "panel":
+		var kind: String = str(def.get("kind", ""))
+		if kind == "panel":
 			panel = int(def.get("index", -1))
-		elif str(def.get("kind", "tower")) == "tower":  # M2.10: not shields or supports
+		elif kind == "tower":
 			towers.append(int(def.get("index", -1)))
+		elif kind == "drill":
+			drill = int(def.get("index", -1))
+		elif kind == "cooler":
+			cooler = int(def.get("index", -1))
 	var n: int = sim.get_slot_count()
 	_place_demo_shield(defs, n)  # M2.10
 	if panel >= 0:
@@ -703,6 +727,13 @@ func _setup_demo() -> void:
 		var lane_slots: Array[int] = [2, 3, 4, n / 2 - 2, n / 2 - 1, n / 2]
 		for k: int in lane_slots.size():
 			sim.place_building(lane_slots[k], towers[k % towers.size()], 0.0)
+	if _demo_drills and drill >= 0:
+		@warning_ignore("integer_division")
+		var night: int = n / 2 + n / 9
+		for k: int in 6:
+			sim.place_building(night + k, drill, 0.0)
+		if cooler >= 0:
+			sim.place_building(night + 6, cooler, 0.0)
 	sim.step_ticks(2)
 	sim.start_wave()
 	sim.step_ticks(30 * 19)

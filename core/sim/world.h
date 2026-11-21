@@ -77,6 +77,10 @@ struct BuildingSlot {
   // M2.10 shields: energy left, and recharge progress (seconds at 1x) while offline.
   float energy = 0.0f;
   float charge = 0.0f;
+  // M2.7 drills (anchors): heat 0..1 (overheats at 1) and the seconds left of
+  // an overheat shutdown (0 = running). Never damage: only uptime.
+  float heat = 0.0f;
+  float overheat = 0.0f;
   // --- M2.6 ---
   // Derived by recomputeLayout (not hashed): camo detection (0..1) and the
   // multiplier on damage dealt to shields, from adjacency auras.
@@ -139,6 +143,12 @@ struct World {
   float lightMult = 1.0f;        // the wave's light level
   float beamStrength = 0.0f;     // sun baseStrength * lightMult, set by sunlight
   float incomePerSecond = 0.0f;  // stardust/s from lit unshaded panels right now
+  float drillIncomePerSecond = 0.0f;  // M2.7: stardust/s from running drills right now
+
+  // --- M2.7 instability (derived every tick by the drills system, not hashed) ---
+  float instability = 0.0f;      // global level, max(0, curve(load) - cooling)
+  float instabilityLoad = 0.0f;  // summed instability weight of the running drills
+  float cooling = 0.0f;          // summed cooling of the coolers right now
   // M2.6: lit, unshaded fraction of the solar panel capacity (0..1), set by
   // sunlight every tick; the Sun Lens channels it.
   float channel = 0.0f;

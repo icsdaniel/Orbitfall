@@ -93,20 +93,28 @@ void sunlight(World& world, float dt) {
 
 void income(World& world, float dt) {
   if (world.content == nullptr || world.planet == nullptr) return;
-  float rate = 0.0f;
+  float rate = 0.0f, drillRate = 0.0f;
   const uint32_t n = world.siteCount();
   for (uint32_t s = 0; s < n; ++s) {
     const BuildingSlot& b = world.site(s);
-    if (b.type < 0 || (b.flags & (kSlotLit | kSlotShaded)) != kSlotLit) continue;
+    if (b.type < 0) continue;
     const BuildingDef& def = world.content->buildings[static_cast<size_t>(b.type)];
+    // M2.7: a running drill earns whatever the light (overheated ones do not).
+    if (def.kind == BuildingKind::Drill) {
+      if (b.overheat <= 0.0f) drillRate += effectiveStats(def, b.tiers).income * b.incomeMult;
+      continue;
+    }
+    if ((b.flags & (kSlotLit | kSlotShaded)) != kSlotLit) continue;
     // M2.2 upgrades, then M2.1 elevated/aura multiplier.
     if (def.kind == BuildingKind::Panel)
       rate += effectiveStats(def, b.tiers).income * world.beamStrength * b.incomeMult;
   }
   world.incomePerSecond = rate;
-  if (!world.running() || !(rate > 0.0f) || !(dt > 0.0f)) return;
+  world.drillIncomePerSecond = drillRate;
+  const float total = rate + drillRate;
+  if (!world.running() || !(total > 0.0f) || !(dt > 0.0f)) return;
   const float before = world.stardust;
-  world.stardust += rate * dt;
+  world.stardust += total * dt;
   // The HUD shows whole stardust: one event per unit earned, not one per tick.
   if (std::floor(world.stardust) != std::floor(before)) {
     world.emit(EventType::StardustChanged, 0, 0, world.stardust - before, 0.0f, world.stardust);

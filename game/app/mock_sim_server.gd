@@ -38,7 +38,8 @@ const LAYER_GROUND: int = 0
 const LAYER_ELEVATED: int = 1
 const LAYER_ANY: int = 2
 const LAYER_NAMES: Dictionary[String, int] = {"ground": 0, "elevated": 1, "any": 2}
-const KIND_BITS: Dictionary[String, int] = {"tower": 1, "panel": 2, "support": 4}
+const KIND_BITS: Dictionary[String, int] = {
+	"tower": 1, "panel": 2, "support": 4, "drill": 8, "cooler": 16}  # drill, cooler: M2.7
 const AURA_STATS: Dictionary[String, int] = {
 	"range": 0, "fireRate": 1, "damage": 2, "income": 3, "detect": 4, "shieldDamage": 5}  # M2.6: 4, 5
 ## M2.6: aura stats that are multipliers in get_site_modifiers (the first four).
@@ -51,6 +52,7 @@ const UPGRADE_PATHS: int = 2
 const UPGRADE_STATS: Dictionary[String, String] = {
 	"damage": "damage", "fireRate": "fire_rate", "range": "range", "arc": "arc",
 	"splash": "splash", "income": "income",
+	"instability": "instability", "cooling": "cooling",  # M2.7
 	# M2.6
 	"slow": "slow", "pierce": "pierce", "auraAmount": "aura_amount", "auraRadius": "aura_radius",
 	"activeCooldown": "active_cooldown", "activePower": "active_power",
@@ -137,6 +139,21 @@ var _links: PackedInt32Array = PackedInt32Array()
 ## M2.2: bought tiers, UPGRADE_PATHS entries per site.
 var _slot_tiers: PackedInt32Array = PackedInt32Array()
 var _exclusive_tier: int = 2
+## M2.7: drill heat (0..1) and overheat seconds left, per site; the rules.json
+## "instability" block; the derived global numbers.
+var _slot_heat: PackedFloat32Array = PackedFloat32Array()
+var _slot_overheat: PackedFloat32Array = PackedFloat32Array()
+var _instab_curve: PackedVector2Array = PackedVector2Array([Vector2(0, 0), Vector2(1, 0.2),
+	Vector2(2, 0.45), Vector2(3, 0.8), Vector2(4, 1.2), Vector2(6, 2.2)])
+var _instab_threshold: float = 1.0
+var _instab_rise_base: float = 0.08
+var _instab_rise_excess: float = 0.6
+var _instab_decay: float = 0.1
+var _instab_overheat: float = 10.0
+var _instability: float = 0.0
+var _instab_load: float = 0.0
+var _cooling: float = 0.0
+var _drill_income: float = 0.0
 
 var _e_pos: PackedVector2Array = PackedVector2Array()
 var _e_prev: PackedVector2Array = PackedVector2Array()
@@ -294,6 +311,8 @@ func place_building(slot: int, building: int, aim_offset: float = 0.0, layer: in
 	for k: int in width:
 		_site_owner[base + (first + k) % _slot_count] = site
 	_set_tiers(site, [0, 0])  # M2.2
+	_slot_heat[site] = 0.0  # M2.7
+	_slot_overheat[site] = 0.0
 	_recompute_layout()
 	_emit(&"BuildingPlaced", site, building)
 	_emit(&"StardustChanged", int(_stardust), 0)
@@ -326,6 +345,8 @@ func sell_building(slot: int) -> void:
 	_emit(&"BuildingSold", site, building)
 	_slot_building[site] = -1
 	_set_tiers(site, [0, 0])
+	_slot_heat[site] = 0.0  # M2.7
+	_slot_overheat[site] = 0.0
 	for k: int in width:
 		_site_owner[base + (first + k) % _slot_count] = -1
 	_recompute_layout()
@@ -515,7 +536,12 @@ func _stats(def: Dictionary, tiers: Array[int]) -> Dictionary:
 	var stats: Dictionary = {
 		"damage": float(def["damage"]), "fire_rate": float(def["fire_rate"]),
 		"range": float(def["range"]), "arc": float(def["arc"]),
-		"splash": float(def["splash"]), "income": float(def["panel_rate"]),
+		"splash": float(def["splash"]),
+		# M2.7: income is drillRate on drills; instability and cooling are their own stats.
+		"income": float(def.get("drill_rate", 0.0)) if str(def["kind"]) == "drill"
+			else float(def["panel_rate"]),
+		"instability": float(def.get("instability", 0.0)),
+		"cooling": float(def.get("cooling", 0.0)),
 		# M2.6
 		"slow": float(def.get("slow", 0.0)), "pierce": float(def.get("pierce", 0)),
 		"aura_amount": 1.0, "aura_radius": 0.0,
@@ -829,6 +855,9 @@ func get_building_defs() -> Array[Dictionary]:
 			# M2.3
 			"damage_type": b["damage_type"], "damage_type_name": b["damage_type_name"],
 			"damage": b["damage"], "splash": b["splash"],
+			# M2.7
+			"drill_rate": b["drill_rate"], "instability": b["instability"],
+			"cooling": b["cooling"], "lit_cooling_mult": b["lit_cooling_mult"],
 			# M2.6
 			"falloff": b.get("falloff", PackedFloat32Array([0.0, 1.0, 1.0, 1.0])),
 			"projectile_kind": b.get("projectile_kind", 0 if b["kind"] == "tower" else -1),
@@ -1035,6 +1064,122 @@ func get_wave_sets() -> PackedStringArray:
 
 # ---------------------------------------------------------------- M2.8 home planets
 
+# --- M2.7 drills, instability and coolers (begin) ---
+
+func get_instability() -> Dictionary:
+	var drills: int = 0
+	var overheated: int = 0
+	var coolers: int = 0
+	for site: int in _slot_building.size():
+		var b: int = _slot_building[site]
+		if b < 0:
+			continue
+		var kind: String = str(_buildings[b]["kind"])
+		if kind == "drill":
+			drills += 1
+			if _slot_overheat[site] > 0.0:
+				overheated += 1
+		elif kind == "cooler":
+			coolers += 1
+	return {
+		"level": _instability, "threshold": _instab_threshold, "load": _instab_load,
+		"cooling": _cooling, "drills": drills, "running": drills - overheated,
+		"overheated": overheated, "coolers": coolers, "drill_income": _drill_income,
+		"overheat_seconds": _instab_overheat,
+	}
+
+
+func get_drill_states() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for site: int in _slot_building.size():
+		var b: int = _slot_building[site]
+		if b < 0 or str(_buildings[b]["kind"]) != "drill":
+			continue
+		out.append({
+			"site": site, "building": b, "heat": _slot_heat[site],
+			"overheated": _slot_overheat[site] > 0.0, "cooldown": _slot_overheat[site],
+			"cooldown_max": _instab_overheat,
+		})
+	return out
+
+
+func get_drill_income_per_second() -> float:
+	return _drill_income
+
+
+func _instability_curve(load: float) -> float:
+	var c: PackedVector2Array = _instab_curve
+	if c.is_empty():
+		return 0.0
+	if c.size() == 1 or load <= c[0].x:
+		return c[0].y
+	for i: int in range(1, c.size()):
+		if load <= c[i].x:
+			var span: float = c[i].x - c[i - 1].x
+			var t: float = (load - c[i - 1].x) / span if span > 0.0 else 1.0
+			return lerpf(c[i - 1].y, c[i].y, t)
+	var a: Vector2 = c[c.size() - 2]
+	var z: Vector2 = c[c.size() - 1]
+	var slope: float = (z.y - a.y) / (z.x - a.x) if z.x > a.x else 0.0
+	return z.y + slope * (load - z.x)
+
+
+func _instability_level(load: float, cooling: float) -> float:
+	return maxf(_instability_curve(load) - cooling, 0.0)
+
+
+## As core systems/drills.cpp: global level, heat while above the threshold,
+## overheat at heat 1 for overheatSeconds; nothing is damaged.
+func _update_drills(dt: float) -> void:
+	var load: float = 0.0
+	var cooling: float = 0.0
+	for site: int in _slot_building.size():
+		var b: int = _slot_building[site]
+		if b < 0:
+			continue
+		var def: Dictionary = _buildings[b]
+		var kind: String = str(def["kind"])
+		if kind == "drill" and _slot_overheat[site] <= 0.0:
+			load += float(_stats(def, _tiers(site))["instability"])
+		elif kind == "cooler":
+			var lit: bool = (_slot_flags[site] & (FLAG_LIT | FLAG_SHADED)) == FLAG_LIT
+			cooling += float(_stats(def, _tiers(site))["cooling"]) \
+				* (float(def["lit_cooling_mult"]) if lit else 1.0)
+	var level: float = _instability_level(load, cooling)
+	_drill_income = 0.0
+	for site: int in _slot_building.size():
+		var b: int = _slot_building[site]
+		if b < 0 or str(_buildings[b]["kind"]) != "drill":
+			continue
+		var stats: Dictionary = _stats(_buildings[b], _tiers(site))
+		if dt > 0.0:
+			if _slot_overheat[site] > 0.0:
+				_slot_overheat[site] -= dt
+				if _slot_overheat[site] <= 0.0:
+					_slot_overheat[site] = 0.0
+					_slot_heat[site] = 0.0
+					load += float(stats["instability"])
+					level = _instability_level(load, cooling)
+					_emit(&"DrillRestarted", site, b)
+			elif level > _instab_threshold:
+				_slot_heat[site] += (_instab_rise_base + _instab_rise_excess * (level - _instab_threshold)) * dt
+				if _slot_heat[site] >= 1.0:
+					_slot_heat[site] = 1.0
+					_slot_overheat[site] = _instab_overheat
+					_emit(&"DrillOverheated", site, b)
+					load = maxf(load - float(stats["instability"]), 0.0)
+					level = _instability_level(load, cooling)
+			else:
+				_slot_heat[site] = maxf(_slot_heat[site] - _instab_decay * dt, 0.0)
+		if _slot_overheat[site] <= 0.0:
+			_drill_income += float(stats["income"]) * _site_mods[4 * site + 3]
+	_instab_load = load
+	_cooling = cooling
+	_instability = level
+
+# --- M2.7 drills, instability and coolers (end) ---
+
+
 func get_planet_defs() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for i: int in _planets.size():
@@ -1233,6 +1378,11 @@ func _reset_run() -> void:
 	_slot_aim.fill(0.0)
 	_slot_tiers.resize(sites * UPGRADE_PATHS)
 	_slot_tiers.fill(0)
+	_slot_heat.resize(sites)  # M2.7
+	_slot_heat.fill(0.0)
+	_slot_overheat.resize(sites)
+	_slot_overheat.fill(0.0)
+	_drill_income = 0.0
 	_site_owner.resize(sites)
 	_site_owner.fill(-1)
 	_recompute_layout()
@@ -1338,11 +1488,13 @@ func _step() -> void:
 		_step_actives()
 		_step_projectiles()
 		_compact_enemies()
-		_stardust += _income * TICK
+		_update_drills(TICK)  # M2.7
+		_stardust += (_income + _drill_income) * TICK
 		_check_wave_end()
 	else:
 		_e_prev = _e_pos.duplicate()
 		_update_light()
+		_update_drills(0.0)
 	_ms_per_tick = lerpf(_ms_per_tick, float(Time.get_ticks_usec() - t0) / 1000.0, 0.1)
 
 
@@ -1764,6 +1916,8 @@ func _building(
 		"damage_type_name": "kinetic" if kind == "tower" else "",
 		# M2.1: slots covered, where it may stand, adjacency auras.
 		"footprint": 1, "layer": LAYER_ANY if kind == "tower" else LAYER_GROUND, "auras": [],
+		# M2.7: drills and coolers.
+		"drill_rate": 0.0, "instability": 0.0, "cooling": 0.0, "lit_cooling_mult": 1.0,
 	}
 
 
@@ -1839,6 +1993,18 @@ func _load_json_content(errors: PackedStringArray) -> void:
 			"spawn_radius": float(d.get("spawnRadius", 0.0)),
 			"shape": int(SHAPES.get(str(fv.get("shape", "star")), 4)), "color": str(fv.get("color", "")),
 		})
+	if rules.get("instability") is Dictionary:  # M2.7
+		var ins: Dictionary = rules["instability"]
+		_instab_curve = PackedVector2Array()
+		var raw_curve: Array = ins.get("curve", [])
+		for pt: Variant in raw_curve:
+			if pt is Array and (pt as Array).size() == 2:
+				_instab_curve.append(Vector2(float(pt[0]), float(pt[1])))
+		_instab_threshold = float(ins.get("threshold", 1.0))
+		_instab_rise_base = float(ins.get("riseBase", 0.1))
+		_instab_rise_excess = float(ins.get("risePerExcess", 0.5))
+		_instab_decay = float(ins.get("decayPerSec", 0.1))
+		_instab_overheat = float(ins.get("overheatSeconds", 10.0))
 	if not planet.is_empty():
 		_apply_planet(planet)
 	if not sun.is_empty():
@@ -1888,6 +2054,12 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				})
 			b["auras"] = auras
 			b["paths"] = _read_paths(d.get("paths", []))  # M2.2
+			if b["kind"] == "drill":  # M2.7
+				b["drill_rate"] = float(d.get("drillRate", 0.0))
+				b["instability"] = float(d.get("instability", 1.0))
+			elif b["kind"] == "cooler":
+				b["cooling"] = float(d.get("cooling", 0.0))
+				b["lit_cooling_mult"] = float(d.get("litCoolingMult", 1.0))
 			# M2.6
 			b["name"] = str(d.get("name", b["name"]))
 			var curve: PackedFloat32Array = PackedFloat32Array()

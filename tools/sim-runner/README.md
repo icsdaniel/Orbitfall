@@ -46,12 +46,12 @@ The run is deterministic: the same content, seeds and bots give the same CSV byt
 | `chase-the-light` | light | a fixed panel field kept under the sun; guns wherever the lanes are |
 | `face-the-threat` | rotation | same battery, turned to cover the most incoming landing damage |
 | `balance` | mixed | lane towers and panels; weighs lit panels against covered threat every moment |
-| `bank-and-drill` | economy | sensible build, banks stardust ahead of dim waves; buys drills once a `drill` building exists (M2.7) |
+| `bank-and-drill` | economy | sensible build; before a dim wave buys drills on the night side (up to four, plus a Cooler when the fourth would overheat) instead of panels, banking the rest until they stand (M2.7) |
 | `upgrader` | mixed | sensible, but spends what is left on upgrade tiers (cheapest first, one path per tower) instead of extra towers (M2.2) |
 
 ## CSV columns
 
-`wave_set, planet, seed, bot, family, outcome (won/lost/unfinished), waves_survived, waves_total, hp_left, hp_max, stardust_earned, stardust_from_panels, stardust_spent, stardust_left, run_seconds (sim time in waves), ticks, kills, leaks, leak_damage, towers, panels, upgrades (tiers bought), rejected (commands the sim refused), hash`, then `leaks_<enemy id>` per enemy definition and `wave<n>_hp_lost` per wave (empty when the run never reached that wave).
+`wave_set, planet, seed, bot, family, outcome (won/lost/unfinished), waves_survived, waves_total, hp_left, hp_max, stardust_earned, stardust_from_panels, stardust_spent, stardust_left, run_seconds (sim time in waves), ticks, kills, leaks, leak_damage, towers, panels, upgrades (tiers bought), drills, coolers (standing at the end, M2.7), overheats (drill shutdowns over the run), rejected (commands the sim refused), hash`, then `leaks_<enemy id>` per enemy definition and `wave<n>_hp_lost` per wave (empty when the run never reached that wave).
 
 ## Threat coverage (PLAN §5.1b)
 
