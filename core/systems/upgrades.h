@@ -24,6 +24,13 @@ struct BuildingStats {
   float arc = 0.0f;  // rad, half-angle
   float splash = 0.0f;
   float income = 0.0f;  // panelRate
+  // M2.6
+  float slow = 0.0f;            // projectile slow fraction
+  float pierce = 0.0f;          // extra enemies a shot passes (whole number when used)
+  float auraAmount = 1.0f;      // multiplier on every aura amount
+  float auraRadius = 0.0f;      // slots added to every aura radius
+  float activeCooldown = 0.0f;  // seconds
+  float activePower = 1.0f;     // active damage multiplier
 
   float get(UpgradeStat s) const;
 };

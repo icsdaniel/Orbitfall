@@ -58,7 +58,11 @@ func test_tap_empty_slot_opens_menu_and_build_sends_place_building() -> void:
 	assert_bool(menu.is_open()).is_true()
 	assert_int(game.selected_slot).is_equal(9)
 	assert_int(menu.slot).is_equal(9)
-	var gatling: int = 1
+	var gatling: int = -1  # M2.6: look it up, the roster grew
+	for def: Dictionary in game.planet_view.building_defs:
+		if def["id"] == "gatling":
+			gatling = int(def["index"])
+	assert_int(menu.previewed).is_not_equal(gatling)  # the first tower is previewed
 	menu.building_button(gatling).pressed.emit()
 	assert_int(game.planet_view.ghost_building).is_equal(gatling)
 	assert_int(sim.calls_to(&"place_building").size()).is_equal(0)

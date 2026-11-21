@@ -7,7 +7,7 @@ extends Node2D
 ## User args (after `--`): --mock, --seed=N, --band=surface|orbit, --demo (scripted
 ## mid-wave state on the mock), --demo-placement (M2.1 layout), --select=SITE, --debug, --end=won|lost (mock),
 ## --screenshot PATH. Playtest bot (see autoplay.gd): --play=sensible|towers|none keeps
-## playing live; with --ff-wave=N [--ff-seconds=S], --ff-shadow or --ff-end the run is
+## playing live; with --ff-wave=N [--ff-seconds=S], --ff-shadow, --ff-beam=bright|dim (M2.6) or --ff-end the run is
 ## first fast-forwarded to that moment (wave N running for S seconds, or its
 ## intermission when S < 0; the first enemy shadow on the planet; the end screen).
 ## M2.8: a home planet picker opens before the first run and after Restart;
@@ -62,6 +62,9 @@ var _ff_wave: int = 0
 var _ff_seconds: float = 0.0
 var _ff_shadow: bool = false
 var _ff_end: bool = false
+## M2.6 screenshots: --ff-beam=bright|dim stops at the first Sun Lens beam at
+## full power (panels lit) or dimmed by a shadow on the planet.
+var _ff_beam: String = ""
 ## M2.8 home planets. Set planet_picker_enabled before the node enters the tree
 ## to start straight away (tests). planet_id "" = the wave set's own planet.
 var planet_picker_enabled: bool = true
@@ -289,6 +292,7 @@ func _build_scene() -> void:
 	hud.build_menu.sell_requested.connect(_on_sell_requested)
 	hud.build_menu.build_above_requested.connect(_on_build_above_requested)
 	hud.build_menu.upgrade_requested.connect(_on_upgrade_requested)
+	hud.build_menu.activate_requested.connect(_on_activate_requested)  # M2.6
 	hud.build_menu.closed.connect(_on_menu_closed)
 
 
@@ -428,6 +432,21 @@ func _building_extra(slot: int, layer: int, owner: int) -> Dictionary:
 	if kind == "shield":  # M2.10: live energy and the recharge rule
 		notes.append(BuildMenu.shield_note(planet_view.building_def(planet_view.site_building(owner)),
 			_shield_state(owner)))
+	# M2.6: auras that are not multipliers (Radar detection, Amplifier shield damage).
+	var links: PackedInt32Array = planet_view.adjacency_links
+	var seen: Dictionary[int, bool] = {}
+	for i: int in range(0, links.size() - 2, 3):
+		if links[i + 1] != owner or seen.has(links[i + 2]):
+			continue
+		seen[links[i + 2]] = true
+		if links[i + 2] == 4:
+			notes.append("Sees camo (Radar)")
+		elif links[i + 2] == 5:
+			notes.append("x2 against shields (Amplifier)")
+	# M2.6: the Sun Lens shows the light it channels.
+	if planet_view.building_def(planet_view.site_building(owner)).get("projectile_kind", -1) == 2 \
+			and sim.has_method(&"get_channel"):
+		notes.append("Channelling %d%% of the panels' light" % roundi(float(sim.get_channel()) * 100.0))
 	var carrying: bool = false
 	if layer == 0 and planet_view.layer_count > 1:
 		var first: int = planet_view.site_slot(owner)
@@ -541,6 +560,7 @@ func _on_sell_requested() -> void:
 ## M2.2: keeps the open building's upgrade paths current (tiers, affordability,
 ## Build view only). Rebuilt only when something it shows changed.
 func _refresh_upgrades(force: bool = false) -> void:
+	_refresh_active()
 	if selected_slot < 0 or not hud.build_menu.is_open() or not sim.has_method(&"get_slot_upgrades"):
 		_upgrade_key = ""
 		planet_view.selected_stats = {}
@@ -565,6 +585,26 @@ func _on_upgrade_requested(path: int) -> void:
 	if selected_slot < 0 or bands.band != BandController.Band.SURFACE:
 		return
 	sim.upgrade_building(planet_view.site_of(selected_slot, selected_layer), path)
+
+
+## M2.6: keeps the open building's active button (Overcharge) current.
+func _refresh_active() -> void:
+	if selected_slot < 0 or not hud.build_menu.is_open() or not sim.has_method(&"get_site_actives"):
+		return
+	var owner: int = planet_view.site_owner(planet_view.site_of(selected_slot, selected_layer))
+	if owner < 0:
+		return
+	var actives: PackedFloat32Array = sim.get_site_actives()
+	if 2 * owner + 1 < actives.size():
+		hud.build_menu.set_active_state(actives[2 * owner], actives[2 * owner + 1])
+
+
+## M2.6: tap the tower, then its active button (or F): Overcharge. Works in
+## both views; the sim refuses it while it cools down.
+func _on_activate_requested() -> void:
+	if selected_slot < 0 or not sim.has_method(&"activate_building"):
+		return
+	sim.activate_building(planet_view.site_of(selected_slot, selected_layer))
 
 
 func _on_menu_closed() -> void:
@@ -601,6 +641,8 @@ func _parse_args() -> void:
 			_select_arg = arg.get_slice("=", 1).to_int()
 		elif arg.begins_with("--play="):
 			_play = arg.get_slice("=", 1)
+		elif arg.begins_with("--ff-beam="):
+			_ff_beam = arg.get_slice("=", 1)
 		elif arg.begins_with("--ff-wave="):
 			_ff_wave = arg.get_slice("=", 1).to_int()
 		elif arg.begins_with("--ff-seconds="):
@@ -777,13 +819,15 @@ func _build_above_bot_towers() -> void:
 ## Plays the run with the playtest bot, as fast as the sim steps, up to the moment
 ## the --ff-* arguments ask for. Uses contract calls only.
 func _fast_forward() -> void:
-	if _ff_wave <= 0 and not _ff_shadow and not _ff_end:
+	if _ff_wave <= 0 and not _ff_shadow and not _ff_end and _ff_beam == "":
 		return
 	for i: int in 40000:
 		var phase: int = sim.get_phase()
 		if phase >= PHASE_WON:
 			break
 		if _ff_shadow and sim.get_shade_intervals().size() > 0:
+			break
+		if _ff_beam != "" and _beam_moment(_ff_beam == "dim"):
 			break
 		if _ff_wave > 0 and int(sim.get_wave_index()) == _ff_wave - 1:
 			if phase == PHASE_INTERMISSION and _ff_seconds < 0.0:
@@ -795,6 +839,21 @@ func _fast_forward() -> void:
 		sim.step_ticks(3)
 	sim.drain_events()
 	bands.update()
+
+
+## M2.6: a Sun Lens is firing at full power (`dim` false) or, with a shadow on
+## the planet, at under half power.
+func _beam_moment(dim: bool) -> bool:
+	if not sim.has_method(&"get_beams"):
+		return false
+	var beams: PackedFloat32Array = sim.get_beams()
+	for i: int in range(0, beams.size() - PlanetView.BEAM_FLOATS + 1, PlanetView.BEAM_FLOATS):
+		var power: float = beams[i + 4]
+		if dim and power < 0.5 and sim.get_shade_intervals().size() > 0 and sim.get_channel() < 0.5:
+			return true
+		if not dim and power > 0.9:
+			return true
+	return false
 
 
 func _save_screenshot() -> void:

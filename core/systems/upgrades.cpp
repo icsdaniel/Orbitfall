@@ -16,6 +16,12 @@ float* field(BuildingStats& s, UpgradeStat stat) {
     case UpgradeStat::Arc: return &s.arc;
     case UpgradeStat::Splash: return &s.splash;
     case UpgradeStat::Income: return &s.income;
+    case UpgradeStat::Slow: return &s.slow;  // M2.6
+    case UpgradeStat::Pierce: return &s.pierce;
+    case UpgradeStat::AuraAmount: return &s.auraAmount;
+    case UpgradeStat::AuraRadius: return &s.auraRadius;
+    case UpgradeStat::ActiveCooldown: return &s.activeCooldown;
+    case UpgradeStat::ActivePower: return &s.activePower;
     case UpgradeStat::Count: break;
   }
   return nullptr;
@@ -53,6 +59,12 @@ BuildingStats baseStats(const BuildingDef& def) {
   s.arc = def.arc;
   s.splash = def.projectile.splash;
   s.income = def.panelRate;
+  s.slow = def.projectile.slow;  // M2.6
+  s.pierce = static_cast<float>(def.projectile.pierce);
+  s.auraAmount = 1.0f;
+  s.auraRadius = 0.0f;
+  s.activeCooldown = def.hasActive ? def.active.cooldown : 0.0f;
+  s.activePower = def.hasActive ? def.active.damageMult : 1.0f;
   return s;
 }
 
@@ -81,6 +93,7 @@ BuildingStats effectiveStats(const BuildingDef& def, const uint8_t tiers[kUpgrad
     if (*f < 0.0f) *f = 0.0f;
   }
   if (s.arc > kPi) s.arc = kPi;
+  if (s.slow > kMaxSlow) s.slow = kMaxSlow;  // M2.6: never a full stop
   return s;
 }
 
@@ -149,6 +162,7 @@ bool upgradeBuilding(World& world, int32_t slot, int32_t path) {
     if (pv.reason == RejectReason::None) {
       b.tiers[path] = static_cast<uint8_t>(pv.tier + 1);
       addStardust(world, -pv.cost);
+      recomputeLayout(world);  // M2.6: upgrades may change aura amounts and radii
       world.emit(EventType::BuildingUpgraded, slot, path, static_cast<float>(pv.tier + 1), 0.0f, pv.cost);
       return true;
     }

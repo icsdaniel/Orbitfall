@@ -39,7 +39,8 @@ const char* const kEventNames[] = {
     "BuildingPlaced", "BuildingSold", "CommandRejected",
     "BuildingUpgraded",  // M2.2
     // M2.10
-    "FallingWarning", "FallingImpact", "ShieldAbsorbed", "ShieldOffline", "ShieldOnline"};
+    "FallingWarning", "FallingImpact", "ShieldAbsorbed", "ShieldOffline", "ShieldOnline",
+    "BuildingActivated"};  // M2.6
 constexpr int kEventNameCount = static_cast<int>(sizeof(kEventNames) / sizeof(kEventNames[0]));
 static_assert(kEventNameCount == static_cast<int>(orbitfall::EventType::Count), "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::CommandRejected) == 12, "event name table out of date");
@@ -202,6 +203,12 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_slot_tiers", "slot"), &SimServer::get_slot_tiers);
   ClassDB::bind_method(D_METHOD("get_upgrade_preview", "slot", "path"), &SimServer::get_upgrade_preview);
   ClassDB::bind_method(D_METHOD("get_slot_upgrades", "slot"), &SimServer::get_slot_upgrades);
+
+  // --- M2.6 towers batch 1 ---
+  ClassDB::bind_method(D_METHOD("activate_building", "slot"), &SimServer::activate_building);
+  ClassDB::bind_method(D_METHOD("get_channel"), &SimServer::get_channel);
+  ClassDB::bind_method(D_METHOD("get_beams"), &SimServer::get_beams);
+  ClassDB::bind_method(D_METHOD("get_site_actives"), &SimServer::get_site_actives);
 
   ClassDB::bind_method(D_METHOD("set_palette", "colors"), &SimServer::set_palette);
   ClassDB::bind_method(D_METHOD("set_debug_scenario", "on"), &SimServer::set_debug_scenario);
@@ -726,7 +733,7 @@ TypedArray<Dictionary> SimServer::get_building_defs() const {
     Dictionary d;
     d["index"] = static_cast<int64_t>(i);
     d["id"] = to_gd(b.id);
-    d["name"] = to_gd(b.id).capitalize();
+    d["name"] = b.name.empty() || b.name == b.id ? to_gd(b.id).capitalize() : to_gd(b.name);
     d["cost"] = b.cost;
     d["arc"] = b.arc;  // rad, half-angle
     d["range"] = b.range;
@@ -767,6 +774,29 @@ TypedArray<Dictionary> SimServer::get_building_defs() const {
     d["recharge_seconds"] = b.shield.rechargeSeconds;
     d["regen_per_sec"] = b.shield.regenPerSec;
     d["upkeep_per_sec"] = b.shield.upkeepPerSec;
+    // M2.6: falloff curve as [t0, mult0, t1, mult1, ...] (t = distance / range),
+    // shot kind (0 dot, 1 shell, 2 beam), pierce, slow and the active ability.
+    PackedFloat32Array falloff;
+    for (const orbitfall::FalloffPoint& pt : b.falloff) {
+      falloff.push_back(pt.t);
+      falloff.push_back(pt.mult);
+    }
+    d["falloff"] = falloff;
+    d["projectile_kind"] = b.hasProjectile ? static_cast<int64_t>(b.projectile.kind) : int64_t(-1);
+    d["pierce"] = b.hasProjectile ? b.projectile.pierce : 0;
+    d["slow"] = b.hasProjectile ? b.projectile.slow : 0.0f;
+    d["slow_seconds"] = b.hasProjectile ? b.projectile.slowSeconds : 0.0f;
+    d["channel_floor"] = b.beam.channelFloor;
+    d["has_active"] = b.hasActive;
+    if (b.hasActive) {
+      Dictionary a;
+      a["id"] = to_gd(b.active.id);
+      a["name"] = to_gd(b.active.name);
+      a["cooldown"] = b.active.cooldown;
+      a["seconds"] = b.active.seconds;
+      a["damage_mult"] = b.active.damageMult;
+      d["active"] = a;
+    }
     out.push_back(d);
   }
   return out;
@@ -778,8 +808,12 @@ TypedArray<Dictionary> SimServer::get_building_defs() const {
 
 namespace {
 
-const char* const kStatKeys[orbitfall::kUpgradeStatCount] = {"damage", "fire_rate", "range",
-                                                             "arc",    "splash",    "income"};
+const char* const kStatKeys[] = {"damage", "fire_rate", "range", "arc", "splash", "income",
+                                 // M2.6
+                                 "slow", "pierce", "aura_amount", "aura_radius",
+                                 "active_cooldown", "active_power"};
+static_assert(sizeof(kStatKeys) / sizeof(kStatKeys[0]) == orbitfall::kUpgradeStatCount,
+              "stat key table out of date");
 
 Dictionary stats_dict(const orbitfall::BuildingStats& s) {
   Dictionary d;
@@ -865,6 +899,28 @@ const orbitfall::BuildingDef* slot_def(const orbitfall::ContentDB& content, cons
 }
 
 }  // namespace
+
+// ---- M2.6 towers batch 1 ----------------------------------------------------
+void SimServer::activate_building(int64_t slot) {
+  queue(orbitfall::cmd::activateBuilding(0, static_cast<int32_t>(slot)));
+}
+
+PackedFloat32Array SimServer::get_beams() const {
+  PackedFloat32Array out;
+  out.resize(static_cast<int64_t>(curr_->beams.size()));
+  if (!curr_->beams.empty())
+    std::memcpy(out.ptrw(), curr_->beams.data(), curr_->beams.size() * sizeof(float));
+  return out;
+}
+
+PackedFloat32Array SimServer::get_site_actives() const {
+  PackedFloat32Array out;
+  out.resize(static_cast<int64_t>(curr_->siteActives.size()));
+  if (!curr_->siteActives.empty())
+    std::memcpy(out.ptrw(), curr_->siteActives.data(), curr_->siteActives.size() * sizeof(float));
+  return out;
+}
+// ---- end M2.6 ---------------------------------------------------------------
 
 void SimServer::upgrade_building(int64_t slot, int64_t path) {
   queue(orbitfall::cmd::upgradeBuilding(0, static_cast<int32_t>(slot), static_cast<int32_t>(path)));
@@ -1186,6 +1242,7 @@ Dictionary SimServer::get_debug_stats() const {
   d["falling"] = static_cast<int64_t>(curr_->fallingCount);  // M2.10
   d["falling_overflow"] = static_cast<int64_t>(curr_->fallingOverflow);
   d["lit_fraction"] = curr_->litFraction;
+  d["channel"] = curr_->channel;  // M2.6
   d["shade_intervals"] = static_cast<int64_t>(curr_->shadeIntervals.size() / 2);
   d["wave_time"] = curr_->waveTime;
   d["time_scale"] = curr_->timeScale;

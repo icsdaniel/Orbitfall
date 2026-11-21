@@ -7,6 +7,7 @@
 #include "systems/enemies.h"
 #include "systems/shadows.h"
 #include "systems/systems.h"
+#include "systems/towers.h"
 #include "systems/upgrades.h"
 
 namespace orbitfall {
@@ -83,6 +84,7 @@ void sunlight(World& world, float dt) {
     }
     changed = changed || ((before ^ b.flags) & kSlotShaded) != 0;
   }
+  world.channel = panelChannel(world);  // M2.6: what the Sun Lens channels this tick
   if (changed) {
     world.emit(EventType::ShadowChanged, static_cast<int32_t>(shadedSlots),
                static_cast<int32_t>(world.shadeCount));

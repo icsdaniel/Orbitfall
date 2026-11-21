@@ -191,6 +191,22 @@ class SimServer : public Node {
   Dictionary get_slot_upgrades(int64_t slot) const;
   // --- M2.2 upgrade paths (end) ---
 
+  // --- M2.6 towers batch 1 (begin) ---
+  // Command: fires the active ability (Sun Lens Overcharge) of the building on
+  // `slot` (a site). Emits BuildingActivated {a: anchor site, b: building,
+  // value: cooldown s} or CommandRejected {b: 5 EmptySlot, 6 NotAllowed (no
+  // active), 12 ActiveNotReady; x: 9}.
+  void activate_building(int64_t slot);
+  // Lit, unshaded fraction of the solar panel capacity (0..1): what the Sun Lens channels.
+  float get_channel() const { return curr_->channel; }
+  // Sun Lens beams this tick, 7 floats each: x0, y0 (tower), x1, y1 (target),
+  // power (ramp x channel x overcharge; 1 = full beam), overcharged (0/1), site.
+  PackedFloat32Array get_beams() const;
+  // 2 floats per site: active cooldown left (s), active time left (s); zeros
+  // for buildings without an active.
+  PackedFloat32Array get_site_actives() const;
+  // --- M2.6 towers batch 1 (end) ---
+
   // --- extras (not in CONTRACT.md) ---
   // Colours for palette keys that are not colour tiers ("enemy.eclipser"); default white.
   void set_palette(const Dictionary& colors);

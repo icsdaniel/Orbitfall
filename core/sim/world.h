@@ -77,6 +77,27 @@ struct BuildingSlot {
   // M2.10 shields: energy left, and recharge progress (seconds at 1x) while offline.
   float energy = 0.0f;
   float charge = 0.0f;
+  // --- M2.6 ---
+  // Derived by recomputeLayout (not hashed): camo detection (0..1) and the
+  // multiplier on damage dealt to shields, from adjacency auras.
+  float detect = 0.0f;
+  float shieldDamageMult = 1.0f;
+  // State (hashed): camo miss accumulator (every 1/missChance-th undetected
+  // shot misses, deterministic), beam ramp time on `beamTarget`, active
+  // ability cooldown and time left.
+  float missAcc = 0.5f;
+  float ramp = 0.0f;
+  uint32_t beamTarget = 0xFFFFFFFFu;
+  float activeCooldown = 0.0f;
+  float activeTime = 0.0f;
+};
+
+// M2.6: one Sun Lens beam drawn this tick (derived, not hashed).
+struct BeamShot {
+  uint16_t site = 0;
+  float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;  // tower -> target, world space
+  float power = 0.0f;       // ramp x channel factor x active multiplier
+  bool overcharged = false;
 };
 
 // One adjacency link (M2.1), for the Build view: `source` buffs `target`.
@@ -118,6 +139,9 @@ struct World {
   float lightMult = 1.0f;        // the wave's light level
   float beamStrength = 0.0f;     // sun baseStrength * lightMult, set by sunlight
   float incomePerSecond = 0.0f;  // stardust/s from lit unshaded panels right now
+  // M2.6: lit, unshaded fraction of the solar panel capacity (0..1), set by
+  // sunlight every tick; the Sun Lens channels it.
+  float channel = 0.0f;
 
   // --- planet ---
   float planetRotation = 0.0f;  // rad in [0, 2*pi); world angle = local + this
@@ -189,6 +213,7 @@ struct World {
   std::vector<ShadeInterval> shade;   // merged shadows in beam space, sorted
   uint32_t shadeCount = 0;
   std::vector<uint32_t> slotTargets;  // per slot: enemy index picked by towerTargeting
+  std::vector<BeamShot> beams;        // M2.6: beams fired this tick (reserved per site)
 
   // --- replay log (not hashed): every applied command, stamped with the tick
   // it applied on. seed + this log reproduces the run (systems/waves.h). ---

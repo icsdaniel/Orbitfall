@@ -1,0 +1,23 @@
+{
+  "id": "cryo", "name": "Cryo", "kind": "tower", "footprint": 1, "layer": "any", "cost": 75,
+  "arcDeg": 35, "range": 280, "fireRate": 1.2, "aimMount": true, "aimOffsetDeg": 0,
+  "projectile": { "kind": "shell", "speed": 650, "damage": 0.5, "type": "cryo", "splash": 16,
+                  "slow": 0.4, "slowSeconds": 1.5 },
+  "falloff": [[0, 1], [1, 1]],
+  "targeting": ["first", "strong", "close"],
+  "paths": [
+    { "id": "frost", "name": "Deep Frost", "tiers": [
+      { "name": "Colder Charge", "cost": 45, "mods": [{ "stat": "slow", "op": "add", "value": 0.08 }] },
+      { "name": "Frost Bloom", "cost": 70, "mods": [{ "stat": "splash", "op": "mul", "value": 1.3 }] },
+      { "name": "Absolute Zero", "cost": 105, "mods": [{ "stat": "slow", "op": "add", "value": 0.1 }] },
+      { "name": "Glacier", "cost": 165, "mods": [{ "stat": "slow", "op": "add", "value": 0.1 }, { "stat": "splash", "op": "mul", "value": 1.3 }] }
+    ] },
+    { "id": "shatter", "name": "Shatter", "tiers": [
+      { "name": "Ice Shards", "cost": 45, "mods": [{ "stat": "damage", "op": "add", "value": 0.3 }] },
+      { "name": "Rapid Chill", "cost": 70, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.25 }] },
+      { "name": "Brittle Frost", "cost": 105, "mods": [{ "stat": "damage", "op": "mul", "value": 1.5 }] },
+      { "name": "Shatterpoint", "cost": 165, "mods": [{ "stat": "damage", "op": "mul", "value": 1.6 }, { "stat": "range", "op": "mul", "value": 1.1 }] }
+    ] }
+  ], "active": null,
+  "visual": { "shape": "circle", "color": "tower.cryo" }
+}

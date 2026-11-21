@@ -1,6 +1,7 @@
 class_name Autoplay
 extends RefCounted
-## Playtest bot for screenshots and smoke tests (`--play=sensible|towers|none`).
+## Playtest bot for screenshots and smoke tests (`--play=sensible|towers|lens|none`;
+## M2.6 `lens` = sensible with the Sun Lens as its second tower).
 ## It plays through the SimServer contract only, like a player: builds in the
 ## intermissions, then starts the wave. A GDScript cousin of the "sensible" bot in
 ## core/tests/balance_bots.h (without its small turns for light); the balance
@@ -16,6 +17,7 @@ var sim: Node
 var mode: String = "sensible"
 var _gatling: Dictionary = {}
 var _cannon: Dictionary = {}
+var _lens: Dictionary = {}
 var _panel: Dictionary = {}
 var _lanes: Array[Array] = []
 var _reserved: Dictionary[int, bool] = {}
@@ -33,7 +35,13 @@ func setup(sim_node: Node, play_mode: String) -> void:
 		if str(def.get("kind", "")) == "panel":
 			_panel = def
 		elif str(def.get("kind", "tower")) == "tower":  # M2.10: not shields or supports
-			towers.append(def)
+			# M2.6: the plain shooters (no beam, slow or pierce); the specialists
+			# of batch 1 are left to the player (and --play=lens adds the Sun Lens).
+			if int(def.get("projectile_kind", 0)) == 2 and _lens.is_empty():
+				_lens = def
+			if int(def.get("projectile_kind", 0)) <= 1 and float(def.get("slow", 0.0)) == 0.0 \
+					and int(def.get("pierce", 0)) == 0:
+				towers.append(def)
 	towers.sort_custom(func(x: Dictionary, y: Dictionary) -> bool:
 		return float(x.get("cost", 0.0)) < float(y.get("cost", 0.0)))
 	# The cheap tower is the bread and butter; the dearer one alternates with it.
@@ -41,6 +49,8 @@ func setup(sim_node: Node, play_mode: String) -> void:
 		_gatling = towers[0]
 	if towers.size() > 1:
 		_cannon = towers[1]
+	if mode == "lens" and not _lens.is_empty():  # M2.6 screenshots: the dear tower is the Sun Lens
+		_cannon = _lens
 	# Tower slots under each lane, from the forecast's lane bearings (rotation 0).
 	var n: int = sim.get_slot_count()
 	var bearings: Array[float] = []
@@ -75,7 +85,7 @@ func act() -> void:
 	for slot: int in buildings.size():
 		if buildings[slot] >= 0:
 			_taken[slot] = true
-	if mode == "sensible":
+	if mode == "sensible" or mode == "lens":
 		_plan_sensible(wave, buildings)
 	elif mode == "towers":
 		_plan_towers()

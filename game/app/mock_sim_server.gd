@@ -29,6 +29,7 @@ const REJECT_INVALID_BUILDING: int = 2
 const REJECT_OCCUPIED: int = 3
 const REJECT_UNAFFORDABLE: int = 4
 const REJECT_EMPTY_SLOT: int = 5
+const REJECT_NOT_ALLOWED: int = 6  # M2.6
 const REJECT_WRONG_PHASE: int = 7
 const REJECT_NO_FOUNDATION: int = 8
 const REJECT_WRONG_LAYER: int = 9
@@ -38,13 +39,21 @@ const LAYER_ELEVATED: int = 1
 const LAYER_ANY: int = 2
 const LAYER_NAMES: Dictionary[String, int] = {"ground": 0, "elevated": 1, "any": 2}
 const KIND_BITS: Dictionary[String, int] = {"tower": 1, "panel": 2, "support": 4}
-const AURA_STATS: Dictionary[String, int] = {"range": 0, "fireRate": 1, "damage": 2, "income": 3}
+const AURA_STATS: Dictionary[String, int] = {
+	"range": 0, "fireRate": 1, "damage": 2, "income": 3, "detect": 4, "shieldDamage": 5}  # M2.6: 4, 5
+## M2.6: aura stats that are multipliers in get_site_modifiers (the first four).
+const MULT_AURA_STATS: int = 4
+const REJECT_ACTIVE_NOT_READY: int = 12  # M2.6
+const PROJECTILE_KINDS: Dictionary[String, int] = {"dot": 0, "shell": 1, "beam": 2}  # M2.6
 const REJECT_UPGRADE_BLOCKED: int = 11  # M2.2
 ## M2.2: paths per building, and the stats an upgrade tier may modify (JSON name -> key).
 const UPGRADE_PATHS: int = 2
 const UPGRADE_STATS: Dictionary[String, String] = {
 	"damage": "damage", "fireRate": "fire_rate", "range": "range", "arc": "arc",
 	"splash": "splash", "income": "income",
+	# M2.6
+	"slow": "slow", "pierce": "pierce", "auraAmount": "aura_amount", "auraRadius": "aura_radius",
+	"activeCooldown": "active_cooldown", "activePower": "active_power",
 }
 const SHAPES: Dictionary[String, int] = {
 	"circle": 0, "triangle": 1, "square": 2, "hexagon": 3, "star": 4,
@@ -144,6 +153,8 @@ var _spawn_queue: Array[Dictionary] = []
 var _wave_time: float = 0.0
 var _events: Array[Dictionary] = []
 var _lit_fraction: float = 0.0
+## M2.6: site -> [active cooldown left, active time left] (s).
+var _actives: Dictionary[int, PackedFloat32Array] = {}
 var _ms_per_tick: float = 0.0
 var _enemy_buffer: PackedFloat32Array = PackedFloat32Array()
 var _projectile_buffer: PackedFloat32Array = PackedFloat32Array()
@@ -311,6 +322,7 @@ func sell_building(slot: int) -> void:
 	# M2.2: the refund covers the upgrades too.
 	var cost: float = float(_buildings[building]["cost"]) + _upgrade_spent(_buildings[building], _tiers(site))
 	_stardust += floorf(cost * _sell_refund)
+	_actives.erase(site)  # M2.6
 	_emit(&"BuildingSold", site, building)
 	_slot_building[site] = -1
 	_set_tiers(site, [0, 0])
@@ -322,6 +334,62 @@ func sell_building(slot: int) -> void:
 
 
 # --- M2.2 upgrade paths (begin) ---
+
+# --- M2.6 towers batch 1 (begin) ---
+
+func activate_building(slot: int) -> void:
+	_record(&"activate_building", [slot])
+	var owner: int = _anchor(slot)
+	if owner < 0:
+		var reason: int = REJECT_EMPTY_SLOT if slot >= 0 and slot < _slot_building.size() else REJECT_INVALID_SLOT
+		_emit(&"CommandRejected", slot, reason)
+		return
+	var def: Dictionary = _buildings[_slot_building[owner]]
+	if not def.has("active"):
+		_emit(&"CommandRejected", owner, REJECT_NOT_ALLOWED)
+		return
+	var state: PackedFloat32Array = _actives.get(owner, PackedFloat32Array([0.0, 0.0]))
+	if state[0] > 0.0 or state[1] > 0.0:
+		_emit(&"CommandRejected", owner, REJECT_ACTIVE_NOT_READY)
+		return
+	var stats: Dictionary = _stats(def, _tiers(owner))
+	_actives[owner] = PackedFloat32Array(
+		[float(stats["active_cooldown"]), float((def["active"] as Dictionary)["seconds"])])
+	_emit(&"BuildingActivated", owner, _slot_building[owner])
+
+
+## Lit, unshaded fraction of the panels (mock: by count, not capacity).
+func get_channel() -> float:
+	return _lit_fraction
+
+
+## The mock draws no Sun Lens beams.
+func get_beams() -> PackedFloat32Array:
+	return PackedFloat32Array()
+
+
+func get_site_actives() -> PackedFloat32Array:
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(2 * _slot_building.size())
+	for site: int in _actives:
+		if 2 * site + 1 < out.size():
+			out[2 * site] = _actives[site][0]
+			out[2 * site + 1] = _actives[site][1]
+	return out
+
+
+## Active timers; the cooldown runs lightChargeMult (2x) faster on a lit, unshaded site.
+func _step_actives() -> void:
+	for site: int in _actives.keys():
+		var state: PackedFloat32Array = _actives[site]
+		var flags: int = get_site_flags()[site] if site < _slot_building.size() else 0
+		var rate: float = 2.0 if (flags & 3) == 1 else 1.0
+		state[1] = maxf(state[1] - TICK, 0.0)
+		state[0] = maxf(state[0] - TICK * rate, 0.0)
+		_actives[site] = state
+
+# --- M2.6 towers batch 1 (end) ---
+
 
 func upgrade_building(slot: int, path: int) -> void:
 	_record(&"upgrade_building", [slot, path])
@@ -448,6 +516,11 @@ func _stats(def: Dictionary, tiers: Array[int]) -> Dictionary:
 		"damage": float(def["damage"]), "fire_rate": float(def["fire_rate"]),
 		"range": float(def["range"]), "arc": float(def["arc"]),
 		"splash": float(def["splash"]), "income": float(def["panel_rate"]),
+		# M2.6
+		"slow": float(def.get("slow", 0.0)), "pierce": float(def.get("pierce", 0)),
+		"aura_amount": 1.0, "aura_radius": 0.0,
+		"active_cooldown": float((def.get("active", {}) as Dictionary).get("cooldown", 0.0)),
+		"active_power": float((def.get("active", {}) as Dictionary).get("damage_mult", 1.0)),
 	}
 	var mul: Dictionary = {}
 	var paths: Array = def.get("paths", [])
@@ -756,6 +829,12 @@ func get_building_defs() -> Array[Dictionary]:
 			# M2.3
 			"damage_type": b["damage_type"], "damage_type_name": b["damage_type_name"],
 			"damage": b["damage"], "splash": b["splash"],
+			# M2.6
+			"falloff": b.get("falloff", PackedFloat32Array([0.0, 1.0, 1.0, 1.0])),
+			"projectile_kind": b.get("projectile_kind", 0 if b["kind"] == "tower" else -1),
+			"pierce": b.get("pierce", 0), "slow": b.get("slow", 0.0),
+			"slow_seconds": b.get("slow_seconds", 0.0), "channel_floor": b.get("channel_floor", 0.2),
+			"has_active": b.has("active"), "active": b.get("active", {}),
 		})
 	return out
 
@@ -1130,6 +1209,7 @@ func _emit(type: StringName, a: int, b: int, pos: Vector2 = Vector2.ZERO, value:
 
 func _reset_run() -> void:
 	_rng.seed = _seed
+	_actives.clear()  # M2.6
 	_tick = 0
 	_phase = PHASE_INTERMISSION
 	_wave_index = 0
@@ -1226,7 +1306,8 @@ func _recompute_layout() -> void:
 				if _footprint_gap(s % _slot_count, sw, t % _slot_count,
 						int(target["footprint"])) > int(aura["radius"]):
 					continue
-				_site_mods[4 * t + int(aura["stat"])] += float(aura["amount"])
+				if int(aura["stat"]) < MULT_AURA_STATS:  # M2.6: detect / shield damage are not multipliers
+					_site_mods[4 * t + int(aura["stat"])] += float(aura["amount"])
 				_links.append_array(PackedInt32Array([s, t, int(aura["stat"])]))
 	for s: int in sites:
 		for k: int in 4:
@@ -1254,6 +1335,7 @@ func _step() -> void:
 		_update_light()
 		_step_falling()
 		_step_towers()
+		_step_actives()
 		_step_projectiles()
 		_compact_enemies()
 		_stardust += _income * TICK
@@ -1806,6 +1888,29 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				})
 			b["auras"] = auras
 			b["paths"] = _read_paths(d.get("paths", []))  # M2.2
+			# M2.6
+			b["name"] = str(d.get("name", b["name"]))
+			var curve: PackedFloat32Array = PackedFloat32Array()
+			var raw_curve: Array = d.get("falloff", [[0, 1], [1, 1]])
+			for point: Variant in raw_curve:
+				if point is Array and (point as Array).size() == 2:
+					curve.append(float(point[0]))
+					curve.append(float(point[1]))
+			b["falloff"] = curve
+			if b["kind"] == "tower":
+				b["projectile_kind"] = int(PROJECTILE_KINDS.get(str(shot.get("kind", "dot")), 0))
+			b["pierce"] = int(shot.get("pierce", 0))
+			b["slow"] = float(shot.get("slow", 0.0))
+			b["slow_seconds"] = float(shot.get("slowSeconds", 0.0))
+			b["channel_floor"] = float((d.get("beam", {}) as Dictionary).get("channelFloor", 0.2)) \
+				if d.get("beam") is Dictionary else 0.2
+			if d.get("active") is Dictionary:
+				var act: Dictionary = d["active"]
+				b["active"] = {
+					"id": str(act.get("id", "")), "name": str(act.get("name", act.get("id", ""))),
+					"cooldown": float(act.get("cooldown", 0.0)), "seconds": float(act.get("seconds", 0.0)),
+					"damage_mult": float(act.get("damageMult", 1.0)),
+				}
 			_buildings.append(b)
 	var enemy_ids: Dictionary[String, int] = {}
 	var enemy_list: Array[Dictionary] = _read_dir("enemies")
