@@ -363,6 +363,46 @@ struct Loader {
                 Range{0.0, false, static_cast<double>(kMaxUpgradeTiers)});
     if (o.has("fallingWarnSeconds")) o.num("fallingWarnSeconds", r.fallingWarnSeconds, kNonNeg);  // M2.10
     if (o.has("instability")) read_instability(o.object("instability"), r.instability);  // M2.7
+    if (o.has("aim")) read_aim(o.object("aim"), r.aim);        // M2.11
+    if (o.has("focus")) read_focus(o.object("focus"), r.focus);  // M2.11
+  }
+
+  // M2.11 "aim": { "offsetsDeg": [-60, -30, 0, 30, 60], "reaimCostFrac",
+  // "reaimBetweenWavesOnly" }.
+  void read_aim(const Obj& o, AimRulesDef& d) {
+    if (!o.valid()) return;
+    if (o.has("reaimCostFrac")) o.num("reaimCostFrac", d.reaimCostFrac, Range{0.0, false, 10.0});
+    if (o.has("reaimBetweenWavesOnly")) o.boolean("reaimBetweenWavesOnly", d.reaimBetweenWavesOnly);
+    const Value* list = o.array("offsetsDeg");
+    if (list == nullptr) return;
+    if (list->array.empty()) o.field_error("offsetsDeg", "must not be empty");
+    double prev = -1.0e9;
+    bool zero = false;
+    for (const Value& v : list->array) {
+      if (!v.is_number()) {
+        o.field_error("offsetsDeg", "each offset must be a number of degrees");
+        continue;
+      }
+      const double deg = v.number;
+      if (!o.check_range("offsetsDeg", deg, Range{-kMaxAimOffsetDeg, false, kMaxAimOffsetDeg})) continue;
+      if (deg <= prev) o.field_error("offsetsDeg", "offsets must be strictly ascending");
+      prev = deg;
+      zero = zero || deg == 0.0;
+      d.offsets.push_back(deg2rad(deg));
+    }
+    if (!list->array.empty() && !zero) o.field_error("offsetsDeg", "must include 0 (the straight mount)");
+  }
+
+  // M2.11 "focus": { "bonusPerExtra", "cap", "radius", "minAltitude", "lensMerge",
+  // "preferZone" }.
+  void read_focus(const Obj& o, FocusRulesDef& d) {
+    if (!o.valid()) return;
+    o.num("bonusPerExtra", d.bonusPerExtra, Range{0.0, false, 5.0});
+    o.num("cap", d.cap, Range{0.0, false, 5.0});
+    o.num("radius", d.radius, kPositive);
+    if (o.has("minAltitude")) o.num("minAltitude", d.minAltitude, kNonNeg);
+    if (o.has("lensMerge")) o.boolean("lensMerge", d.lensMerge);
+    if (o.has("preferZone")) o.boolean("preferZone", d.preferZone);
   }
 
   // M2.7 "instability": { "curve": [[drills, level], ...], "threshold",

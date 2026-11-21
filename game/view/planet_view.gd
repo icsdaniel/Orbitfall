@@ -69,6 +69,11 @@ var adjacency_links: PackedInt32Array = PackedInt32Array()
 var drill_states: Dictionary[int, Dictionary] = {}
 ## M2.6: Sun Lens beams of the latest tick (see SimServer.get_beams).
 var lens_beams: PackedFloat32Array = PackedFloat32Array()
+## M2.11: aim offset (rad) per site, focus points (get_focus_points) and the
+## mount the placement ghost would be built with.
+var site_aims: PackedFloat32Array = PackedFloat32Array()
+var focus_points: Array[Dictionary] = []
+var ghost_aim: float = 0.0
 
 var _beam: Node2D
 var _font: Font
@@ -128,6 +133,9 @@ func sync() -> void:
 			site_owners[i] = i if slot_buildings[i] >= 0 else -1
 		site_modifiers = PackedFloat32Array()
 		adjacency_links = PackedInt32Array()
+	if sim.has_method(&"get_focus_points"):  # M2.11
+		site_aims = sim.get_site_aims()
+		focus_points.assign(sim.get_focus_points())
 	drill_states.clear()
 	if sim.has_method(&"get_drill_states"):  # M2.7
 		for state: Dictionary in sim.get_drill_states():
@@ -334,8 +342,10 @@ func _draw() -> void:
 	_draw_planet()
 	_draw_shade_wedges()
 	_draw_ghost_arcs()
+	_draw_aim_axes()  # M2.11
 	_draw_slots()
 	_draw_lens_beams()
+	_draw_focus_points()  # M2.11
 	_draw_selection()
 
 
@@ -502,8 +512,9 @@ func _draw_building(site: int, br: float) -> void:
 	if float(def.get("arc", 0.0)) > 0.0 and str(def.get("kind", "")) == "tower":
 		var has_target: bool = (flags & FLAG_TARGET) != 0
 		var axis_alpha: float = 0.9 if has_target else 0.45 * surface_weight
+		var aim_dir: Vector2 = dir.rotated(site_aim(site))  # M2.11: the tick follows the mount
 		if axis_alpha > 0.02:
-			draw_line(centre + dir * br, centre + dir * (br + 9.0),
+			draw_line(centre + aim_dir * br, centre + aim_dir * (br + 9.0),
 				Color(Palette.THREAT if has_target else Palette.TEXT, axis_alpha), 1.0, true)
 
 
@@ -585,11 +596,14 @@ func _draw_selection() -> void:
 			tower_range *= 1.0 + elevated_range_bonus
 		if arc > 0.0 and tower_range > 0.0:
 			var origin: Vector2 = dir * (radius + (elevated_height if selected_layer > 0 else 0.0))
-			var sector: PackedVector2Array = sector_polygon(origin, angle, arc, tower_range)
-			_draw_falloff_ring(origin, angle, arc, tower_range, def.get("falloff", PackedFloat32Array()), color)
+			# M2.11: the sector turns with the mount (the ghost's chosen one when building).
+			var axis: float = angle + (site_aim(owner) if owner >= 0 else ghost_aim)
+			var sector: PackedVector2Array = sector_polygon(origin, axis, arc, tower_range)
+			_draw_falloff_ring(origin, axis, arc, tower_range, def.get("falloff", PackedFloat32Array()), color)
 			sector.append(sector[0])
 			draw_polyline(sector, Color(color, 0.75), 1.5 * px, true)
-			draw_line(sector[0], sector[0] + dir * tower_range, Color(color, 0.35), 1.0 * px, true)
+			draw_line(sector[0], sector[0] + Vector2.from_angle(axis) * tower_range, Color(color, 0.35),
+				1.0 * px, true)
 		_draw_aura_reach(def, first, width)
 		if str(def.get("kind", "")) == "shield":  # M2.10: the dome it raises
 			var half: float = float(def.get("shield_width", 0.0)) * 0.5
@@ -602,6 +616,81 @@ func _draw_selection() -> void:
 			ShapeDraw.draw(self, Palette.shape_of(def.get("shape", 0)), centre,
 				br, angle + PI * 0.5, Color(ghost, 0.6), 0.8)
 	draw_arc(centre, br + 3.5, 0.0, TAU, 24, Palette.TEXT, maxf(1.2, 2.0 * px), true)
+
+
+## M2.11: aim offset of the building anchored on `site` (0 when none).
+func site_aim(site: int) -> float:
+	return site_aims[site] if site >= 0 and site < site_aims.size() else 0.0
+
+
+## M2.11: sites that feed at least one focus point.
+func focus_feeders() -> Dictionary[int, bool]:
+	var out: Dictionary[int, bool] = {}
+	for f: Dictionary in focus_points:
+		var sites: PackedInt32Array = f.get("feeders", PackedInt32Array())
+		for s: int in sites:
+			out[s] = true
+	return out
+
+
+## M2.11 aim axes (Build view): every aim-mounted tower with a bent mount or a
+## focus point shows a thin line along its axis; lines that feed a focus
+## point are drawn in the focus colour up to the reticle.
+func _draw_aim_axes() -> void:
+	if surface_weight <= 0.02 or site_aims.is_empty():
+		return
+	var px: float = 1.0 / maxf(view_zoom, 0.01)
+	var feeders: Dictionary[int, bool] = focus_feeders()
+	for site: int in mini(site_aims.size(), site_buildings.size()):
+		var b: int = site_building(site)
+		if b < 0:
+			continue
+		var def: Dictionary = building_def(b)
+		if str(def.get("kind", "")) != "tower" or not bool(def.get("aim_mount", false)):
+			continue
+		var aim: float = site_aim(site)
+		var feeds: bool = feeders.has(site)
+		if absf(aim) < 0.001 and not feeds:
+			continue
+		var angle: float = site_world_angle(site)
+		var origin: Vector2 = Vector2.from_angle(angle) * (radius + (elevated_height if site_layer(site) > 0 else 0.0))
+		var axis: Vector2 = Vector2.from_angle(angle + aim)
+		var length: float = float(def.get("range", 0.0)) * site_modifier(site, 0)
+		if feeds:
+			var reach: float = 0.0
+			for f: Dictionary in focus_points:
+				var sites: PackedInt32Array = f.get("feeders", PackedInt32Array())
+				var at: Vector2 = f.get("pos", Vector2.ZERO)
+				if sites.has(site):
+					reach = maxf(reach, (at - origin).dot(axis))
+			draw_line(origin, origin + axis * reach, Color(Palette.FOCUS, 0.55 * surface_weight), 1.4 * px, true)
+			draw_line(origin + axis * reach, origin + axis * length,
+				Color(Palette.FOCUS, 0.16 * surface_weight), 1.0 * px, true)
+		else:
+			draw_line(origin, origin + axis * length, Color(Palette.TEXT, 0.22 * surface_weight), 1.0 * px, true)
+
+
+## M2.11 focus reticles: the zone circle, four ticks and the damage bonus,
+## brightest in the Build view; they turn with the planet.
+func _draw_focus_points() -> void:
+	if focus_points.is_empty():
+		return
+	var px: float = 1.0 / maxf(view_zoom, 0.01)
+	var alpha: float = maxf(surface_weight, 0.35)
+	for f: Dictionary in focus_points:
+		var pos: Vector2 = f.get("pos", Vector2.ZERO)
+		var r: float = float(f.get("radius", 50.0))
+		var mult: float = float(f.get("mult", 1.0))
+		draw_circle(pos, r, Color(Palette.FOCUS, 0.07 * alpha))
+		draw_arc(pos, r, 0.0, TAU, 40, Color(Palette.FOCUS, 0.85 * alpha), 1.6 * px, true)
+		for k: int in 4:
+			var d: Vector2 = Vector2.from_angle(TAU * float(k) / 4.0 + PI * 0.25)
+			draw_line(pos + d * r * 0.55, pos + d * r * 0.95, Color(Palette.FOCUS, 0.9 * alpha), 1.6 * px, true)
+		draw_circle(pos, 2.2 * px, Color(Palette.FOCUS, alpha))
+		if _font != null and mult > 1.0:
+			var size: int = maxi(int(14.0 * px), 6)
+			draw_string(_font, pos + Vector2(r * 0.75, -r * 0.75), "+%d%%" % roundi((mult - 1.0) * 100.0),
+				HORIZONTAL_ALIGNMENT_LEFT, -1.0, size, Color(Palette.FOCUS, alpha))
 
 
 ## M2.6 gradient range ring: the arc sector filled in bands whose opacity
@@ -656,8 +745,11 @@ func _draw_lens_beams() -> void:
 		var from: Vector2 = Vector2(lens_beams[i], lens_beams[i + 1])
 		var to: Vector2 = Vector2(lens_beams[i + 2], lens_beams[i + 3])
 		var power: float = clampf(lens_beams[i + 4], 0.0, 4.0)
-		var over: bool = lens_beams[i + 5] > 0.5
+		var over: bool = fmod(lens_beams[i + 5], 2.0) > 0.5
+		var merged: bool = lens_beams[i + 5] > 1.5  # M2.11: a merged beam beyond a focus point
 		var shown: float = clampf(power, 0.0, 1.0)
+		if merged:
+			draw_line(from, to, Color(Palette.FOCUS, 0.35), (6.0 + 4.0 * clampf(power, 0.0, 3.0)) * px, true)
 		draw_line(from, to, Color(Palette.SUN_WARM, 0.15 + 0.35 * shown), (2.0 + 6.0 * shown) * px, true)
 		draw_line(from, to, Color(Palette.SUN_WARM.lightened(0.3), 0.35 + 0.6 * shown),
 			(0.8 + 1.8 * shown) * px, true)

@@ -48,6 +48,7 @@ The run is deterministic: the same content, seeds and bots give the same CSV byt
 | `balance` | mixed | lane towers and panels; weighs lit panels against covered threat every moment |
 | `bank-and-drill` | economy | sensible build; before a dim wave buys drills on the night side (up to four, plus a Cooler when the fourth would overheat) instead of panels, banking the rest until they stand (M2.7) |
 | `upgrader` | mixed | sensible, but spends what is left on upgrade tiers (cheapest first, one path per tower) instead of extra towers (M2.2) |
+| `focus-builder` | layout | never-rotate's plan, but each lane's towers stand on the slots whose bent mounts cross on the lane, forming focus zones (M2.11; try `--waves m2_swarm`) |
 
 ## CSV columns
 

@@ -2,6 +2,7 @@
 
 #include "sim/mathx.h"
 #include "sim/world.h"
+#include "systems/focus.h"
 #include "systems/upgrades.h"
 
 namespace orbitfall {
@@ -11,13 +12,6 @@ bool reject(World& world, CommandType type, int32_t slot, RejectReason reason, f
   world.emit(EventType::CommandRejected, slot, static_cast<int32_t>(reason),
              static_cast<float>(static_cast<int>(type)), 0.0f, cost);
   return false;
-}
-
-bool isFinite(float v) { return v - v == 0.0f; }
-
-float clampAim(float offset) {
-  const float limit = kMaxAimOffsetDeg * kPi / 180.0f;
-  return isFinite(offset) ? clampf(offset, -limit, limit) : 0.0f;
 }
 
 // Shared checks for commands that act on an existing building. `slot` may be
@@ -126,6 +120,7 @@ void recomputeLayout(World& world) {
     b.detect = clampf(b.detect, 0.0f, 1.0f);               // M2.6: a fraction
     if (world.siteElevated(s)) b.rangeMult *= 1.0f + db.rules.elevatedRangeBonus;
   }
+  solveFocus(world);  // M2.11: ranges (and the towers standing) may have changed
 }
 
 bool placeBuilding(World& world, int32_t slot, int32_t building, float aimOffset) {
@@ -170,7 +165,8 @@ bool placeBuilding(World& world, int32_t slot, int32_t building, float aimOffset
   b.type = static_cast<int16_t>(building);
   b.width = static_cast<uint8_t>(width);
   b.mode = def.targeting.empty() ? uint8_t(0) : static_cast<uint8_t>(def.targeting.front());
-  b.aimOffset = def.aimMount ? clampAim(def.aimOffset + aimOffset) : 0.0f;
+  // M2.11: the mount snaps to one of rules.aim.offsets; setting it here is free.
+  b.aimOffset = def.aimMount ? snapAimOffset(world.content->rules, def.aimOffset + aimOffset) : 0.0f;
   for (uint32_t k = 0; k < width; ++k) {
     world.site(base + (first + k) % n).anchor = static_cast<int16_t>(site);
   }
@@ -215,7 +211,21 @@ bool setAim(World& world, int32_t slot, float aimOffset) {
   const BuildingDef* def = occupied(world, CommandType::SetAim, slot);
   if (def == nullptr) return false;
   if (!def->aimMount) return reject(world, CommandType::SetAim, slot, RejectReason::NotAllowed);
-  world.site(static_cast<uint32_t>(slot)).aimOffset = clampAim(aimOffset);
+  // M2.11 (DESIGN Q33 "re-aim between waves"): snapped to a mount step, priced
+  // at rules.aim.reaimCostFrac of the building's cost, refused mid-wave.
+  const RulesDef& rules = world.content->rules;
+  if (rules.aim.reaimBetweenWavesOnly && world.waveSet != nullptr && world.phase == Phase::Wave) {
+    return reject(world, CommandType::SetAim, slot, RejectReason::WrongPhase);
+  }
+  BuildingSlot& b = world.site(static_cast<uint32_t>(slot));
+  const float offset = snapAimOffset(rules, aimOffset);
+  if (offset == b.aimOffset) return true;  // already there: nothing to pay
+  const float cost = reaimCost(rules, *def);
+  if (world.stardust < cost) return reject(world, CommandType::SetAim, slot, RejectReason::Unaffordable, cost);
+  b.aimOffset = offset;
+  if (cost > 0.0f) addStardust(world, -cost);
+  world.emit(EventType::AimChanged, slot, b.type, offset, 0.0f, cost);
+  solveFocus(world);
   return true;
 }
 

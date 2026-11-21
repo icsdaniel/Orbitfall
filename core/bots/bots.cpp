@@ -46,6 +46,7 @@ const StrategyInfo kInfo[kStrategyCount] = {
     {Strategy::Balance, "balance", "balance (weighs light against threat)", "mixed", true},
     {Strategy::BankAndDrill, "bank-and-drill", "bank-and-drill (banks before dim waves)", "economy", true},
     {Strategy::Upgrader, "upgrader", "upgrader (sensible, upgrades not extras)", "mixed", true},
+    {Strategy::FocusBuilder, "focus-builder", "focus-builder (bent mounts cross on each lane)", "layout", true},
 };
 
 const StrategyInfo& info(Strategy s) {
@@ -163,12 +164,12 @@ struct Bot {
     return world().slots[static_cast<size_t>(slot)].type < 0;
   }
 
-  bool buy(int slot, int building) {
+  bool buy(int slot, int building, float aim = 0.0f) {
     if (building < 0) return false;
     const float cost = db.buildings[static_cast<size_t>(building)].cost;
     if (!free(slot) || cost > budget) return false;
     budget -= cost;
-    sim.push(cmd::placeBuilding(sim.tick(), slot, building, 0.0f));
+    sim.push(cmd::placeBuilding(sim.tick(), slot, building, aim));
     // Mark it taken for the rest of this intermission's planning.
     planned.push_back(slot);
     plannedTypes.push_back(building);
@@ -190,12 +191,15 @@ struct Bot {
   }
 
   // Buys the next tower of a lane list (Gatling first, then alternating).
-  bool buyTower(const std::vector<int>& slots) {
-    for (int slot : slots) {
+  // M2.11: `aims` (optional, one per slot) are the mount offsets to build with.
+  bool buyTower(const std::vector<int>& slots, const std::vector<float>* aims = nullptr) {
+    for (size_t at = 0; at < slots.size(); ++at) {
+      const int slot = slots[at];
       if (taken(slot)) continue;
+      const float aim = aims != nullptr && at < aims->size() ? (*aims)[at] : 0.0f;
       // Alternate Gatling and Cannon; settle for the Gatling when short.
       const int type = (towersBought % 2 == 1) ? cannon : gatling;
-      if (buy(slot, type) || (type != gatling && buy(slot, gatling))) {
+      if (buy(slot, type, aim) || (type != gatling && buy(slot, gatling, aim))) {
         ++towersBought;
         return true;
       }
@@ -401,6 +405,7 @@ struct Bot {
     laidOut = true;
     const World& w = world();
     for (const LaneDef& lane : w.planet->lanes) laneSlots.push_back(ringAround(lane.bearing, 6));
+    if (strategy == Strategy::FocusBuilder) focusLayout();
     batterySlots = ringAround(0.0f, 8);
     fieldSlots = ringAround(0.0f, 8);
     switch (strategy) {
@@ -414,6 +419,65 @@ struct Bot {
         }
         break;
     }
+  }
+
+  // --- M2.11 focus-builder ---------------------------------------------------
+  // Per lane: slots and mount offsets whose axes pass through the lane's focus
+  // target (the lane bearing at half the Gatling's range above the surface),
+  // best first; then the lane's own slots, straight, as a fallback.
+  std::vector<std::vector<float>> laneAims;
+  void focusLayout() {
+    const World& w = world();
+    const float radius = w.planet->radius;
+    const float range = gatling >= 0 ? db.buildings[static_cast<size_t>(gatling)].range : 300.0f;
+    const float zone = db.rules.focus.radius;
+    std::vector<float> offsets = db.rules.aim.offsets;
+    if (offsets.empty()) offsets.push_back(0.0f);
+    for (size_t l = 0; l < w.planet->lanes.size(); ++l) {
+      const float bearing = w.planet->lanes[l].bearing;
+      const float px = (radius + 0.5f * range) * std::cos(bearing), py = (radius + 0.5f * range) * std::sin(bearing);
+      struct Pick {
+        float miss;
+        int slot;
+        float aim;
+      };
+      std::vector<Pick> picks;
+      for (uint32_t i = 0; i < w.slotCount(); ++i) {
+        const float a = w.slotAngle(i);
+        if (std::fabs(wrapPi(a - bearing)) > 60.0f * kDeg) continue;
+        const float tx = radius * std::cos(a), ty = radius * std::sin(a);
+        Pick best{1.0e9f, static_cast<int>(i), 0.0f};
+        for (float o : offsets) {
+          const float dx = std::cos(a + o), dy = std::sin(a + o);
+          const float along = (px - tx) * dx + (py - ty) * dy;
+          if (along <= 0.0f || along > range) continue;
+          const float miss = std::fabs((px - tx) * dy - (py - ty) * dx);
+          if (miss < best.miss) best = Pick{miss, static_cast<int>(i), o};
+        }
+        if (best.miss <= 0.35f * zone) picks.push_back(best);
+      }
+      // Straight under the lane first, then outward in pairs.
+      std::stable_sort(picks.begin(), picks.end(), [&](const Pick& x, const Pick& y) {
+        return std::fabs(wrapPi(w.slotAngle(static_cast<uint32_t>(x.slot)) - bearing)) <
+               std::fabs(wrapPi(w.slotAngle(static_cast<uint32_t>(y.slot)) - bearing)) - 1.0e-4f;
+      });
+      std::vector<int> slots;
+      std::vector<float> aims;
+      for (const Pick& p : picks) {
+        slots.push_back(p.slot);
+        aims.push_back(p.aim);
+      }
+      for (int slot : laneSlots[l]) {
+        if (std::find(slots.begin(), slots.end(), slot) != slots.end()) continue;
+        slots.push_back(slot);
+        aims.push_back(0.0f);
+      }
+      laneSlots[l] = slots;
+      laneAims.push_back(aims);
+    }
+  }
+  const std::vector<float>* aimsOf(size_t lane) {
+    return lane < laneAims.size() ? &laneAims[lane] : nullptr;
   }
 
   bool isReserved(int slot) {
@@ -529,7 +593,7 @@ struct Bot {
 
     for (size_t l = 0; l < laneSlots.size(); ++l) {
       const int want = l == 0 ? kWantFirstLane[k] : kWantOtherLane[k];
-      while (towersOn(laneSlots[l]) < want && buyTower(laneSlots[l])) {}
+      while (towersOn(laneSlots[l]) < want && buyTower(laneSlots[l], aimsOf(l))) {}
     }
     // The anti-caster Gatling follows the sun.
     for (uint32_t i = 0; i < w.slotCount(); ++i) {
@@ -568,8 +632,8 @@ struct Bot {
       for (size_t l = 1; l < laneSlots.size(); ++l) {
         if (towersOn(laneSlots[l]) < towersOn(laneSlots[least])) least = l;
       }
-      bool bought = buyTower(laneSlots[least]);
-      for (size_t l = 0; !bought && l < laneSlots.size(); ++l) bought = buyTower(laneSlots[l]);
+      bool bought = buyTower(laneSlots[least], aimsOf(least));
+      for (size_t l = 0; !bought && l < laneSlots.size(); ++l) bought = buyTower(laneSlots[l], aimsOf(l));
       if (!bought) break;
     }
   }
@@ -733,7 +797,8 @@ struct Bot {
       case Strategy::Chaser: planChaser(); break;
       case Strategy::Sensible:
       case Strategy::Upgrader: planSensible(); break;
-      case Strategy::NeverRotate: planLanes(false); break;
+      case Strategy::NeverRotate:
+      case Strategy::FocusBuilder: planLanes(false); break;  // M2.11: bent mounts via laneAims
       case Strategy::BankAndDrill: planLanes(true); break;
       case Strategy::Balance: planLanes(false); break;
       case Strategy::RotateToLane:
@@ -1059,7 +1124,13 @@ RunResult play(const ContentDB& db, Strategy strategy, const RunOptions& options
         case EventType::EnemyKilled:
           ++r.kills;
           bounty += e.value;
-          if (enemyOk) ++r.killsByEnemy[static_cast<size_t>(e.a)];
+          if (enemyOk) {
+            ++r.killsByEnemy[static_cast<size_t>(e.a)];
+            r.hpDestroyed += layerHp(db.enemies[static_cast<size_t>(e.a)]);  // M2.11
+          }
+          break;
+        case EventType::LayerPopped:  // M2.11
+          if (enemyOk) r.hpDestroyed += layerHp(db.enemies[static_cast<size_t>(e.a)]);
           break;
         case EventType::PlanetHit:
           if (e.b >= 0 && e.b < static_cast<int32_t>(kMaxLanesTracked)) {
@@ -1101,6 +1172,7 @@ RunResult play(const ContentDB& db, Strategy strategy, const RunOptions& options
   r.panels = static_cast<uint32_t>(bot.count(BuildingKind::Panel));
   r.drills = static_cast<uint32_t>(bot.count(BuildingKind::Drill));
   r.coolers = static_cast<uint32_t>(bot.count(BuildingKind::Cooler));
+  r.focusPoints = static_cast<uint32_t>(w.focus.size());  // M2.11
   r.hash = sim.hash();
   return r;
 }

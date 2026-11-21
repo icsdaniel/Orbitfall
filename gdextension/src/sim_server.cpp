@@ -15,6 +15,7 @@
 #include "content/content_loader.h"
 #include "sim/mathx.h"
 #include "systems/combat.h"
+#include "systems/focus.h"
 #include "systems/sun.h"
 #include "systems/upgrades.h"
 #include "systems/waves.h"
@@ -42,7 +43,8 @@ const char* const kEventNames[] = {
     "FallingWarning", "FallingImpact", "ShieldAbsorbed", "ShieldOffline", "ShieldOnline",
     "BuildingActivated",  // M2.6
     "DrillOverheated", "DrillRestarted",  // M2.7
-    "LayerRegrown", "EnemySplit"};  // M2.5
+    "LayerRegrown", "EnemySplit",  // M2.5
+    "AimChanged"};  // M2.11
 constexpr int kEventNameCount = static_cast<int>(sizeof(kEventNames) / sizeof(kEventNames[0]));
 static_assert(kEventNameCount == static_cast<int>(orbitfall::EventType::Count), "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::CommandRejected) == 12, "event name table out of date");
@@ -218,6 +220,11 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_channel"), &SimServer::get_channel);
   ClassDB::bind_method(D_METHOD("get_beams"), &SimServer::get_beams);
   ClassDB::bind_method(D_METHOD("get_site_actives"), &SimServer::get_site_actives);
+  // M2.11 bent aim and focus fire
+  ClassDB::bind_method(D_METHOD("get_site_aims"), &SimServer::get_site_aims);
+  ClassDB::bind_method(D_METHOD("get_aim_rules"), &SimServer::get_aim_rules);
+  ClassDB::bind_method(D_METHOD("get_reaim_cost", "slot"), &SimServer::get_reaim_cost);
+  ClassDB::bind_method(D_METHOD("get_focus_points"), &SimServer::get_focus_points);
 
   ClassDB::bind_method(D_METHOD("set_palette", "colors"), &SimServer::set_palette);
   ClassDB::bind_method(D_METHOD("set_debug_scenario", "on"), &SimServer::set_debug_scenario);
@@ -936,6 +943,60 @@ PackedFloat32Array SimServer::get_site_actives() const {
   return out;
 }
 // ---- end M2.6 ---------------------------------------------------------------
+
+// ---- M2.11 bent aim and focus fire ------------------------------------------
+PackedFloat32Array SimServer::get_site_aims() const {
+  PackedFloat32Array out;
+  out.resize(static_cast<int64_t>(curr_->siteAims.size()));
+  if (!curr_->siteAims.empty())
+    std::memcpy(out.ptrw(), curr_->siteAims.data(), curr_->siteAims.size() * sizeof(float));
+  return out;
+}
+
+Dictionary SimServer::get_aim_rules() const {
+  const orbitfall::RulesDef& r = content_.rules;
+  PackedFloat32Array offsets;
+  for (const float o : r.aim.offsets) offsets.push_back(o);
+  Dictionary d;
+  d["offsets"] = offsets;
+  d["reaim_cost_frac"] = r.aim.reaimCostFrac;
+  d["between_waves_only"] = r.aim.reaimBetweenWavesOnly;
+  d["focus_bonus"] = r.focus.bonusPerExtra;
+  d["focus_cap"] = r.focus.cap;
+  d["focus_radius"] = r.focus.radius;
+  d["lens_merge"] = r.focus.lensMerge;
+  return d;
+}
+
+float SimServer::get_reaim_cost(int64_t slot) const {
+  if (!contentLoaded_ || slot < 0 || slot >= static_cast<int64_t>(curr_->siteOwners.size())) return -1.0f;
+  const int32_t anchor = curr_->siteOwners[static_cast<size_t>(slot)];
+  if (anchor < 0) return -1.0f;
+  const int32_t type = curr_->siteBuildings[static_cast<size_t>(anchor)];
+  if (type < 0 || type >= static_cast<int32_t>(content_.buildings.size())) return -1.0f;
+  const orbitfall::BuildingDef& def = content_.buildings[static_cast<size_t>(type)];
+  return def.aimMount ? orbitfall::reaimCost(content_.rules, def) : -1.0f;
+}
+
+Array SimServer::get_focus_points() const {
+  Array out;
+  const float rot = get_planet_rotation();
+  const float c = std::cos(rot), sn = std::sin(rot);
+  for (const orbitfall::FocusPoint& f : curr_->focus) {
+    Dictionary d;
+    d["local"] = Vector2(f.x, f.y);
+    d["pos"] = Vector2(f.x * c - f.y * sn, f.x * sn + f.y * c);
+    d["radius"] = f.radius;
+    PackedInt32Array feeders;
+    for (int k = 0; k < f.feeders; ++k) feeders.push_back(f.sites[k]);
+    d["feeders"] = feeders;
+    d["lenses"] = static_cast<int64_t>(f.lenses);
+    d["mult"] = orbitfall::focusMultiplier(content_.rules.focus, f.feeders);
+    out.push_back(d);
+  }
+  return out;
+}
+// ---- end M2.11 --------------------------------------------------------------
 
 void SimServer::upgrade_building(int64_t slot, int64_t path) {
   queue(orbitfall::cmd::upgradeBuilding(0, static_cast<int32_t>(slot), static_cast<int32_t>(path)));

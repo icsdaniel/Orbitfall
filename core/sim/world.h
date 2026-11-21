@@ -49,6 +49,7 @@ enum SlotFlag : uint8_t {
   kSlotShaded = 1u << 1,     // inside the beam but in an enemy's shadow
   kSlotHasTarget = 1u << 2,  // a tower with an enemy in arc and range
   kSlotShieldOffline = 1u << 3,  // M2.10: a shield at 0 energy, recharging
+  kSlotLensMerged = 1u << 4,     // M2.11: a Lens whose beam merged at a focus point this tick
 };
 
 // One entry per slot of the planet's ring. Buildings are few, so this is a
@@ -102,6 +103,24 @@ struct BeamShot {
   float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;  // tower -> target, world space
   float power = 0.0f;       // ramp x channel factor x active multiplier
   bool overcharged = false;
+  // M2.11: a merged Lens beam (from a focus point outward, summed power of
+  // every feeding Lens; `site` is the first feeder).
+  bool merged = false;
+};
+
+// M2.11 focus point: where the aim axes of two or more aim-mounted towers
+// cross within their ranges (BRIEF §6). Planet-local, so it turns with the
+// planet; derived by solveFocus whenever the layout or an aim changes (not
+// hashed: a pure function of hashed state).
+inline constexpr int kMaxFocusFeeders = 8;
+inline constexpr uint32_t kMaxFocusPoints = 64;
+struct FocusPoint {
+  float x = 0.0f, y = 0.0f;  // planet-local centre
+  float radius = 0.0f;       // zone radius
+  uint8_t feeders = 0;       // towers whose axis feeds this zone
+  uint8_t lenses = 0;        // of which beam towers (Sun Lens)
+  uint16_t pairs = 0;        // axis crossings merged into this point
+  uint16_t sites[kMaxFocusFeeders] = {};
 };
 
 // One adjacency link (M2.1), for the Build view: `source` buffs `target`.
@@ -224,6 +243,8 @@ struct World {
   uint32_t shadeCount = 0;
   std::vector<uint32_t> slotTargets;  // per slot: enemy index picked by towerTargeting
   std::vector<BeamShot> beams;        // M2.6: beams fired this tick (reserved per site)
+  // M2.11: focus points, recomputed by solveFocus on layout / aim changes only.
+  std::vector<FocusPoint> focus;
 
   // --- replay log (not hashed): every applied command, stamped with the tick
   // it applied on. seed + this log reproduces the run (systems/waves.h). ---

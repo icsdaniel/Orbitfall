@@ -109,6 +109,9 @@ struct Snapshot {
   float channel = 0.0f;               // M2.6: World::channel
   std::vector<float> beams;           // M2.6: 7 floats per Sun Lens beam (see get_beams)
   std::vector<float> siteActives;     // M2.6: 2 per site: active cooldown left, active time left
+  // M2.11 bent aim and focus fire
+  std::vector<float> siteAims;        // per site: aim offset (rad)
+  std::vector<orbitfall::FocusPoint> focus;  // planet-local focus points
   std::vector<float> shadeIntervals;  // pairs of world angles, merged
   // --- M2.7 drills and instability ---
   float drillIncomePerSecond = 0.0f;
@@ -235,9 +238,13 @@ inline void fill_snapshot(const orbitfall::World& w, const RunStatics& run, Snap
     o[2] = b.x1;
     o[3] = b.y1;
     o[4] = b.power;
-    o[5] = b.overcharged ? 1.0f : 0.0f;
+    o[5] = (b.overcharged ? 1.0f : 0.0f) + (b.merged ? 2.0f : 0.0f);  // M2.11: +2 = merged Lens beam
     o[6] = static_cast<float>(b.site);
   }
+  // M2.11
+  s.siteAims.resize(sites);
+  for (size_t i = 0; i < sites; ++i) s.siteAims[i] = w.site(static_cast<uint32_t>(i)).aimOffset;
+  s.focus.assign(w.focus.begin(), w.focus.end());
   s.siteActives.resize(sites * 2);
   for (size_t i = 0; i < sites; ++i) {
     const BuildingSlot& b = w.site(static_cast<uint32_t>(i));
