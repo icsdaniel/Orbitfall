@@ -303,7 +303,7 @@ func place_building(slot: int, building: int, aim_offset: float = 0.0, layer: in
 		return
 	_stardust -= cost
 	_slot_building[site] = building
-	_slot_aim[site] = aim_offset
+	_slot_aim[site] = _snap_aim(aim_offset) if bool(def.get("aim_mount", false)) else 0.0  # M2.11
 	_slot_cooldown[site] = 0.0
 	_slot_energy[site] = float(_buildings[building].get("shield_energy", 0.0))  # M2.10
 	_slot_charge[site] = 0.0
@@ -619,10 +619,185 @@ func _read_paths(raw: Variant) -> Array[Dictionary]:
 # --- M2.2 upgrade paths (end) ---
 
 
+## M2.11: snaps to the mount steps, costs reaimCostFrac of the price, refused
+## mid-wave; emits AimChanged (value = cost) like the sim.
 func set_aim(slot: int, offset: float) -> void:
 	_record(&"set_aim", [slot, offset])
-	if slot >= 0 and slot < _slot_aim.size():
-		_slot_aim[slot] = offset
+	if slot < 0 or slot >= _site_owner.size():
+		_emit(&"CommandRejected", slot, REJECT_INVALID_SLOT, Vector2(3.0, 0.0))
+		return
+	var site: int = _site_owner[slot]
+	if site < 0 or _slot_building[site] < 0:
+		_emit(&"CommandRejected", slot, REJECT_EMPTY_SLOT, Vector2(3.0, 0.0))
+		return
+	var def: Dictionary = _buildings[_slot_building[site]]
+	if not bool(def.get("aim_mount", false)):
+		_emit(&"CommandRejected", site, REJECT_NOT_ALLOWED, Vector2(3.0, 0.0))
+		return
+	if _phase >= PHASE_WON or (_aim_between_waves and _phase == PHASE_WAVE):
+		_emit(&"CommandRejected", site, REJECT_WRONG_PHASE, Vector2(3.0, 0.0))
+		return
+	var snapped: float = _snap_aim(offset)
+	if is_equal_approx(snapped, _slot_aim[site]):
+		return
+	var cost: float = float(def["cost"]) * _reaim_cost_frac
+	if cost > _stardust + 0.0001:
+		_emit(&"CommandRejected", site, REJECT_UNAFFORDABLE, Vector2(3.0, 0.0), cost)
+		return
+	_stardust -= cost
+	_slot_aim[site] = snapped
+	_solve_focus()
+	_emit(&"AimChanged", site, _slot_building[site], Vector2(snapped, 0.0), cost)
+	_emit(&"StardustChanged", int(_stardust), 0)
+
+
+# --- M2.11 bent aim and focus fire (begin) ---
+## Mock focus fire: the same solver as core/systems/focus.cpp (pairs of aim
+## axes crossing within range, merged within the zone radius); the mock's
+## combat does not apply the bonus.
+var _aim_offsets: PackedFloat32Array = PackedFloat32Array()
+var _reaim_cost_frac: float = 0.0
+var _aim_between_waves: bool = false
+var _focus_rules: Dictionary = {
+	"bonus": 0.0, "cap": 0.0, "radius": 50.0, "min_altitude": 10.0, "lens_merge": false}
+var _focus: Array[Dictionary] = []
+
+
+func get_site_aims() -> PackedFloat32Array:
+	return _slot_aim.duplicate()
+
+
+func get_aim_rules() -> Dictionary:
+	return {
+		"offsets": _aim_offsets.duplicate(), "reaim_cost_frac": _reaim_cost_frac,
+		"between_waves_only": _aim_between_waves, "focus_bonus": _focus_rules["bonus"],
+		"focus_cap": _focus_rules["cap"], "focus_radius": _focus_rules["radius"],
+		"lens_merge": _focus_rules["lens_merge"],
+	}
+
+
+func get_reaim_cost(slot: int) -> float:
+	if slot < 0 or slot >= _site_owner.size():
+		return -1.0
+	var site: int = _site_owner[slot]
+	if site < 0 or _slot_building[site] < 0:
+		return -1.0
+	var def: Dictionary = _buildings[_slot_building[site]]
+	return float(def["cost"]) * _reaim_cost_frac if bool(def.get("aim_mount", false)) else -1.0
+
+
+func get_focus_points() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for f: Dictionary in _focus:
+		var local: Vector2 = f["local"]
+		var feeders: PackedInt32Array = f["feeders"]
+		out.append({
+			"local": local, "pos": local.rotated(_rot), "radius": float(_focus_rules["radius"]),
+			"feeders": feeders, "lenses": int(f["lenses"]), "mult": _focus_mult(feeders.size()),
+		})
+	return out
+
+
+func _focus_mult(feeders: int) -> float:
+	if feeders < 2:
+		return 1.0
+	return 1.0 + minf(float(_focus_rules["bonus"]) * float(feeders - 1), float(_focus_rules["cap"]))
+
+
+func _snap_aim(offset: float) -> float:
+	var limit: float = deg_to_rad(60.0)
+	var v: float = clampf(offset, -limit, limit) if is_finite(offset) else 0.0
+	if _aim_offsets.is_empty():
+		return v
+	var best: float = _aim_offsets[0]
+	for o: float in _aim_offsets:
+		if absf(o - v) < absf(best - v):
+			best = o
+	return best
+
+
+func _load_aim_rules(rules: Dictionary) -> void:
+	_aim_offsets = PackedFloat32Array()
+	_reaim_cost_frac = 0.0
+	_aim_between_waves = false
+	if rules.get("aim") is Dictionary:
+		var aim: Dictionary = rules["aim"]
+		for deg: Variant in aim.get("offsetsDeg", []):
+			_aim_offsets.append(deg_to_rad(float(deg)))
+		_reaim_cost_frac = float(aim.get("reaimCostFrac", 0.0))
+		_aim_between_waves = bool(aim.get("reaimBetweenWavesOnly", false))
+	if rules.get("focus") is Dictionary:
+		var f: Dictionary = rules["focus"]
+		_focus_rules = {
+			"bonus": float(f.get("bonusPerExtra", 0.0)), "cap": float(f.get("cap", 0.0)),
+			"radius": float(f.get("radius", 50.0)), "min_altitude": float(f.get("minAltitude", 10.0)),
+			"lens_merge": bool(f.get("lensMerge", false)),
+		}
+
+
+func _solve_focus() -> void:
+	_focus = []
+	var sites: int = _slot_building.size()
+	var radius: float = float(_focus_rules["radius"])
+	var min_dist: float = _radius + float(_focus_rules["min_altitude"])
+	var weights: Array[int] = []
+	for a: int in sites:
+		if not _feeds_focus(a):
+			continue
+		var ta: Vector2 = Vector2.from_angle(_site_angle(a)) * _site_radius(a)
+		var da: Vector2 = Vector2.from_angle(_site_angle(a) + _slot_aim[a])
+		var range_a: float = _focus_range(a)
+		for b: int in range(a + 1, sites):
+			if not _feeds_focus(b):
+				continue
+			var tb: Vector2 = Vector2.from_angle(_site_angle(b)) * _site_radius(b)
+			var db: Vector2 = Vector2.from_angle(_site_angle(b) + _slot_aim[b])
+			var cross: float = da.cross(db)
+			if absf(cross) < 0.0001:
+				continue
+			var e: Vector2 = tb - ta
+			var along_a: float = e.cross(db) / cross
+			var along_b: float = e.cross(da) / cross
+			if along_a <= 0.0 or along_b <= 0.0 or along_a > range_a or along_b > _focus_range(b):
+				continue
+			var p: Vector2 = ta + da * along_a
+			if p.length() < min_dist:
+				continue
+			var into: int = -1
+			for i: int in _focus.size():
+				var c: Vector2 = _focus[i]["local"]
+				if c.distance_to(p) < radius:
+					into = i
+					break
+			if into < 0:
+				_focus.append({"local": p, "feeders": PackedInt32Array(), "lenses": 0})
+				weights.append(0)
+				into = _focus.size() - 1
+			var w: float = float(weights[into])
+			var centre: Vector2 = _focus[into]["local"]
+			_focus[into]["local"] = (centre * w + p) / (w + 1.0)
+			weights[into] += 1
+			for site: int in [a, b]:
+				var feeders: PackedInt32Array = _focus[into]["feeders"]
+				if not feeders.has(site):
+					feeders.append(site)
+					_focus[into]["feeders"] = feeders
+					if bool(_buildings[_slot_building[site]].get("beam", false)):
+						_focus[into]["lenses"] = int(_focus[into]["lenses"]) + 1
+
+
+func _feeds_focus(site: int) -> bool:
+	var b: int = _slot_building[site]
+	if b < 0:
+		return false
+	var def: Dictionary = _buildings[b]
+	return str(def["kind"]) == "tower" and bool(def.get("aim_mount", false))
+
+
+func _focus_range(site: int) -> float:
+	var def: Dictionary = _buildings[_slot_building[site]]
+	return float(_site_stats(def, _tiers(site), site)["range"])
+# --- M2.11 bent aim and focus fire (end) ---
 
 
 func set_targeting(slot: int, mode: int) -> void:
@@ -858,6 +1033,8 @@ func get_building_defs() -> Array[Dictionary]:
 			# M2.7
 			"drill_rate": b["drill_rate"], "instability": b["instability"],
 			"cooling": b["cooling"], "lit_cooling_mult": b["lit_cooling_mult"],
+			# M2.11 (same keys as the extension)
+			"aim_mount": b.get("aim_mount", false), "aim_offset": 0.0,
 			# M2.6
 			"falloff": b.get("falloff", PackedFloat32Array([0.0, 1.0, 1.0, 1.0])),
 			"projectile_kind": b.get("projectile_kind", 0 if b["kind"] == "tower" else -1),
@@ -1467,6 +1644,7 @@ func _recompute_layout() -> void:
 			_site_mods[4 * s + k] = maxf(1.0 + _site_mods[4 * s + k], 0.1)
 		if s >= _slot_count:
 			_site_mods[4 * s] *= 1.0 + _elevated_bonus
+	_solve_focus()  # M2.11
 
 
 func _light_mult(wave: int) -> float:
@@ -1921,6 +2099,8 @@ func _building(
 		"footprint": 1, "layer": LAYER_ANY if kind == "tower" else LAYER_GROUND, "auras": [],
 		# M2.7: drills and coolers.
 		"drill_rate": 0.0, "instability": 0.0, "cooling": 0.0, "lit_cooling_mult": 1.0,
+		# M2.11: towers have an aim mount unless the content says otherwise.
+		"aim_mount": kind == "tower", "beam": false,
 	}
 
 
@@ -1988,6 +2168,7 @@ func _load_json_content(errors: PackedStringArray) -> void:
 	_elevated_bonus = float(rules.get("elevatedRangeBonus", 0.15))
 	_warn_seconds = float(rules.get("fallingWarnSeconds", 3.0))  # M2.10
 	_light_charge = float(rules.get("lightChargeMult", 2.0))
+	_load_aim_rules(rules)  # M2.11
 	_falling_defs = []
 	for d: Dictionary in _read_dir("falling"):
 		var fv: Dictionary = d.get("visual", {})
@@ -2032,6 +2213,8 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				float(shot.get("splash", 0.0)), float(shot.get("speed", 0.0)),
 				float(d.get("panelRate", 0.0)), str(visual.get("shape", "square")))
 			b["color"] = str(visual.get("color", ""))
+			b["aim_mount"] = bool(d.get("aimMount", false))  # M2.11
+			b["beam"] = str(shot.get("kind", "")) == "beam"
 			if d.get("shield") is Dictionary:  # M2.10
 				var sh: Dictionary = d["shield"]
 				b["shield_width"] = deg_to_rad(float(sh.get("widthDeg", 60.0)))

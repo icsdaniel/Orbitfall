@@ -13,6 +13,9 @@ signal build_above_requested
 signal upgrade_requested(path: int)
 ## M2.6: fire the active ability (Sun Lens Overcharge) of the selected building.
 signal activate_requested
+## M2.11: lean the mount one step (-1 left / +1 right): the ghost's mount on an
+## empty slot (free), or a re-aim of the selected tower (priced, between waves).
+signal aim_step_requested(direction: int)
 signal closed
 
 ## One column keeps the menu as narrow as in M1, so the Build view still shows
@@ -41,6 +44,11 @@ var _active: Button
 var _active_name: String = ""
 var _active_key_text: String = ""
 var _build: Button
+## M2.11 mount row: < "Aim +30°  re-aim 6" >
+var _aim_row: HBoxContainer
+var _aim_left: Button
+var _aim_right: Button
+var _aim_label: Label
 var _sell: Button
 var _above: Button
 ## M2.2: upgrade paths of a built tower (Build view only).
@@ -80,6 +88,26 @@ func _init() -> void:
 	_list.add_theme_constant_override(&"h_separation", 6)
 	_list.add_theme_constant_override(&"v_separation", 6)
 	_scroll.add_child(_list)
+	# M2.11: touch the arrows, or , and . with a keyboard.
+	_aim_row = HBoxContainer.new()
+	_aim_row.name = "AimRow"
+	_aim_row.visible = false
+	_aim_row.add_theme_constant_override(&"separation", 6)
+	_aim_left = UiKit.button("<", Vector2(56.0, 56.0), Color(0.20, 0.22, 0.34))
+	_aim_left.name = "AimLeft"
+	_aim_left.pressed.connect(func() -> void: aim_step_requested.emit(-1))
+	_aim_row.add_child(_aim_left)
+	_aim_label = UiKit.label("Aim 0°", 18)
+	_aim_label.name = "AimLabel"
+	_aim_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_aim_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_aim_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_aim_row.add_child(_aim_label)
+	_aim_right = UiKit.button(">", Vector2(56.0, 56.0), Color(0.20, 0.22, 0.34))
+	_aim_right.name = "AimRight"
+	_aim_right.pressed.connect(func() -> void: aim_step_requested.emit(1))
+	_aim_row.add_child(_aim_right)
+	_box.add_child(_aim_row)
 	_build = UiKit.button("Build", Vector2(230.0, 68.0), Color(0.14, 0.42, 0.24))
 	_build.name = "Build"
 	_build.pressed.connect(_on_build_pressed)
@@ -186,6 +214,7 @@ func open_empty(
 	_scroll.visible = true
 	_fit_scroll()
 	_build.visible = true
+	_aim_row.visible = false  # M2.11: Game shows it for aim-mounted buildings
 	_active.visible = false
 	_sell.visible = false
 	_above.visible = false
@@ -232,6 +261,7 @@ func open_building(
 	_list.visible = false
 	_scroll.visible = false
 	_build.visible = false
+	_aim_row.visible = false  # M2.11
 	# M2.6: the active ability (tap the button, or F with a keyboard).
 	var active: Dictionary = def.get("active", {})
 	_active_name = str(active.get("name", ""))
@@ -346,6 +376,28 @@ func active_button() -> Button:
 	return _active
 
 
+## M2.11: shows the mount row with `text`; `enabled` false greys the arrows
+## (re-aiming mid-wave). Hidden when `text` is empty.
+func show_aim(text: String, enabled: bool) -> void:
+	_aim_row.visible = text != ""
+	_aim_label.text = text
+	_aim_left.disabled = not enabled
+	_aim_right.disabled = not enabled
+	refit()
+
+
+func aim_row_visible() -> bool:
+	return _aim_row.visible
+
+
+func aim_text() -> String:
+	return _aim_label.text
+
+
+func aim_button(direction: int) -> Button:
+	return _aim_right if direction > 0 else _aim_left
+
+
 ## M2.6: previews the next (+1) or previous (-1) building of the list.
 func step_preview(direction: int) -> void:
 	var keys: Array[int] = []
@@ -370,6 +422,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key == null or not key.pressed or key.echo:
 		return
 	var code: int = key.physical_keycode if key.physical_keycode != KEY_NONE else key.keycode
+	# M2.11 keyboard path for the mount row: , leans left, . leans right.
+	if _aim_row.visible and (code == KEY_COMMA or code == KEY_PERIOD):
+		if not _aim_left.disabled:
+			aim_step_requested.emit(-1 if code == KEY_COMMA else 1)
+		get_viewport().set_input_as_handled()
+		return
 	if _scroll.visible:
 		match code:
 			KEY_RIGHT, KEY_BRACKETRIGHT, KEY_TAB:

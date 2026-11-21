@@ -50,6 +50,7 @@ const SHADOW: Color = Color(0.0, 0.0, 0.02)
 const THREAT: Color = Color(1.0, 0.35, 0.30)
 const DRILL_HOT: Color = Color(1.0, 0.36, 0.10)  # M2.7: drill heat and the instability meter
 const COOL: Color = Color(0.55, 0.92, 1.0)  # M2.7: cooler halo and a calm meter
+const FOCUS: Color = Color(1.0, 0.85, 0.30)  # M2.11: focus reticles and the axes feeding them
 const GOOD: Color = Color(0.35, 0.90, 0.50)
 const TEXT: Color = Color(0.93, 0.95, 1.0)
 const TEXT_DIM: Color = Color(0.62, 0.68, 0.80)

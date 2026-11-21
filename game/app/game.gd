@@ -53,6 +53,10 @@ var _demo_placement: bool = false
 var _start_band: String = ""
 var _tap_switched_view: bool = false
 var _upgrade_key: String = ""  # M2.2: what the open upgrade panel was built from
+## M2.11: mount steps and focus numbers (get_aim_rules), and the mount the next
+## aim-mounted building is placed with.
+var _aim_rules: Dictionary = {}
+var _build_aim: float = 0.0
 var _select_arg: int = -1
 var _debug_arg: bool = false
 var _end_arg: String = ""
@@ -296,6 +300,7 @@ func _build_scene() -> void:
 	hud.build_menu.build_above_requested.connect(_on_build_above_requested)
 	hud.build_menu.upgrade_requested.connect(_on_upgrade_requested)
 	hud.build_menu.activate_requested.connect(_on_activate_requested)  # M2.6
+	hud.build_menu.aim_step_requested.connect(_on_aim_step_requested)  # M2.11
 	hud.build_menu.closed.connect(_on_menu_closed)
 
 
@@ -332,6 +337,7 @@ func _track_phase() -> void:
 		elif phase == PHASE_INTERMISSION and _phase == PHASE_WAVE:
 			bands.go_to(BandController.Band.SURFACE)
 	_phase = phase
+	_refresh_aim()  # M2.11: re-aiming opens and closes with the waves
 	_refresh_forecast()
 	if phase == PHASE_WON or phase == PHASE_LOST:
 		clear_selection()
@@ -354,6 +360,9 @@ func _handle_events() -> void:
 			pass
 		elif str(event.get("type", "")) == "ShieldOffline":  # M2.10
 			hud.toast("Shield down - recharging")
+		elif str(event.get("type", "")) == "AimChanged":  # M2.11
+			planet_view.sync()
+			_refresh_aim()
 
 
 func _refresh_forecast() -> void:
@@ -372,6 +381,8 @@ func _reject_text(reason: int) -> String:
 			return "No room there"
 		4:
 			return "Not enough stardust"
+		7:
+			return "Not now: re-aim between waves"  # M2.11 (also any command after the run)
 		8:
 			return "Needs a building below"
 		9:
@@ -418,6 +429,7 @@ func _select_slot(slot: int, layer: int = 0) -> void:
 	planet_view.selected_slot = slot
 	planet_view.selected_layer = layer
 	_refresh_upgrades(true)
+	_refresh_aim()  # M2.11
 
 
 ## M2.1 details for the menu of the building anchored on `owner`, tapped at
@@ -531,16 +543,19 @@ func _on_band_changed(band: int) -> void:
 
 func _on_preview_changed(building: int) -> void:
 	planet_view.ghost_building = building
+	_refresh_aim()  # M2.11
 
 
 func _on_build_requested(building: int) -> void:
 	if selected_slot < 0:
 		return
 	_last_building = building
+	# M2.11: an aim-mounted building is placed with the mount chosen in the menu (free).
+	var aim: float = _build_aim if bool(planet_view.building_def(building).get("aim_mount", false)) else 0.0
 	if selected_layer > 0:
-		sim.place_building(selected_slot, building, 0.0, selected_layer)
+		sim.place_building(selected_slot, building, aim, selected_layer)
 	else:
-		sim.place_building(selected_slot, building, 0.0)
+		sim.place_building(selected_slot, building, aim)
 	clear_selection()
 
 
@@ -619,6 +634,78 @@ func _on_activate_requested() -> void:
 	if selected_slot < 0 or not sim.has_method(&"activate_building"):
 		return
 	sim.activate_building(planet_view.site_of(selected_slot, selected_layer))
+
+
+# --- M2.11 bent aim (begin) ---
+
+## Mount steps from the rules (rad); the Q33 default when the sim has none.
+func _aim_offsets() -> PackedFloat32Array:
+	if _aim_rules.is_empty() and sim.has_method(&"get_aim_rules"):
+		_aim_rules = sim.get_aim_rules()
+	var offsets: PackedFloat32Array = _aim_rules.get("offsets", PackedFloat32Array())
+	if offsets.is_empty():
+		for deg: float in [-60.0, -30.0, 0.0, 30.0, 60.0]:
+			offsets.append(deg_to_rad(deg))
+	return offsets
+
+
+## Index of the step nearest `offset`.
+static func nearest_step(offsets: PackedFloat32Array, offset: float) -> int:
+	var best: int = 0
+	for i: int in offsets.size():
+		if absf(offsets[i] - offset) < absf(offsets[best] - offset):
+			best = i
+	return best
+
+
+## Shows the menu's mount row for the selection: the ghost's mount on an
+## empty slot (free), or the tower's aim with its re-aim price (between waves).
+func _refresh_aim() -> void:
+	_aim_offsets()  # fetches the rules once
+	if selected_slot < 0 or not hud.build_menu.is_open():
+		planet_view.ghost_aim = 0.0
+		return
+	var site: int = planet_view.site_of(selected_slot, selected_layer)
+	var owner: int = planet_view.site_owner(site)
+	if owner < 0:
+		var def: Dictionary = planet_view.building_def(hud.build_menu.previewed)
+		if bool(def.get("aim_mount", false)):
+			planet_view.ghost_aim = _build_aim
+			hud.build_menu.show_aim("Mount %+d°  (free now)" % roundi(rad_to_deg(_build_aim)), true)
+		else:
+			planet_view.ghost_aim = 0.0
+			hud.build_menu.show_aim("", false)
+		return
+	var built: Dictionary = planet_view.building_def(planet_view.site_building(owner))
+	if not bool(built.get("aim_mount", false)) or not sim.has_method(&"get_reaim_cost"):
+		hud.build_menu.show_aim("", false)
+		return
+	var deg: int = roundi(rad_to_deg(planet_view.site_aim(owner)))
+	var mid_wave: bool = _phase == PHASE_WAVE and bool(_aim_rules.get("between_waves_only", true))
+	if mid_wave:
+		hud.build_menu.show_aim("Aim %+d°  (re-aim between waves)" % deg, false)
+	else:
+		hud.build_menu.show_aim("Aim %+d°  re-aim %d" % [deg, ceili(float(sim.get_reaim_cost(owner)))], true)
+
+
+## Touch (< >) and keyboard (, .) path: one mount step left or right.
+func _on_aim_step_requested(direction: int) -> void:
+	if selected_slot < 0:
+		return
+	var offsets: PackedFloat32Array = _aim_offsets()
+	var site: int = planet_view.site_of(selected_slot, selected_layer)
+	var owner: int = planet_view.site_owner(site)
+	if owner < 0:
+		var at: int = nearest_step(offsets, _build_aim)
+		_build_aim = offsets[clampi(at + direction, 0, offsets.size() - 1)]
+		_refresh_aim()
+		return
+	var now: int = nearest_step(offsets, planet_view.site_aim(owner))
+	var next: int = clampi(now + direction, 0, offsets.size() - 1)
+	if next != now and sim.has_method(&"set_aim"):
+		sim.set_aim(owner, offsets[next])
+
+# --- M2.11 bent aim (end) ---
 
 
 func _on_menu_closed() -> void:
