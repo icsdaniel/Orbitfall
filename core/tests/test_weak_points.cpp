@@ -147,7 +147,11 @@ TEST_CASE("weak point: body about 25%, weak side 3 to 4x, never 0") {
   CHECK(oneShot(ww, ww.lance, 0, 0.0f) == doctest::Approx(7.0f));
   CHECK(oneShot(ww, ww.lance, 0, 3.0f, 300.0f) == doctest::Approx(7.0f));
   CHECK(oneShot(ww, kGatling, 2, 0.0f) == doctest::Approx(0.25f));
-  // A Gatling right under it gets the weak point too (the rule is geometric).
+  // Only precision towers reach the weak point (rules.weakPointPrecisionOnly):
+  // a Gatling right under it still deals a body hit...
+  CHECK(oneShot(ww, kGatling, 0, 0.0f) == doctest::Approx(0.25f));
+  // ...unless the rule is switched off, then the geometry alone decides.
+  ww.db.rules.weakPointPrecisionOnly = false;
   CHECK(oneShot(ww, kGatling, 0, 0.0f) == doctest::Approx(3.5f));
 }
 
@@ -291,15 +295,14 @@ TEST_CASE("weak point acceptance: a never-rotating bot kills Bulwarks at under 2
   CHECK(static_cast<float>(stillKills) < 0.25f * static_cast<float>(turningKills));
 }
 
-// Whole runs of the Bulwark trial wave set (waves/trial_bulwark.json) with the
-// shared M2.9 strategy bots: never-rotate (the sensible build, hands off)
+// The acceptance on whole runs of the Bulwark trial wave set
+// (waves/trial_bulwark.json) with the shared M2.9 strategy bots: never-rotate
+// (the sensible build plus a Lance right under the Bulwarks' lane, hands off)
 // against rotate-to-weak-point (a battery with Lances, turned so a Lance sits
-// under the nearest Bulwark). Rate = Bulwarks killed per second of wave time.
-// Reported for the balance log; the strict 25% acceptance is the scripted
-// scenario above, because in mixed waves never-rotate's lane Gatlings sit
-// under the lane and score weak-point hits on the Bulwarks that come in close
-// to it (about half the rotating bot's rate today, see docs/STATUS.md).
-TEST_CASE("weak point: strategy bots on the Bulwark trial (report)") {
+// under the nearest Bulwark). Rate = Bulwarks killed per second of wave time,
+// over 8 seeds. Only precision towers score weak-point hits
+// (rules.weakPointPrecisionOnly), so the lane Gatlings only chip the plate.
+TEST_CASE("weak point acceptance: strategy bots on the Bulwark trial") {
   ContentDB db;
   std::vector<std::string> errors;
   REQUIRE(load_content(ORBITFALL_CONTENT_DIR, db, errors));
@@ -309,7 +312,7 @@ TEST_CASE("weak point: strategy bots on the Bulwark trial (report)") {
   REQUIRE(opts.waveSet != kNoIndex);
   uint32_t killsStill = 0, killsTurning = 0;
   float secondsStill = 0.0f, secondsTurning = 0.0f;
-  for (uint32_t seed = 1; seed <= 4; ++seed) {
+  for (uint32_t seed = 1; seed <= 8; ++seed) {
     opts.seed = seed;
     const orbitfall_bots::RunResult still = orbitfall_bots::play(db, orbitfall_bots::Strategy::NeverRotate, opts);
     const orbitfall_bots::RunResult turning =
@@ -330,5 +333,5 @@ TEST_CASE("weak point: strategy bots on the Bulwark trial (report)") {
   const float rateTurning = static_cast<float>(killsTurning) / secondsTurning;
   MESSAGE("Bulwark kill rate: never-rotate " << rateStill << "/s, rotate-to-weak-point " << rateTurning << "/s");
   CHECK(killsTurning > 0);
-  CHECK(rateTurning > rateStill);
+  CHECK(rateStill < 0.25f * rateTurning);
 }

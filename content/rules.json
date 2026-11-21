@@ -8,5 +8,6 @@
   "surfaceTimeEaseSeconds": 0.3,
   "elevatedRangeBonus": 0.15,
   "upgradeExclusiveTier": 2,
-  "weakWindowDeg": 8
+  "weakWindowDeg": 8,
+  "weakPointPrecisionOnly": true
 }

@@ -533,6 +533,24 @@ struct Bot {
     const float half = 0.5f * litArc(w.planet->radius, w.sun->beamWidth);
     const bool dim = w.waveSet->waves[w.waveIndex].lightMult < 1.0f;
 
+    // M2.4: a lane that brings weak-point enemies gets a Lance right under
+    // it (these bots never aim it; the lane is where it does most good).
+    if (precision >= 0) {
+      for (const SpawnDef& sp : w.waveSet->waves[w.waveIndex].spawns) {
+        if (!db.enemies[static_cast<size_t>(sp.enemy)].hasWeakPoint) continue;
+        if (sp.lane < 0 || sp.lane >= static_cast<int>(laneSlots.size())) continue;
+        const std::vector<int>& lane = laneSlots[static_cast<size_t>(sp.lane)];
+        bool have = false;
+        for (int slot : lane) have = have || (!free(slot) && w.slots[static_cast<size_t>(slot)].type == precision);
+        for (int slot : lane) {
+          if (have) break;
+          if (taken(slot)) continue;
+          have = buy(slot, precision);
+          break;
+        }
+      }
+    }
+
     for (size_t l = 0; l < laneSlots.size(); ++l) {
       const int want = l == 0 ? kWantFirstLane[k] : kWantOtherLane[k];
       while (towersOn(laneSlots[l]) < want && buyTower(laneSlots[l])) {}

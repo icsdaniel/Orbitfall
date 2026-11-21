@@ -85,6 +85,7 @@ TEST_CASE("bulwark.json: a weak point with body about 25% and weak side 3 to 4x"
   CHECK(b.shape == Shape::Square);  // a plate; shape = movement class (tank)
   CHECK_FALSE(b.hpBar);             // not carrier-size (readability rule 7)
   CHECK(b.laneJitter > db.rules.spawnJitter);  // comes in spread wide: lining up is a decision
+  CHECK(db.rules.weakPointPrecisionOnly);  // only the Lance (precision) reaches the weak side
   // Every shipped tower: body never 0 (>= the floor), weak side at least 3x
   // whatever falloff point it hits at.
   for (const BuildingDef& t : db.buildings) {
@@ -151,6 +152,11 @@ TEST_CASE("weakPoint fields: overrides and validation") {
     CHECK(db.enemies[static_cast<size_t>(db.enemy_index("bulwark"))].weakPoint.window ==
           doctest::Approx(5.0f * kDegree));
     CHECK(db.rules.weakWindow == doctest::Approx(10.0f * kDegree));
+  }
+  SUBCASE("the precision-only rule can be switched off in rules") {
+    Files files = shippedFiles();
+    edit(files, "rules.json", "\"weakPointPrecisionOnly\": true", "\"weakPointPrecisionOnly\": false");
+    CHECK_FALSE(loaded(files).rules.weakPointPrecisionOnly);
   }
   SUBCASE("a body multiplier under the floor is rejected (never 0)") {
     Files files = shippedFiles();

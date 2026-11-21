@@ -334,6 +334,7 @@ struct Loader {
       o.integer("upgradeExclusiveTier", r.upgradeExclusiveTier,
                 Range{0.0, false, static_cast<double>(kMaxUpgradeTiers)});
     if (o.has("weakWindowDeg")) o.angle("weakWindowDeg", r.weakWindow, Range{0.0, true, 45.0});
+    if (o.has("weakPointPrecisionOnly")) o.boolean("weakPointPrecisionOnly", r.weakPointPrecisionOnly);
   }
 
   // {"kinetic": 0.5, ...} -> out[type]. The floor is checked in resolve().

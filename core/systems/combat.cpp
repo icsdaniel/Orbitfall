@@ -385,7 +385,8 @@ void collisions(World& world, float dt) {
     const float origin = p.origin[i];
     // M2.4: weak point or body for enemies that have one; 1x for the rest.
     auto strike = [&](uint32_t k, const EnemyDef& def) {
-      const bool weak = isWeakPointHit(def, origin, e.posX[k], e.posY[k]);
+      const bool weak = (source.precision || !db.rules.weakPointPrecisionOnly) &&
+                        isWeakPointHit(def, origin, e.posX[k], e.posY[k]);
       const float dealt = damage * hitMultiplier(db, source, def, fraction, weak);
       if (def.hasWeakPoint) {
         if (weak) {

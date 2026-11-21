@@ -46,6 +46,8 @@ float damageMultiplier(const ContentDB& db, const BuildingDef& source, const Ene
 // True when a shot launched from world angle `towerAngle` hits the weak point
 // of `enemy` at (ex, ey): the enemy has one and |wrap(towerAngle - bearing)|
 // <= its window. Aim offsets do not count: the tower must sit under it.
+// With rules.weakPointPrecisionOnly (the default) collisions only asks this
+// for shots from precision towers.
 bool isWeakPointHit(const EnemyDef& enemy, float towerAngle, float ex, float ey);
 // Multiplier of a hit on `enemy`: 1 when it has no weak point, else
 // weakPoint.mult or weakPoint.bodyMult.

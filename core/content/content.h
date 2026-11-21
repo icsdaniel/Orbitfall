@@ -299,6 +299,9 @@ struct RulesDef {  // content/rules.json: global tunables
   // is capped at it (default 2: one path may reach the top, the other stops at 2).
   int upgradeExclusiveTier = 2;
   float weakWindow = 8.0f * 3.14159265358979323846f / 180.0f;  // M2.4: rad, default weak-point window
+  // M2.4: true = only shots from precision towers (the Lance) can hit a weak
+  // point; every other tower's hits on a weak-point enemy are body hits.
+  bool weakPointPrecisionOnly = true;
 };
 
 struct ContentDB {
