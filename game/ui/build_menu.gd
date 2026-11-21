@@ -15,9 +15,11 @@ signal upgrade_requested(path: int)
 signal activate_requested
 signal closed
 
-const LIST_COLUMNS: int = 2
-const BUTTON_WIDTH: float = 210.0
-const BUTTON_HEIGHT: float = 58.0
+## One column keeps the menu as narrow as in M1, so the Build view still shows
+## the whole planet ring beside it; the list scrolls instead.
+const LIST_COLUMNS: int = 1
+const BUTTON_WIDTH: float = 230.0
+const BUTTON_HEIGHT: float = 60.0
 ## Height of the building list before it scrolls (canvas px of the 1280x720 base).
 const LIST_MAX_HEIGHT: float = 320.0
 
@@ -29,7 +31,7 @@ var previewed: int = -1
 var _box: VBoxContainer
 var _title: Label
 var _info: Label
-## M2.6: two columns of building buttons in a scroll box, so a long roster
+## M2.6: the building buttons in a scroll box, so a long roster
 ## still fits a landscape phone (touch drag, mouse wheel; Left/Right or [ ]
 ## pick, Enter builds).
 var _list: GridContainer
