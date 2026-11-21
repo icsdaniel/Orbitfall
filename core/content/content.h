@@ -22,7 +22,8 @@ inline constexpr float kMaxAimOffsetDeg = 60.0f;
 enum class Shape : uint8_t { Circle, Triangle, Square, Hexagon, Star, Diamond, Disc };
 // Support (M2.1): a building that neither shoots nor earns, e.g. an aura source.
 // Shield (M2.10): protects an arc of sky from falling objects.
-enum class BuildingKind : uint8_t { Tower, Panel, Support, Shield, Count };
+// Drill, Cooler (M2.7): light-independent income and its instability relief.
+enum class BuildingKind : uint8_t { Tower, Panel, Support, Shield, Drill, Cooler, Count };
 // Where a building may stand (M2.1): the ground ring only, the elevated ring
 // only, or either.
 enum class BuildingLayer : uint8_t { Ground, Elevated, Any };
@@ -158,7 +159,9 @@ struct AuraDef {
 inline constexpr int kUpgradePaths = 2;
 inline constexpr int kMaxUpgradeTiers = 4;
 
-enum class UpgradeStat : uint8_t { Damage, FireRate, Range, Arc, Splash, Income, Count };
+// Income is panelRate on panels and drillRate on drills; Instability (drill
+// weight in the instability curve) and Cooling (Cooler) are M2.7.
+enum class UpgradeStat : uint8_t { Damage, FireRate, Range, Arc, Splash, Income, Instability, Cooling, Count };
 inline constexpr int kUpgradeStatCount = static_cast<int>(UpgradeStat::Count);
 enum class ModOp : uint8_t { Add, Mul };
 
@@ -213,6 +216,15 @@ struct BuildingDef {
   std::vector<TargetingMode> targeting;  // first entry is the default mode
   // Panels only.
   float panelRate = 0.0f;  // stardust per second at beamStrength 1
+  // M2.7 drills: stardust per second whatever the light, and the drill's weight
+  // in the instability curve (RulesDef::instability).
+  float drillRate = 0.0f;
+  float instability = 1.0f;
+  // M2.7 coolers: instability removed from the global level; times
+  // litCoolingMult while the cooler's slot is lit and unshaded (a radiator
+  // works best on the night side).
+  float cooling = 0.0f;
+  float litCoolingMult = 1.0f;
   std::vector<UpgradePathDef> paths;  // M2.2: empty = not upgradable
   // Shields only (M2.10).
   ShieldDef shield;
@@ -319,6 +331,27 @@ struct WaveSetDef {  // one file under content/waves/
   std::vector<WaveDef> waves;
 };
 
+// M2.7 instability (rules.json "instability", optional; without it drills
+// never overheat). Global level = max(0, curve(load) - cooling), where load is
+// the sum of the instability weights of the running drills and cooling the
+// sum of the coolers' cooling. While the level is above `threshold`, every
+// running drill gains heat at riseBase + risePerExcess * (level - threshold)
+// per second; at heat 1 it overheats and stops for overheatSeconds (heat back
+// to 0 when it restarts). At or below the threshold heat falls at decayPerSec.
+// Nothing is ever damaged.
+struct CurvePoint {
+  float x = 0.0f;
+  float y = 0.0f;
+};
+struct InstabilityDef {
+  std::vector<CurvePoint> curve;  // x ascending; linear between points, extended past the last
+  float threshold = 1.0f;
+  float riseBase = 0.1f;
+  float risePerExcess = 0.5f;
+  float decayPerSec = 0.1f;
+  float overheatSeconds = 10.0f;
+};
+
 struct RulesDef {  // content/rules.json: global tunables
   int tickRate = 30;
   float killBounty = 1.0f;  // multiplier on EnemyDef::bounty
@@ -332,6 +365,7 @@ struct RulesDef {  // content/rules.json: global tunables
   // is capped at it (default 2: one path may reach the top, the other stops at 2).
   int upgradeExclusiveTier = 2;
   float fallingWarnSeconds = 3.0f;  // M2.10: falling objects are telegraphed this long before impact
+  InstabilityDef instability;  // M2.7
 };
 
 struct ContentDB {

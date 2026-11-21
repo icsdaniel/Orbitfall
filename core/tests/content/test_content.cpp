@@ -106,7 +106,7 @@ TEST_CASE("every shipped content file loads with zero errors") {
                             db.enemies.size() + db.waveSets.size() + db.falling.size() + 2);
   CHECK(db.planets.size() == 3);  // M2.8: small, medium, large
   CHECK(db.suns.size() == 1);
-  CHECK(db.buildings.size() == 4);  // M2.10: + shield
+  CHECK(db.buildings.size() == 6);  // M2.10: + shield; M2.7: + drill, cooler
   CHECK(db.enemies.size() == 6);    // M2.10: + bomber
   CHECK(db.waveSets.size() == 2);   // M2.10: + the m2_storm demo set
   CHECK(db.falling.size() == 2);    // M2.10: meteor, bomb
@@ -335,7 +335,7 @@ TEST_CASE("m1 waves match the balanced BRIEF 8.2 table; wave 5 lightMult is 0.5"
 
 TEST_CASE("rejects malformed JSON with file and position") {
   expect_rejected("enemies/dart.json", "\"speed\": 110,", "\"speed\": 110", "JSON parse error: line 3");
-  expect_rejected("rules.json", "{", "[", "JSON parse error");
+  expect_rejected("rules.json", "\"tickRate\": 30,", "\"tickRate\": 30", "JSON parse error");
 }
 
 TEST_CASE("rejects unknown references") {

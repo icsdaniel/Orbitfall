@@ -16,7 +16,9 @@ void planetRotation(World& world, float dt);
 // slots, b = merged intervals) when the set of shaded slots changes.
 void sunlight(World& world, float dt);
 // M1.7: lit, unshaded panels earn panelRate * beamStrength per second.
-// Sets world.incomePerSecond; emits StardustChanged per whole unit earned.
+// M2.7: running drills earn drillRate per second whatever the light.
+// Sets world.incomePerSecond (panels) and drillIncomePerSecond; emits
+// StardustChanged per whole unit earned.
 void income(World& world, float dt);
 // M1.9: releases the current wave's spawns, spread over its spawnSeconds.
 void spawners(World& world, float dt);
@@ -44,6 +46,8 @@ void collisions(World& world, float dt);
 // PlanetHit (a = enemy type, b = lane, x/y, value = damage) and, at HP 0,
 // GameOver (a = wave index); the phase becomes Lost.
 void landing(World& world, float dt);
+// M2.7: instability, drill heat, overheat and restart (systems/drills.h).
+void drills(World& world, float dt);
 // Removes entities flagged dead during the tick (swap-remove).
 void cleanup(World& world, float dt);
 

@@ -16,6 +16,8 @@ float* field(BuildingStats& s, UpgradeStat stat) {
     case UpgradeStat::Arc: return &s.arc;
     case UpgradeStat::Splash: return &s.splash;
     case UpgradeStat::Income: return &s.income;
+    case UpgradeStat::Instability: return &s.instability;
+    case UpgradeStat::Cooling: return &s.cooling;
     case UpgradeStat::Count: break;
   }
   return nullptr;
@@ -52,7 +54,9 @@ BuildingStats baseStats(const BuildingDef& def) {
   s.range = def.range;
   s.arc = def.arc;
   s.splash = def.projectile.splash;
-  s.income = def.panelRate;
+  s.income = def.kind == BuildingKind::Drill ? def.drillRate : def.panelRate;  // M2.7
+  s.instability = def.kind == BuildingKind::Drill ? def.instability : 0.0f;
+  s.cooling = def.kind == BuildingKind::Cooler ? def.cooling : 0.0f;
   return s;
 }
 

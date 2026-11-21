@@ -107,6 +107,17 @@ struct Snapshot {
   float incomePerSecond = 0.0f;
   float litFraction = 0.0f;           // lit unshaded panels / panels
   std::vector<float> shadeIntervals;  // pairs of world angles, merged
+  // --- M2.7 drills and instability ---
+  float drillIncomePerSecond = 0.0f;
+  float instability = 0.0f;
+  float instabilityLoad = 0.0f;
+  float cooling = 0.0f;
+  int32_t coolers = 0;
+  // One entry per drill (anchor sites, site order): site, heat 0..1, overheat
+  // seconds left (0 = running).
+  std::vector<int32_t> drillSites;
+  std::vector<float> drillHeat;
+  std::vector<float> drillOverheat;
   // --- render buffers at alpha 1 (16 floats per instance) plus velocities ---
   uint32_t enemyCount = 0;
   uint32_t enemyOverflow = 0;
@@ -188,6 +199,27 @@ inline void fill_snapshot(const orbitfall::World& w, const RunStatics& run, Snap
   s.beamWidth = w.sun ? w.sun->beamWidth : 0.0f;
   s.beamStrength = w.beamStrength;
   s.incomePerSecond = w.incomePerSecond;
+  // M2.7
+  s.drillIncomePerSecond = w.drillIncomePerSecond;
+  s.instability = w.instability;
+  s.instabilityLoad = w.instabilityLoad;
+  s.cooling = w.cooling;
+  s.drillSites.clear();
+  s.drillHeat.clear();
+  s.drillOverheat.clear();
+  s.coolers = 0;
+  if (w.content != nullptr) {
+    for (size_t i = 0; i < sites; ++i) {
+      const BuildingSlot& b = w.site(static_cast<uint32_t>(i));
+      if (b.type < 0) continue;
+      const BuildingKind kind = w.content->buildings[static_cast<size_t>(b.type)].kind;
+      if (kind == BuildingKind::Cooler) ++s.coolers;
+      if (kind != BuildingKind::Drill) continue;
+      s.drillSites.push_back(static_cast<int32_t>(i));
+      s.drillHeat.push_back(b.heat);
+      s.drillOverheat.push_back(b.overheat);
+    }
+  }
   s.litFraction = panels > 0 ? static_cast<float>(earning) / static_cast<float>(panels) : 0.0f;
   const uint32_t pairsMax = w.shadeCount < kMaxShadePairs ? w.shadeCount : kMaxShadePairs;
   s.shadeIntervals.resize(static_cast<size_t>(pairsMax) * 2);

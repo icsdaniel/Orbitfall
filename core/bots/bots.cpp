@@ -15,6 +15,7 @@
 #include "content/content.h"
 #include "sim/mathx.h"
 #include "sim/sim.h"
+#include "systems/drills.h"
 #include "systems/enemies.h"
 #include "systems/sun.h"
 #include "systems/upgrades.h"
@@ -98,7 +99,7 @@ struct Bot {
   Sim& sim;
   const ContentDB& db;
   int gatling, cannon, panel;
-  int drill;  // kNoIndex until M2.7 ships one
+  int drill, cooler;  // M2.7; kNoIndex when the content has none
   float budget = 0.0f;  // stardust not yet committed this intermission
   float lastInput = 0.0f;
   uint32_t towersBought = 0;
@@ -108,7 +109,8 @@ struct Bot {
         gatling(content.building_index("gatling")),
         cannon(content.building_index("cannon")),
         panel(content.building_index("solar_panel")),
-        drill(content.building_index("drill")) {
+        drill(content.building_index("drill")),
+        cooler(content.building_index("cooler")) {
     m1Layout();
   }
 
@@ -169,6 +171,7 @@ struct Bot {
     sim.push(cmd::placeBuilding(sim.tick(), slot, building, 0.0f));
     // Mark it taken for the rest of this intermission's planning.
     planned.push_back(slot);
+    plannedTypes.push_back(building);
     return true;
   }
   std::vector<int> planned;
@@ -544,19 +547,22 @@ struct Bot {
       }
     }
     // Banking: a panel bought for a dim wave pays back slowly, so the money
-    // is kept (or put into drills, which do not need light) and spent on guns
-    // one intermission later.
-    const bool hold = bank && dim;
-    tendPanels(0.0f, kWantPanels[k], !hold);
-    if (hold) {
-      if (drill >= 0) {
-        for (int n = 0; n < 2; ++n) {
-          const int slot = nearestFree(wrapTau(w.sunBearing + kPi), reservedSlots, kPi);
-          if (slot < 0 || !buy(slot, drill)) break;
-        }
-      }
-      return;
+    // is kept and spent on guns one intermission later. M2.7: drills earn in
+    // the dark, so before a dim wave the bank first goes into drills (night
+    // side, up to kDrillsWanted standing) while instability stays at or under
+    // the threshold, with a Cooler when one more drill would tip it over.
+    // With that many drills standing the dark is covered: nothing is held
+    // back and the rest buys guns as usual.
+    bool hold = bank && dim;
+    if (hold && drill >= 0) {
+      buyDrills(kDrillsWanted, 0.0f);
+      float load = 0.0f, cooling = 0.0f;
+      int drills = 0;
+      drillLoad(load, cooling, drills);
+      hold = drills + plannedOf(drill) < kDrillsWanted;
     }
+    tendPanels(0.0f, kWantPanels[k], !(bank && dim));
+    if (hold) return;
     for (int guard = 0; guard < 8; ++guard) {
       size_t least = 0;
       for (size_t l = 1; l < laneSlots.size(); ++l) {
@@ -565,6 +571,72 @@ struct Bot {
       bool bought = buyTower(laneSlots[least]);
       for (size_t l = 0; !bought && l < laneSlots.size(); ++l) bought = buyTower(laneSlots[l]);
       if (!bought) break;
+    }
+  }
+
+  // --- M2.7 bank-and-drill: drills and coolers -----------------------------
+
+  static constexpr int kMaxDrills = 6;
+  static constexpr int kDrillsWanted = 4;
+  std::vector<int> plannedTypes;  // building of each `planned` slot
+
+  // Buildings of type `type` bought this intermission (not standing yet).
+  int plannedOf(int type) {
+    int n = 0;
+    for (int t : plannedTypes) n += t == type ? 1 : 0;
+    return n;
+  }
+
+  // Load and cooling of what stands (and is planned) right now, coolers
+  // counted at full night-side cooling (the bot puts them there).
+  void drillLoad(float& load, float& cooling, int& drills) {
+    const World& w = world();
+    load = cooling = 0.0f;
+    drills = 0;
+    for (uint32_t i = 0; i < w.slotCount(); ++i) {
+      const BuildingSlot& b = w.slots[i];
+      if (b.type < 0) continue;
+      const BuildingDef& def = db.buildings[static_cast<size_t>(b.type)];
+      if (def.kind == BuildingKind::Drill) {
+        load += effectiveStats(def, b.tiers).instability;
+        ++drills;
+      } else if (def.kind == BuildingKind::Cooler) {
+        cooling += effectiveStats(def, b.tiers).cooling;
+      }
+    }
+  }
+
+  // Free night-side slot (opposite the sun), away from the lane towers.
+  int nightSlot() {
+    const World& w = world();
+    return nearestFree(wrapTau(w.sunBearing + kPi - w.planetRotation), reservedSlots, kPi);
+  }
+
+  // Buys drills until `wanted` stand (at most kMaxDrills), keeping `reserve`
+  // stardust in the budget.
+  void buyDrills(int wanted, float reserve) {
+    if (drill < 0) return;
+    const InstabilityDef& rules = db.rules.instability;
+    const BuildingDef& d = db.buildings[static_cast<size_t>(drill)];
+    float load = 0.0f, cooling = 0.0f;
+    int drills = 0;
+    drillLoad(load, cooling, drills);
+    while (drills < wanted && drills < kMaxDrills) {
+      if (instabilityLevel(rules, load + d.instability, cooling) > rules.threshold) {
+        // One more drill would overheat something: cool first, if that is enough.
+        if (cooler < 0) return;
+        const BuildingDef& c = db.buildings[static_cast<size_t>(cooler)];
+        if (instabilityLevel(rules, load + d.instability, cooling + c.cooling) > rules.threshold) return;
+        if (budget < c.cost + d.cost + reserve) return;  // only worth it with the drill as well
+        const int slot = nightSlot();
+        if (slot < 0 || !buy(slot, cooler)) return;
+        cooling += c.cooling;
+      }
+      if (budget < d.cost + reserve) return;
+      const int slot = nightSlot();
+      if (slot < 0 || !buy(slot, drill)) return;
+      load += d.instability;
+      ++drills;
     }
   }
 
@@ -654,6 +726,7 @@ struct Bot {
   void plan() {
     budget = world().stardust;
     planned.clear();
+    plannedTypes.clear();
     switch (strategy) {
       case Strategy::Never: break;
       case Strategy::Towers: planTowers(); break;
@@ -959,9 +1032,11 @@ RunResult play(const ContentDB& db, Strategy strategy, const RunOptions& options
             for (const BuildingSlot& b : w.slots) {
               if (b.type == bot.panel && (b.flags & kSlotLit) != 0) ++lit;
             }
-            std::printf("    wave %u: hp %.0f stardust %.0f towers %d panels %d (lit %d) rot %.0f sun %.0f\n",
+            std::printf("    wave %u: hp %.0f stardust %.0f towers %d panels %d (lit %d) drills %d coolers %d "
+                        "instability %.2f rot %.0f sun %.0f\n",
                         w.waveIndex + 1, w.planetHp, w.stardust, bot.count(BuildingKind::Tower),
-                        bot.count(BuildingKind::Panel), lit, w.planetRotation / kDeg, w.sunBearing / kDeg);
+                        bot.count(BuildingKind::Panel), lit, bot.count(BuildingKind::Drill),
+                        bot.count(BuildingKind::Cooler), w.instability, w.planetRotation / kDeg, w.sunBearing / kDeg);
           }
         }
       }
@@ -1008,6 +1083,7 @@ RunResult play(const ContentDB& db, Strategy strategy, const RunOptions& options
           ++r.upgrades;
           break;
         case EventType::BuildingSold: refunded += e.value; break;
+        case EventType::DrillOverheated: ++r.overheats; break;  // M2.7
         default: break;
       }
     }
@@ -1023,6 +1099,8 @@ RunResult play(const ContentDB& db, Strategy strategy, const RunOptions& options
   r.ticks = w.tick;
   r.towers = static_cast<uint32_t>(bot.count(BuildingKind::Tower));
   r.panels = static_cast<uint32_t>(bot.count(BuildingKind::Panel));
+  r.drills = static_cast<uint32_t>(bot.count(BuildingKind::Drill));
+  r.coolers = static_cast<uint32_t>(bot.count(BuildingKind::Cooler));
   r.hash = sim.hash();
   return r;
 }

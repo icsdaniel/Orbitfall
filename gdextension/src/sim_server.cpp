@@ -39,12 +39,14 @@ const char* const kEventNames[] = {
     "BuildingPlaced", "BuildingSold", "CommandRejected",
     "BuildingUpgraded",  // M2.2
     // M2.10
-    "FallingWarning", "FallingImpact", "ShieldAbsorbed", "ShieldOffline", "ShieldOnline"};
+    "FallingWarning", "FallingImpact", "ShieldAbsorbed", "ShieldOffline", "ShieldOnline",
+    "DrillOverheated", "DrillRestarted"};  // M2.7
 constexpr int kEventNameCount = static_cast<int>(sizeof(kEventNames) / sizeof(kEventNames[0]));
 static_assert(kEventNameCount == static_cast<int>(orbitfall::EventType::Count), "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::CommandRejected) == 12, "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::BuildingUpgraded) == 13, "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::ShieldOnline) == 18, "event name table out of date");
+static_assert(static_cast<int>(orbitfall::EventType::DrillRestarted) == 20, "event name table out of date");
 
 String to_gd(const std::string& s) { return String::utf8(s.c_str(), static_cast<int64_t>(s.size())); }
 
@@ -196,6 +198,11 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("drain_events"), &SimServer::drain_events);
   ClassDB::bind_method(D_METHOD("get_surface_time_scale"), &SimServer::get_surface_time_scale);
   ClassDB::bind_method(D_METHOD("get_surface_time_ease_seconds"), &SimServer::get_surface_time_ease_seconds);
+
+  // --- M2.7 drills, instability and coolers ---
+  ClassDB::bind_method(D_METHOD("get_instability"), &SimServer::get_instability);
+  ClassDB::bind_method(D_METHOD("get_drill_states"), &SimServer::get_drill_states);
+  ClassDB::bind_method(D_METHOD("get_drill_income_per_second"), &SimServer::get_drill_income_per_second);
 
   // --- M2.2 upgrade paths ---
   ClassDB::bind_method(D_METHOD("upgrade_building", "slot", "path"), &SimServer::upgrade_building);
@@ -730,11 +737,11 @@ TypedArray<Dictionary> SimServer::get_building_defs() const {
     d["cost"] = b.cost;
     d["arc"] = b.arc;  // rad, half-angle
     d["range"] = b.range;
-    d["kind"] = b.kind == orbitfall::BuildingKind::Panel
-                    ? String("panel")
-                    : (b.kind == orbitfall::BuildingKind::Support  ? String("support")
-                       : b.kind == orbitfall::BuildingKind::Shield ? String("shield")  // M2.10
-                                                                   : String("tower"));
+    static const char* const kKindNames[] = {"tower", "panel", "support", "shield", "drill", "cooler"};  // M2.10, M2.7
+    static_assert(sizeof(kKindNames) / sizeof(kKindNames[0]) ==
+                      static_cast<size_t>(orbitfall::BuildingKind::Count),
+                  "building kind names out of date");
+    d["kind"] = String(kKindNames[static_cast<size_t>(b.kind)]);
     // M2.1: where it may stand (0 ground, 1 elevated, 2 any) and its auras.
     d["layer"] = static_cast<int64_t>(b.layer);
     TypedArray<Dictionary> auras;
@@ -754,6 +761,11 @@ TypedArray<Dictionary> SimServer::get_building_defs() const {
     d["aim_offset"] = b.aimOffset;
     d["fire_rate"] = b.fireRate;
     d["panel_rate"] = b.panelRate;
+    // M2.7: drills and coolers (0 for other kinds).
+    d["drill_rate"] = b.drillRate;
+    d["instability"] = b.kind == orbitfall::BuildingKind::Drill ? b.instability : 0.0f;
+    d["cooling"] = b.cooling;
+    d["lit_cooling_mult"] = b.litCoolingMult;
     // M2.3: towers declare a damage type (-1 for buildings that do not shoot).
     d["damage_type"] = b.hasProjectile ? static_cast<int64_t>(b.projectile.type) : int64_t(-1);
     d["damage_type_name"] =
@@ -778,8 +790,9 @@ TypedArray<Dictionary> SimServer::get_building_defs() const {
 
 namespace {
 
-const char* const kStatKeys[orbitfall::kUpgradeStatCount] = {"damage", "fire_rate", "range",
-                                                             "arc",    "splash",    "income"};
+const char* const kStatKeys[orbitfall::kUpgradeStatCount] = {
+    "damage", "fire_rate", "range", "arc", "splash", "income",
+    "instability", "cooling"};  // M2.7
 
 Dictionary stats_dict(const orbitfall::BuildingStats& s) {
   Dictionary d;
@@ -992,6 +1005,45 @@ PackedFloat32Array SimServer::get_shield_mults() const {
   return out;
 }
 // --- end M2.3 ---
+
+// --- M2.7 drills, instability and coolers (begin) ---
+Dictionary SimServer::get_instability() const {
+  const Snapshot& s = *curr_;
+  const orbitfall::InstabilityDef& rules = content_.rules.instability;
+  int64_t overheated = 0;
+  for (const float t : s.drillOverheat) overheated += t > 0.0f ? 1 : 0;
+  Dictionary d;
+  d["level"] = s.instability;
+  d["threshold"] = rules.threshold;
+  d["load"] = s.instabilityLoad;
+  d["cooling"] = s.cooling;
+  d["drills"] = static_cast<int64_t>(s.drillSites.size());
+  d["running"] = static_cast<int64_t>(s.drillSites.size()) - overheated;
+  d["overheated"] = overheated;
+  d["coolers"] = static_cast<int64_t>(s.coolers);
+  d["drill_income"] = s.drillIncomePerSecond;
+  d["overheat_seconds"] = rules.overheatSeconds;
+  return d;
+}
+
+TypedArray<Dictionary> SimServer::get_drill_states() const {
+  const Snapshot& s = *curr_;
+  TypedArray<Dictionary> out;
+  for (size_t i = 0; i < s.drillSites.size(); ++i) {
+    const int32_t site = s.drillSites[i];
+    Dictionary d;
+    d["site"] = static_cast<int64_t>(site);
+    d["building"] = static_cast<int64_t>(
+        site >= 0 && static_cast<size_t>(site) < s.siteBuildings.size() ? s.siteBuildings[static_cast<size_t>(site)] : -1);
+    d["heat"] = s.drillHeat[i];
+    d["overheated"] = s.drillOverheat[i] > 0.0f;
+    d["cooldown"] = s.drillOverheat[i];
+    d["cooldown_max"] = content_.rules.instability.overheatSeconds;
+    out.push_back(d);
+  }
+  return out;
+}
+// --- M2.7 drills, instability and coolers (end) ---
 
 // --- M2.8 home planets ---
 TypedArray<Dictionary> SimServer::get_planet_defs() const {

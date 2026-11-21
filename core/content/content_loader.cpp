@@ -56,7 +56,9 @@ constexpr Named<Shape> kShapes[] = {
 constexpr Named<BuildingKind> kBuildingKinds[] = {{"tower", BuildingKind::Tower},
                                                   {"panel", BuildingKind::Panel},
                                                   {"support", BuildingKind::Support},
-                                                  {"shield", BuildingKind::Shield}};  // M2.10
+                                                  {"shield", BuildingKind::Shield},  // M2.10
+                                                  {"drill", BuildingKind::Drill},    // M2.7
+                                                  {"cooler", BuildingKind::Cooler}};  // M2.7
 constexpr Named<BuildingLayer> kBuildingLayers[] = {{"ground", BuildingLayer::Ground},
                                                     {"elevated", BuildingLayer::Elevated},
                                                     {"any", BuildingLayer::Any}};
@@ -82,7 +84,8 @@ constexpr Named<EnemyBehavior> kEnemyBehaviors[] = {{"lane", EnemyBehavior::Lane
 constexpr Named<UpgradeStat> kUpgradeStats[] = {
     {"damage", UpgradeStat::Damage}, {"fireRate", UpgradeStat::FireRate},
     {"range", UpgradeStat::Range},   {"arc", UpgradeStat::Arc},
-    {"splash", UpgradeStat::Splash}, {"income", UpgradeStat::Income}};
+    {"splash", UpgradeStat::Splash}, {"income", UpgradeStat::Income},
+    {"instability", UpgradeStat::Instability}, {"cooling", UpgradeStat::Cooling}};  // M2.7
 constexpr Named<ModOp> kModOps[] = {{"add", ModOp::Add}, {"mul", ModOp::Mul}};
 constexpr Named<uint32_t> kTraits[] = {
     {"camo", kTraitCamo},         {"armored", kTraitArmored},
@@ -92,6 +95,20 @@ constexpr Named<uint32_t> kTraits[] = {
     {"orbiter", kTraitOrbiter},   {"healer", kTraitHealer},
     {"bulwark", kTraitBulwark},   {"carrier", kTraitCarrier},
     {"layered", kTraitLayered}};
+
+// M2.2/M2.7: which upgrade stats each kind of building has.
+bool statFitsKind(UpgradeStat stat, BuildingKind kind) {
+  switch (kind) {
+    case BuildingKind::Panel: return stat == UpgradeStat::Income;
+    case BuildingKind::Drill: return stat == UpgradeStat::Income || stat == UpgradeStat::Instability;
+    case BuildingKind::Cooler: return stat == UpgradeStat::Cooling;
+    case BuildingKind::Tower:
+    case BuildingKind::Support:
+    case BuildingKind::Shield:
+    case BuildingKind::Count: break;
+  }
+  return stat != UpgradeStat::Income && stat != UpgradeStat::Instability && stat != UpgradeStat::Cooling;
+}
 
 int trait_bit_index(uint32_t bit) {
   int i = 0;
@@ -337,6 +354,36 @@ struct Loader {
       o.integer("upgradeExclusiveTier", r.upgradeExclusiveTier,
                 Range{0.0, false, static_cast<double>(kMaxUpgradeTiers)});
     if (o.has("fallingWarnSeconds")) o.num("fallingWarnSeconds", r.fallingWarnSeconds, kNonNeg);  // M2.10
+    if (o.has("instability")) read_instability(o.object("instability"), r.instability);  // M2.7
+  }
+
+  // M2.7 "instability": { "curve": [[drills, level], ...], "threshold",
+  // "riseBase", "risePerExcess", "decayPerSec", "overheatSeconds" }.
+  void read_instability(const Obj& o, InstabilityDef& d) {
+    if (!o.valid()) return;
+    o.num("threshold", d.threshold, kPositive);
+    o.num("riseBase", d.riseBase, kPositive);
+    o.num("risePerExcess", d.risePerExcess, kNonNeg);
+    o.num("decayPerSec", d.decayPerSec, kNonNeg);
+    o.num("overheatSeconds", d.overheatSeconds, kPositive);
+    const Value* c = o.array("curve");
+    if (c == nullptr) return;
+    if (c->array.empty()) o.field_error("curve", "must not be empty");
+    double prevX = -1.0, prevY = 0.0;
+    for (const Value& pt : c->array) {
+      if (!pt.is_array() || pt.array.size() != 2 || !pt.array[0].is_number() ||
+          !pt.array[1].is_number()) {
+        o.field_error("curve", "each point must be [drills, level]");
+        continue;
+      }
+      const double x = pt.array[0].number, y = pt.array[1].number;
+      if (!o.check_range("curve", x, kNonNeg) || !o.check_range("curve", y, kNonNeg)) continue;
+      if (x <= prevX) o.field_error("curve", "points must be in strictly ascending drill order");
+      if (y < prevY) o.field_error("curve", "instability must not fall as drills are added");
+      prevX = x;
+      prevY = y;
+      d.curve.push_back({static_cast<float>(x), static_cast<float>(y)});
+    }
   }
 
   // {"kinetic": 0.5, ...} -> out[type]. The floor is checked in resolve().
@@ -479,6 +526,12 @@ struct Loader {
         if (sh.has("regenPerSec")) sh.num("regenPerSec", b.shield.regenPerSec, kNonNeg);
         if (sh.has("upkeepPerSec")) sh.num("upkeepPerSec", b.shield.upkeepPerSec, kNonNeg);
       }
+    } else if (kindOk && b.kind == BuildingKind::Drill) {  // M2.7
+      o.num("drillRate", b.drillRate, kNonNeg);
+      if (o.has("instability")) o.num("instability", b.instability, kNonNeg);
+    } else if (kindOk && b.kind == BuildingKind::Cooler) {  // M2.7
+      o.num("cooling", b.cooling, kNonNeg);
+      if (o.has("litCoolingMult")) o.num("litCoolingMult", b.litCoolingMult, kNonNeg);
     }
     if (kindOk && o.has("paths")) read_paths(o, b);  // M2.2
     buildingWhere.push_back(o.where());
@@ -570,10 +623,23 @@ struct Loader {
     const bool opOk = mo.named("op", kModOps, mod.op);
     double value = 0.0;
     if (!statOk || !opOk) return;
-    const bool forPanel = mod.stat == UpgradeStat::Income;
-    if (forPanel != (b.kind == BuildingKind::Panel)) {
-      mo.field_error("stat", forPanel ? "'income' only applies to panels"
-                                      : "only 'income' applies to panels");
+    if (!statFitsKind(mod.stat, b.kind)) {
+      // M2.2 wording kept for towers and panels; M2.7 adds drills and coolers.
+      std::string msg;
+      if (b.kind == BuildingKind::Panel) {
+        msg = "only 'income' applies to panels";
+      } else if (b.kind == BuildingKind::Drill) {
+        msg = "only 'income' and 'instability' apply to drills";
+      } else if (b.kind == BuildingKind::Cooler) {
+        msg = "only 'cooling' applies to coolers";
+      } else if (mod.stat == UpgradeStat::Income) {
+        msg = "'income' only applies to panels and drills";
+      } else if (mod.stat == UpgradeStat::Cooling) {
+        msg = "'cooling' only applies to coolers";
+      } else {
+        msg = "'instability' only applies to drills";
+      }
+      mo.field_error("stat", msg);
       return;
     }
     // A multiplier of 0 or less would switch the stat off: not an upgrade.

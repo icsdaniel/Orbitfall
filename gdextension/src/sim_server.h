@@ -170,6 +170,19 @@ class SimServer : public Node {
   float get_surface_time_scale() const;
   float get_surface_time_ease_seconds() const;
 
+  // --- M2.7 drills, instability and coolers (begin) ---
+  // Global instability: {level, threshold, load (summed weight of the running
+  // drills), cooling (coolers right now, light-aware), drills, running,
+  // overheated, coolers, drill_income (stardust/s), overheat_seconds}.
+  // level > threshold means running drills heat up and, at heat 1, overheat.
+  Dictionary get_instability() const;
+  // One entry per drill, site order: {site, building, heat (0..1),
+  // overheated (bool), cooldown (seconds left), cooldown_max}.
+  TypedArray<Dictionary> get_drill_states() const;
+  // Stardust per second from running drills (panels: get_income_per_second).
+  float get_drill_income_per_second() const { return curr_->drillIncomePerSecond; }
+  // --- M2.7 drills, instability and coolers (end) ---
+
   // --- M2.2 upgrade paths (begin) ---
   // Command: buys the next tier of `path` (0 or 1) for the building on `slot`.
   // Emits BuildingUpgraded {a: slot, b: path, x: new tier, value: cost} or

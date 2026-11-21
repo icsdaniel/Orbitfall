@@ -231,14 +231,14 @@ func test_load_content_shipped_content_has_no_errors() -> void:
 	assert_float(server.get_surface_time_ease_seconds()).is_between(0.0, 5.0)
 
 	var buildings: Array[Dictionary] = server.get_building_defs()
-	assert_int(buildings.size()).is_equal(4)  # M2.10: + shield
+	assert_int(buildings.size()).is_equal(6)  # M2.10: + shield; M2.7: + drill, cooler
 	var ids: Array[String] = []
 	for def: Dictionary in buildings:
 		assert_bool(def.has_all(
 			["index", "id", "name", "cost", "arc", "range", "kind", "shape", "color"])).is_true()
 		assert_int(def["index"]).is_equal(ids.size())
 		ids.append(def["id"])
-	assert_array(ids).contains(["cannon", "gatling", "shield", "solar_panel"])
+	assert_array(ids).contains(["cannon", "gatling", "shield", "solar_panel", "drill", "cooler"])
 	assert_str(buildings[ids.find("shield")]["kind"]).is_equal("shield")  # M2.10
 	var cannon: Dictionary = buildings[ids.find("cannon")]
 	assert_float(cannon["cost"]).is_greater(0.0)

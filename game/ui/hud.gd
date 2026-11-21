@@ -33,6 +33,8 @@ var debug_button: Button
 ## M2.3: enemy codex and trait legend, one tap away.
 var codex_button: Button
 var codex: CodexPanel
+## M2.7: instability meter under the HP bar (shown once a drill or cooler stands).
+var instability: InstabilityMeter
 
 var _stardust: Label
 var _income: Label
@@ -149,6 +151,10 @@ func refresh() -> void:
 	var phase: int = sim.get_phase()
 	var stardust: float = sim.get_stardust()
 	var income: float = sim.get_income_per_second()
+	if sim.has_method(&"get_instability"):  # M2.7: drills earn too
+		var info: Dictionary = sim.get_instability()
+		income += float(info.get("drill_income", 0.0))
+		instability.show_info(info)
 	_set_text(_stardust, "%d" % floori(stardust))
 	_set_text(_income, "+%.1f/s" % income)
 	_income.add_theme_color_override(
@@ -258,6 +264,9 @@ func _build_top_bar() -> void:
 	_hp_bar.add_theme_stylebox_override(&"fill", fill)
 	_hp_bar.add_theme_stylebox_override(&"background", back)
 	box.add_child(_hp_bar)
+	instability = InstabilityMeter.new()
+	instability.name = "Instability"
+	box.add_child(instability)
 	_hp_text = UiKit.label("HP", 20)
 	_hp_text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_hp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

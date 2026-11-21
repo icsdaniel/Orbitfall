@@ -11,8 +11,10 @@ signal upgrade_requested(path: int)
 const STAT_NAMES: Dictionary[String, String] = {
 	"damage": "Damage", "fire_rate": "Fire rate", "range": "Range", "arc": "Arc",
 	"splash": "Blast", "income": "Income",
+	"instability": "Instability", "cooling": "Cooling",  # M2.7
 }
-const STAT_ORDER: Array[String] = ["damage", "fire_rate", "range", "arc", "splash", "income"]
+const STAT_ORDER: Array[String] = [
+	"damage", "fire_rate", "range", "arc", "splash", "income", "instability", "cooling"]
 const PATH_KEYS: Array[Key] = [KEY_1, KEY_2]
 
 var _stats: Label

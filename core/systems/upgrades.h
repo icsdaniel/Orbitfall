@@ -23,7 +23,9 @@ struct BuildingStats {
   float range = 0.0f;
   float arc = 0.0f;  // rad, half-angle
   float splash = 0.0f;
-  float income = 0.0f;  // panelRate
+  float income = 0.0f;  // panelRate (panels) or drillRate (drills, M2.7)
+  float instability = 0.0f;  // M2.7: a drill's weight in the instability curve
+  float cooling = 0.0f;      // M2.7: a cooler's cooling (before litCoolingMult)
 
   float get(UpgradeStat s) const;
 };

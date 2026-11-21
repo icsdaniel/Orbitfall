@@ -59,6 +59,8 @@ var site_flags: PackedInt32Array = PackedInt32Array()
 var site_owners: PackedInt32Array = PackedInt32Array()
 var site_modifiers: PackedFloat32Array = PackedFloat32Array()
 var adjacency_links: PackedInt32Array = PackedInt32Array()
+## M2.7: drill state by anchor site: {heat, overheated, cooldown, cooldown_max}.
+var drill_states: Dictionary[int, Dictionary] = {}
 
 var _beam: Node2D
 var _font: Font
@@ -116,6 +118,10 @@ func sync() -> void:
 			site_owners[i] = i if slot_buildings[i] >= 0 else -1
 		site_modifiers = PackedFloat32Array()
 		adjacency_links = PackedInt32Array()
+	drill_states.clear()
+	if sim.has_method(&"get_drill_states"):  # M2.7
+		for state: Dictionary in sim.get_drill_states():
+			drill_states[int(state.get("site", -1))] = state
 	queue_redraw()
 	if _beam != null:
 		_beam.queue_redraw()
@@ -458,6 +464,20 @@ func _draw_building(site: int, br: float) -> void:
 			color = color.darkened(0.55)
 	elif shaded:
 		color = color.darkened(0.35)
+	# M2.7: a drill reddens as it heats; an overheated one is dimmed and wears a
+	# cooldown ring. A cooler shows a cool halo, fainter in the beam (it radiates
+	# best in the dark).
+	var kind: String = str(def.get("kind", ""))
+	var drill: Dictionary = drill_states.get(site, {}) if kind == "drill" else {}
+	var overheated: bool = bool(drill.get("overheated", false))
+	if kind == "drill":
+		var heat: float = clampf(float(drill.get("heat", 0.0)), 0.0, 1.0)
+		color = color.lerp(Palette.DRILL_HOT, heat)
+		if overheated:
+			color = Color(color.darkened(0.55), 0.55)
+	elif kind == "cooler":
+		var in_light: bool = lit and not shaded
+		draw_circle(centre, br * 1.6, Color(Palette.COOL, 0.12 if in_light else 0.28))
 	var layer: int = site_layer(site)
 	_draw_footprint(site_slot(site), layer, site_width(site), br, color, 1.0)
 	if layer > 0:
@@ -466,12 +486,32 @@ func _draw_building(site: int, br: float) -> void:
 			1.4, true)
 	ShapeDraw.draw(self, Palette.shape_of(def.get("shape", 0)), centre, br,
 		angle + PI * 0.5, color, 0.8)
+	if kind == "drill":
+		_draw_drill_badge(centre, br, drill)
 	if float(def.get("arc", 0.0)) > 0.0 and str(def.get("kind", "")) == "tower":
 		var has_target: bool = (flags & FLAG_TARGET) != 0
 		var axis_alpha: float = 0.9 if has_target else 0.45 * surface_weight
 		if axis_alpha > 0.02:
 			draw_line(centre + dir * br, centre + dir * (br + 9.0),
 				Color(Palette.THREAT if has_target else Palette.TEXT, axis_alpha), 1.0, true)
+
+
+## M2.7: heat ring around a drill (fills as it heats, red past half) and, while
+## overheated, a dim ring that empties as the cooldown runs out plus a "!" mark.
+func _draw_drill_badge(centre: Vector2, br: float, state: Dictionary) -> void:
+	var r: float = br * 1.45
+	if bool(state.get("overheated", false)):
+		var left: float = clampf(float(state.get("cooldown", 0.0))
+			/ maxf(float(state.get("cooldown_max", 1.0)), 0.001), 0.0, 1.0)
+		draw_arc(centre, r, -PI * 0.5, -PI * 0.5 + TAU * left, 24, Color(Palette.DRILL_HOT, 0.8), 1.6, true)
+		if _font != null:
+			draw_string(_font, centre + Vector2(-br * 0.35, br * 0.45), "!",
+				HORIZONTAL_ALIGNMENT_LEFT, -1.0, int(maxf(br * 1.4, 8.0)), Palette.TEXT)
+		return
+	var heat: float = clampf(float(state.get("heat", 0.0)), 0.0, 1.0)
+	if heat > 0.01:
+		draw_arc(centre, r, -PI * 0.5, -PI * 0.5 + TAU * heat, 24,
+			Color(Palette.DRILL_HOT if heat > 0.5 else Palette.SUN_WARM, 0.9), 1.3, true)
 
 
 ## Band over the slots a building of `width` covers from `slot` on (nothing for

@@ -39,6 +39,7 @@ Pipeline defaultPipeline() {
   p.add("shields", shields);
   p.add("fallingImpact", fallingImpact);
   p.add("landing", landing);
+  p.add("drills", drills);  // M2.7: before income, so overheated drills do not earn
   p.add("income", income);
   p.add("cleanup", cleanup);
   p.add("waveFlow", waveFlow);

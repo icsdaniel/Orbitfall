@@ -1,0 +1,19 @@
+{
+  "id": "drill", "kind": "drill", "footprint": 1, "layer": "ground", "cost": 70,
+  "drillRate": 2, "instability": 1, "aimMount": false, "aimOffsetDeg": 0,
+  "paths": [
+    { "id": "bore", "name": "Deep Bore", "tiers": [
+      { "name": "Hard Bit", "cost": 42, "mods": [{ "stat": "income", "op": "add", "value": 0.3 }] },
+      { "name": "Twin Auger", "cost": 63, "mods": [{ "stat": "income", "op": "mul", "value": 1.2 }] },
+      { "name": "Core Tap", "cost": 98, "mods": [{ "stat": "income", "op": "add", "value": 0.5 }, { "stat": "instability", "op": "mul", "value": 1.1 }] },
+      { "name": "Mantle Siphon", "cost": 154, "mods": [{ "stat": "income", "op": "mul", "value": 1.3 }, { "stat": "instability", "op": "mul", "value": 1.1 }] }
+    ] },
+    { "id": "stable", "name": "Stable Core", "tiers": [
+      { "name": "Damped Mount", "cost": 42, "mods": [{ "stat": "instability", "op": "mul", "value": 0.85 }] },
+      { "name": "Slow Spin", "cost": 63, "mods": [{ "stat": "instability", "op": "mul", "value": 0.85 }] },
+      { "name": "Heat Pipes", "cost": 98, "mods": [{ "stat": "instability", "op": "mul", "value": 0.8 }, { "stat": "income", "op": "mul", "value": 1.1 }] },
+      { "name": "Quiet Core", "cost": 154, "mods": [{ "stat": "instability", "op": "mul", "value": 0.7 }] }
+    ] }
+  ], "active": null,
+  "visual": { "shape": "hexagon", "color": "building.drill" }
+}

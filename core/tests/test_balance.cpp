@@ -261,3 +261,18 @@ TEST_CASE("balance: no home planet is strictly best") {
     CHECK(s.wins[static_cast<int>(Strategy::Never)] == 0);
   }
 }
+
+// M2.7: the bank-and-drill bot really builds drills and a Cooler, keeps them
+// below the overheat threshold, and still wins the M1 waves; with its drills
+// it does at least as well as banking alone did before M2.7 (HP 96 on seeds 1-3).
+TEST_CASE("M2.7: bank-and-drill builds drills and a cooler and wins") {
+  const ContentDB& db = shippedContent();
+  for (uint32_t seed = 1; seed <= 3; ++seed) {
+    const RunResult r = play(db, Strategy::BankAndDrill, seed);
+    CHECK(r.phase == Phase::Won);
+    CHECK(r.drills >= 3);
+    CHECK(r.coolers >= 1);
+    CHECK(r.overheats == 0);
+    CHECK(r.hp >= 0.5f * r.hpMax);
+  }
+}
