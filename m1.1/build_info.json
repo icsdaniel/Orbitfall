@@ -1,0 +1,11 @@
+{
+  "version": "m1.1",
+  "kind": "milestone",
+  "commit": "d303d35886940308ae2583b50ae32a1821adf40f",
+  "commit_short": "d303d35",
+  "ref": "m1.1",
+  "pr": 0,
+  "target": "template_release",
+  "date": "2026-11-21T10:05:53Z",
+  "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/44892598730"
+}

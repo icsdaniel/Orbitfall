@@ -1,0 +1,11 @@
+{
+  "version": "latest",
+  "kind": "latest",
+  "commit": "f82962c4076731083b650debe90d227ae6a2105c",
+  "commit_short": "f82962c",
+  "ref": "main",
+  "pr": 0,
+  "target": "template_release",
+  "date": "2026-11-21T10:43:26Z",
+  "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/44895614159"
+}

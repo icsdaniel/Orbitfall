@@ -1,0 +1,11 @@
+{
+  "version": "pr-21",
+  "kind": "pr",
+  "commit": "8d95ac2804b08758f35d0f99b671110beddce6aa",
+  "commit_short": "8d95ac2",
+  "ref": "m2.4-weak-points",
+  "pr": 21,
+  "target": "template_release",
+  "date": "2026-11-18T16:27:27Z",
+  "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/44347329602"
+}
