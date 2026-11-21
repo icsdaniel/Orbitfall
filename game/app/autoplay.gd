@@ -1,7 +1,8 @@
 class_name Autoplay
 extends RefCounted
-## Playtest bot for screenshots and smoke tests (`--play=sensible|towers|lens|none`;
-## M2.6 `lens` = sensible with the Sun Lens as its second tower).
+## Playtest bot for screenshots and smoke tests (`--play=sensible|towers|lens|focus|none`;
+## M2.6 `lens` = sensible with the Sun Lens as its second tower; M2.11 `focus` =
+## towers on bent mounts that cross over each lane, Sun Lenses on the second lane).
 ## It plays through the SimServer contract only, like a player: builds in the
 ## intermissions, then starts the wave. A GDScript cousin of the "sensible" bot in
 ## core/tests/balance_bots.h (without its small turns for light); the balance
@@ -12,6 +13,10 @@ const LANE_SPREAD: Array[int] = [0, 1, -1, 2, -2, 3]
 const WANT_A: Array[int] = [1, 1, 1, 1, 2, 2, 3, 3]
 const WANT_B: Array[int] = [0, 1, 1, 1, 1, 2, 2, 3]
 const WANT_PANELS: Array[int] = [1, 2, 4, 5, 5, 6, 6, 4]
+## M2.11 focus formation per lane: slot offset from the lane's slot and mount
+## (deg) toward the lane; crossings at about 250-290 from the centre merge.
+const FOCUS_SLOTS: Array[int] = [0, 2, -2, 4, -4]
+const FOCUS_AIMS: Array[float] = [0.0, -30.0, 30.0, -60.0, 60.0]
 
 var sim: Node
 var mode: String = "sensible"
@@ -89,6 +94,8 @@ func act() -> void:
 		_plan_sensible(wave, buildings)
 	elif mode == "towers":
 		_plan_towers()
+	elif mode == "focus":
+		_plan_focus()
 	sim.start_wave()
 
 
@@ -150,6 +157,23 @@ func _plan_sensible(wave: int, buildings: PackedInt32Array) -> void:
 		var a: bool = _towers_on(_lanes[0]) <= _towers_on(_lanes[1])
 		if not _buy_tower(_lanes[0] if a else _lanes[1]) and not _buy_tower(_lanes[1] if a else _lanes[0]):
 			break
+
+
+## M2.11: the focus formation on every lane, lane by lane; on the second lane
+## the two first leaning towers are Sun Lenses (their beams merge).
+func _plan_focus() -> void:
+	var n: int = sim.get_slot_count()
+	for k: int in FOCUS_SLOTS.size():
+		for lane: int in _lanes.size():
+			var centre: int = _lanes[lane][0]
+			var slot: int = posmod(centre + FOCUS_SLOTS[k], n)
+			var lens: bool = lane == 1 and (k == 1 or k == 2) and not _lens.is_empty()
+			var def: Dictionary = _lens if lens else _gatling
+			if _taken.has(slot) or def.is_empty() or float(def.get("cost", 0.0)) > _budget:
+				continue
+			_budget -= float(def.get("cost", 0.0))
+			_taken[slot] = true
+			sim.place_building(slot, int(def["index"]), deg_to_rad(FOCUS_AIMS[k]))
 
 
 func _towers_on(slots: Array) -> int:
