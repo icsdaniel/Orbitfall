@@ -33,6 +33,9 @@ enum class EventType : uint8_t {
   // M2.7 drills (nothing is damaged; only the drill's uptime changes):
   DrillOverheated,  // a = site, b = building index, x = instability level, value = shutdown seconds
   DrillRestarted,   // a = site, b = building index, x = instability level after the restart
+  // M2.5 enemies batch 1:
+  LayerRegrown,  // a = enemy type before, b = enemy type after (one layer up), x/y = where
+  EnemySplit,    // a = enemy type that split, b = child type, x/y = where, value = children spawned
   Count
 };
 

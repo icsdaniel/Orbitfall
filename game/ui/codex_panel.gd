@@ -23,39 +23,45 @@ class CueIcon:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	func _draw() -> void:
-		var c: Vector2 = size * 0.5
-		var r: float = minf(size.x, size.y) * 0.27
-		var fill: Color = color
-		if traits & BatchRenderer.TRAIT_CAMO != 0:
-			fill.a = 0.4
-		if traits & BatchRenderer.TRAIT_FAST != 0:
-			for dx: float in [-0.5, 0.0, 0.5]:
-				var tail: float = 1.9 if dx == 0.0 else 1.6
-				draw_line(c + Vector2(dx * r, r * 0.8), c + Vector2(dx * r, r * tail),
-					Color(color.lightened(0.35), 0.8), 2.0, true)
-		ShapeDraw.draw(self, shape, c, r, 0.0, fill,
-			0.0 if traits & BatchRenderer.TRAIT_CAMO != 0 else 1.5)
-		var outline: PackedVector2Array = Transform2D(0.0, c) * ShapeDraw.points(shape, r)
-		outline.append(outline[0])
-		if traits & BatchRenderer.TRAIT_CAMO != 0:
-			for i: int in 10:
-				var a0: float = TAU * float(i) / 10.0
-				draw_arc(c, r * 1.02, a0, a0 + TAU / 20.0, 4, color.lightened(0.3), 2.0, true)
-		if traits & BatchRenderer.TRAIT_ARMORED != 0:
-			draw_polyline(outline, Palette.ARMOR, 4.0, true)
-		if traits & BatchRenderer.TRAIT_SPLITTER != 0:
-			draw_colored_polygon(PackedVector2Array([
-				c + Vector2(0.0, r * 0.05), c + Vector2(r * 0.6, r * 1.15),
-				c + Vector2(-r * 0.6, r * 1.15)]), Color(Palette.PANEL_BG, 1.0))
-		if traits & BatchRenderer.TRAIT_HEAT_RESISTANT != 0:
-			draw_arc(c, r * 1.22, 0.0, TAU, 28, Palette.HEAT, 2.0, true)
-		if traits & BatchRenderer.TRAIT_SHIELDED != 0:
-			draw_arc(c, r * 1.48, 0.0, TAU, 28, Color(Palette.SHIELD, 0.9), 3.0, true)
-		if traits & BatchRenderer.TRAIT_REGROW != 0:
-			var b: Vector2 = c + Vector2(r * 1.15, -r * 1.15)
-			draw_circle(b, r * 0.5, Color(0.03, 0.10, 0.05))
-			draw_line(b - Vector2(r * 0.32, 0.0), b + Vector2(r * 0.32, 0.0), Palette.REGROW, 2.5)
-			draw_line(b - Vector2(0.0, r * 0.32), b + Vector2(0.0, r * 0.32), Palette.REGROW, 2.5)
+		CodexPanel.draw_cued_shape(self, shape, size * 0.5, minf(size.x, size.y) * 0.27, color, traits)
+
+
+## Draws `shape` at `c` (radius `r`) with the trait cues of `traits` as the SDF
+## shader shows them (BatchRenderer.TRAIT_* bits). Shared by the codex and,
+## from M2.5, the forecast strip icons.
+static func draw_cued_shape(ci: CanvasItem, shape: int, c: Vector2, r: float, color: Color,
+		traits: int) -> void:
+	var fill: Color = color
+	if traits & BatchRenderer.TRAIT_CAMO != 0:
+		fill.a = 0.4
+	if traits & BatchRenderer.TRAIT_FAST != 0:
+		for dx: float in [-0.5, 0.0, 0.5]:
+			var tail: float = 1.9 if dx == 0.0 else 1.6
+			ci.draw_line(c + Vector2(dx * r, r * 0.8), c + Vector2(dx * r, r * tail),
+				Color(color.lightened(0.35), 0.8), 2.0, true)
+	ShapeDraw.draw(ci, shape, c, r, 0.0, fill,
+		0.0 if traits & BatchRenderer.TRAIT_CAMO != 0 else 1.5)
+	var outline: PackedVector2Array = Transform2D(0.0, c) * ShapeDraw.points(shape, r)
+	outline.append(outline[0])
+	if traits & BatchRenderer.TRAIT_CAMO != 0:
+		for i: int in 10:
+			var a0: float = TAU * float(i) / 10.0
+			ci.draw_arc(c, r * 1.02, a0, a0 + TAU / 20.0, 4, color.lightened(0.3), 2.0, true)
+	if traits & BatchRenderer.TRAIT_ARMORED != 0:
+		ci.draw_polyline(outline, Palette.ARMOR, 4.0, true)
+	if traits & BatchRenderer.TRAIT_SPLITTER != 0:
+		ci.draw_colored_polygon(PackedVector2Array([
+			c + Vector2(0.0, r * 0.05), c + Vector2(r * 0.6, r * 1.15),
+			c + Vector2(-r * 0.6, r * 1.15)]), Color(Palette.PANEL_BG, 1.0))
+	if traits & BatchRenderer.TRAIT_HEAT_RESISTANT != 0:
+		ci.draw_arc(c, r * 1.22, 0.0, TAU, 28, Palette.HEAT, 2.0, true)
+	if traits & BatchRenderer.TRAIT_SHIELDED != 0:
+		ci.draw_arc(c, r * 1.48, 0.0, TAU, 28, Color(Palette.SHIELD, 0.9), 3.0, true)
+	if traits & BatchRenderer.TRAIT_REGROW != 0:
+		var b: Vector2 = c + Vector2(r * 1.15, -r * 1.15)
+		ci.draw_circle(b, r * 0.5, Color(0.03, 0.10, 0.05))
+		ci.draw_line(b - Vector2(r * 0.32, 0.0), b + Vector2(r * 0.32, 0.0), Palette.REGROW, 2.5)
+		ci.draw_line(b - Vector2(0.0, r * 0.32), b + Vector2(0.0, r * 0.32), Palette.REGROW, 2.5)
 
 
 signal closed
@@ -224,6 +230,14 @@ static func enemy_summary(def: Dictionary, enemy_defs: Array[Dictionary],
 	var pops: int = int(def.get("pops_into", -1))
 	if pops >= 0 and pops < enemy_defs.size():
 		stats.append("pops into %s" % str(enemy_defs[pops].get("name", "?")))
+	# M2.5: Regrow and Splitter say what they do in numbers.
+	var regrow: float = float(def.get("regrow_seconds", 0.0))
+	if regrow > 0.0:
+		stats.append("regrows a layer after %s s unhit" % _number(regrow))
+	var splits: int = int(def.get("splits_into", -1))
+	if splits >= 0 and splits < enemy_defs.size() and int(def.get("split_count", 0)) > 0:
+		stats.append("splits into %d %s" % [int(def.get("split_count", 0)),
+				str(enemy_defs[splits].get("name", "?"))])
 	if bool(def.get("shadow_caster", false)):
 		stats.append("casts a shadow")
 	var names: PackedStringArray = trait_names(int(def.get("traits", 0)), trait_defs)

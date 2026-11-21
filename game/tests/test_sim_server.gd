@@ -246,7 +246,7 @@ func test_load_content_shipped_content_has_no_errors() -> void:
 	assert_str(cannon["kind"]).is_equal("tower")
 	assert_str(buildings[ids.find("solar_panel")]["kind"]).is_equal("panel")
 	assert_str(buildings[ids.find("solar_panel")]["name"]).is_equal("Solar Panel")
-	assert_int(server.get_enemy_defs().size()).is_equal(6)  # M2.10: + bomber
+	assert_int(server.get_enemy_defs().size()).is_equal(14)  # M2.10: + bomber; M2.5: + 8 (batch 1, spore is 3 layers)
 
 
 func test_load_content_reports_errors() -> void:

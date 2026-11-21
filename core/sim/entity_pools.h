@@ -18,10 +18,12 @@ namespace orbitfall {
   F(float, shield)    /* M2.3: shield points left */           \
   F(float, slow)      /* M2.6: speed fraction taken off */     \
   F(float, slowTime)  /* M2.6: seconds the slow still lasts */ \
+  F(float, calm)      /* M2.5: seconds since it last took damage */ \
   F(uint32_t, traits) /* trait bits */                         \
   F(uint16_t, type)   /* enemy definition index */             \
   F(uint16_t, flags)  /* EnemyFlag bits and behaviour state */ \
-  F(uint16_t, lane)   /* planet lane it spawned on */
+  F(uint16_t, lane)   /* planet lane it spawned on */       \
+  F(uint16_t, spawnType) /* M2.5: type it spawned as (regrow cap) */
 ORBITFALL_DECLARE_POOL(EnemyPool, ORBITFALL_ENEMY_FIELDS)
 
 // Projectiles, in world space.

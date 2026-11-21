@@ -49,6 +49,14 @@ void collisions(World& world, float dt);
 // PlanetHit (a = enemy type, b = lane, x/y, value = damage) and, at HP 0,
 // GameOver (a = wave index); the phase becomes Lost.
 void landing(World& world, float dt);
+// M2.5 Regrow: living enemies with the Regrow trait that took no damage for
+// their regrowSeconds regain one layer, capped at the type they spawned as.
+// Emits LayerRegrown (a = type before, b = type after, x/y).
+void regrow(World& world, float dt);
+// M2.5 Splitter: enemies killed by damage this tick with a split spawn their
+// children (splitCount of splitInto, spread sideways, same lane) before
+// cleanup. Emits EnemySplit (a = type, b = child type, x/y, value = spawned).
+void splits(World& world, float dt);
 // M2.7: instability, drill heat, overheat and restart (systems/drills.h).
 void drills(World& world, float dt);
 // Removes entities flagged dead during the tick (swap-remove).

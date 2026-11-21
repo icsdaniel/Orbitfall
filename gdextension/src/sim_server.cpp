@@ -41,13 +41,15 @@ const char* const kEventNames[] = {
     // M2.10
     "FallingWarning", "FallingImpact", "ShieldAbsorbed", "ShieldOffline", "ShieldOnline",
     "BuildingActivated",  // M2.6
-    "DrillOverheated", "DrillRestarted"};  // M2.7
+    "DrillOverheated", "DrillRestarted",  // M2.7
+    "LayerRegrown", "EnemySplit"};  // M2.5
 constexpr int kEventNameCount = static_cast<int>(sizeof(kEventNames) / sizeof(kEventNames[0]));
 static_assert(kEventNameCount == static_cast<int>(orbitfall::EventType::Count), "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::CommandRejected) == 12, "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::BuildingUpgraded) == 13, "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::ShieldOnline) == 18, "event name table out of date");
 static_assert(static_cast<int>(orbitfall::EventType::DrillRestarted) == 21, "event name table out of date");
+static_assert(static_cast<int>(orbitfall::EventType::EnemySplit) == 23, "event name table out of date");
 
 String to_gd(const std::string& s) { return String::utf8(s.c_str(), static_cast<int64_t>(s.size())); }
 
@@ -1018,6 +1020,10 @@ TypedArray<Dictionary> SimServer::get_enemy_defs() const {
     for (int t = 0; t < orbitfall::kDamageTypeCount; ++t)
       mults[t] = orbitfall::typeMultiplier(content_, e, static_cast<orbitfall::DamageType>(t));
     d["damage_mult"] = mults;
+    // M2.5 (codex): Regrow seconds (0 = none) and the Splitter's children.
+    d["regrow_seconds"] = e.regrowSeconds;
+    d["splits_into"] = e.splitInto;
+    d["split_count"] = e.splitCount;
     out.push_back(d);
   }
   return out;

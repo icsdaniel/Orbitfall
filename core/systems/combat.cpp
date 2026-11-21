@@ -153,6 +153,7 @@ bool damageEnemy(World& world, uint32_t i, float damage, DamageType type, float 
   const ContentDB& db = *world.content;
   EnemyPool& e = world.enemies;
   if (i >= e.count || (e.flags[i] & kEnemyDead) || !(damage > 0.0f)) return false;
+  e.calm[i] = 0.0f;  // M2.5 Regrow: any hit restarts the regrow timer
   if (e.shield[i] > 0.0f) {
     const float sm = shieldMultiplier(db, type) * (shieldBonus > 0.0f ? shieldBonus : 1.0f);
     const float onShield = damage * sm;
@@ -174,6 +175,7 @@ bool damageEnemy(World& world, uint32_t i, float damage, DamageType type, float 
     if (def.popsInto == kNoIndex) {
       e.hp[i] = 0.0f;
       e.flags[i] |= kEnemyDead;
+      if (def.splitCount > 0 && def.splitInto != kNoIndex) e.flags[i] |= kEnemySplit;  // M2.5
       const float bounty = def.bounty * db.rules.killBounty;
       world.emit(EventType::EnemyKilled, e.type[i], e.lane[i], e.posX[i], e.posY[i], bounty);
       if (bounty > 0.0f) addStardust(world, bounty);

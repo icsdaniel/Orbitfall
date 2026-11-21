@@ -1,0 +1,7 @@
+{
+  "id": "splitter", "behavior": "lane", "layers": 1, "hp": 3,
+  "speed": 34, "size": 10, "landDamage": 3, "bounty": 2,
+  "traits": ["splitter"], "split": { "into": "drifter_red", "count": 3, "spread": 14 },
+  "shadowCaster": false, "hpBar": false, "popsInto": null,
+  "shape": "circle", "visual": { "color": "tier.green" }
+}

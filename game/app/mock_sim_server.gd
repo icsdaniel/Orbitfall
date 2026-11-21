@@ -880,6 +880,9 @@ func get_enemy_defs() -> Array[Dictionary]:
 			"traits": e["traits"], "hp_bar": e["hp_bar"], "pops_into": e["pops_into"],
 			"shield": e["shield"], "hp_bar_segments": e["hp_bar_segments"],
 			"land_damage": float(e["land_damage"]) * float(e["layers"]), "damage_mult": _enemy_mults(e),
+			# M2.5
+			"regrow_seconds": e["regrow_seconds"], "splits_into": e["splits_into"],
+			"split_count": e["split_count"],
 		})
 	return out
 
@@ -1936,6 +1939,8 @@ func _enemy(
 		"traits": TRAIT_LAYERED if layers > 1 else 0, "shield": 0.0, "pops_into": -1,
 		"hp_bar_segments": 4 if shadow_caster else 1,
 		"damage_mult": PackedFloat32Array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+		# M2.5
+		"regrow_seconds": 0.0, "splits_into": -1, "split_count": 0,
 	}
 
 
@@ -2111,11 +2116,22 @@ func _load_json_content(errors: PackedStringArray) -> void:
 			e["hp_bar_segments"] = int(d.get("hpBarSegments", 1))
 			e["damage_mult"] = _type_mults(d.get("damageMult"))
 			e["_pops_into_id"] = str(d.get("popsInto", "")) if d.get("popsInto") != null else ""
+			# M2.5: Regrow and Splitter (the trait bit follows the block, as in core).
+			var regrow: Dictionary = d.get("regrow", {}) if d.get("regrow") is Dictionary else {}
+			e["regrow_seconds"] = float(regrow.get("seconds", 0.0))
+			if float(e["regrow_seconds"]) > 0.0:
+				e["traits"] = int(e["traits"]) | (1 << TRAIT_IDS.find("regrow"))
+			var split: Dictionary = d.get("split", {}) if d.get("split") is Dictionary else {}
+			e["split_count"] = int(split.get("count", 0))
+			e["_splits_into_id"] = str(split.get("into", ""))
+			if int(e["split_count"]) > 0:
+				e["traits"] = int(e["traits"]) | (1 << TRAIT_IDS.find("splitter"))
 			_enemies.append(e)
 	for e: Dictionary in _enemies:
 		enemy_ids[str(e["id"])] = int(e["index"])
 	for e: Dictionary in _enemies:
 		e["pops_into"] = int(enemy_ids.get(str(e.get("_pops_into_id", "")), -1))
+		e["splits_into"] = int(enemy_ids.get(str(e.get("_splits_into_id", "")), -1))  # M2.5
 	_parse_waves(wave_set, errors)
 
 
