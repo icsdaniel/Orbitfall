@@ -31,6 +31,7 @@ Pipeline defaultPipeline() {
   p.add("spatialRebuild", spatialRebuild);
   p.add("towerTargeting", towerTargeting);
   p.add("towerFire", towerFire);
+  p.add("beamFire", beamFire);  // M2.6: Sun Lens beams (continuous, no projectile)
   p.add("projectileMovement", projectileMovement);
   p.add("collisions", collisions);
   // M2.10: falling objects move and are telegraphed, shields recharge and
@@ -41,6 +42,7 @@ Pipeline defaultPipeline() {
   p.add("landing", landing);
   p.add("drills", drills);  // M2.7: before income, so overheated drills do not earn
   p.add("income", income);
+  p.add("abilities", abilities);  // M2.6: active ability timers (light-charged)
   p.add("cleanup", cleanup);
   p.add("waveFlow", waveFlow);
   p.add("advanceClock", advanceClock);

@@ -71,6 +71,16 @@ float segmentCircle(float ax, float ay, float bx, float by, float cx, float cy, 
   return t <= 1.0f ? t : -1.0f;
 }
 
+// M2.6: chance that a shot from site `b` at an enemy with `traits` misses
+// (camo, reduced by the site's Radar detection).
+float missChanceFor(const ContentDB& db, const BuildingSlot& b, uint32_t traits) {
+  float chance = 0.0f;
+  for (int bit = 0; bit < kTraitCount; ++bit)
+    if ((traits & (1u << bit)) && db.damage.traits[bit].missChance > chance)
+      chance = db.damage.traits[bit].missChance;
+  return chance * (1.0f - b.detect);
+}
+
 }  // namespace
 
 TowerAim towerAim(const World& world, uint32_t slot) {
@@ -139,12 +149,12 @@ float damageMultiplier(const ContentDB& db, const BuildingDef& source, const Ene
   return mult < floor ? floor : mult;
 }
 
-bool damageEnemy(World& world, uint32_t i, float damage, DamageType type) {
+bool damageEnemy(World& world, uint32_t i, float damage, DamageType type, float shieldBonus) {
   const ContentDB& db = *world.content;
   EnemyPool& e = world.enemies;
   if (i >= e.count || (e.flags[i] & kEnemyDead) || !(damage > 0.0f)) return false;
   if (e.shield[i] > 0.0f) {
-    const float sm = shieldMultiplier(db, type);
+    const float sm = shieldMultiplier(db, type) * (shieldBonus > 0.0f ? shieldBonus : 1.0f);
     const float onShield = damage * sm;
     if (onShield < e.shield[i]) {
       e.shield[i] -= onShield;
@@ -240,7 +250,7 @@ void towerFire(World& world, float dt) {
   for (uint32_t s = 0; s < n; ++s) {
     BuildingSlot& b = world.site(s);
     const BuildingDef* def = towerDef(world, b);
-    if (def == nullptr) continue;
+    if (def == nullptr || def->projectile.kind == ProjectileKind::Beam) continue;  // M2.6: beamFire
     b.cooldown -= dt;
     const uint32_t target = world.slotTargets[s];
     if (target == kInvalidIndex) {
@@ -255,8 +265,27 @@ void towerFire(World& world, float dt) {
 
     const TowerAim aim = towerAim(world, s);
     float dirX = aim.ax, dirY = aim.ay;
-    leadDirection(e.posX[target] - aim.x, e.posY[target] - aim.y, e.velX[target], e.velY[target],
-                  def->projectile.speed, dirX, dirY);
+    const float sf = speedFactor(e, target);  // M2.6: lead a slowed target by its real speed
+    leadDirection(e.posX[target] - aim.x, e.posY[target] - aim.y, e.velX[target] * sf,
+                  e.velY[target] * sf, def->projectile.speed, dirX, dirY);
+    // M2.6 camo: an undetected tower misses every 1/missChance-th shot
+    // (deterministic accumulator). The miss is a real shot turned just wide of
+    // the target, so it can still hit something behind it.
+    const float miss = missChanceFor(*world.content, b, e.traits[target]);
+    if (miss > 0.0f) {
+      b.missAcc += miss;
+      if (b.missAcc >= 1.0f) {
+        b.missAcc -= 1.0f;
+        const float ddx = e.posX[target] - aim.x, ddy = e.posY[target] - aim.y;
+        const float dist = std::sqrt(ddx * ddx + ddy * ddy);
+        const float size = world.content->enemies[e.type[target]].size;
+        const float wide = dist > 1e-3f ? std::atan2(2.5f * size + 4.0f, dist) : 0.3f;
+        const float c = std::cos(wide), sn = std::sin(wide);
+        const float rx = dirX * c - dirY * sn, ry = dirX * sn + dirY * c;
+        dirX = rx;
+        dirY = ry;
+      }
+    }
     const uint32_t k = p.add();
     if (k == kInvalidIndex) continue;  // pool full: the shot is lost
     p.posX[k] = aim.x;
@@ -268,6 +297,10 @@ void towerFire(World& world, float dt) {
     p.range[k] = stats.range;
     p.splash[k] = stats.splash;
     p.type[k] = static_cast<uint16_t>(b.type);
+    p.slow[k] = stats.slow;  // M2.6
+    p.shieldMult[k] = b.shieldDamageMult;
+    p.pierce[k] = static_cast<uint16_t>(stats.pierce > 0.0f ? stats.pierce + 0.5f : 0.0f);
+    p.lastHit[k] = kInvalidIndex;
   }
 }
 
@@ -291,54 +324,73 @@ void collisions(World& world, float dt) {
     // The path flown this tick: A -> B.
     const float bx = p.posX[i], by = p.posY[i];
     const float ax = bx - p.velX[i] * dt, ay = by - p.velY[i] * dt;
-    uint32_t hit = kInvalidIndex;
-    float hitT = 2.0f;
-    world.grid.query((ax < bx ? ax : bx) - pad, (ay < by ? ay : by) - pad,
-                     (ax > bx ? ax : bx) + pad, (ay > by ? ay : by) + pad, [&](uint32_t k) {
-      if (e.flags[k] & kEnemyDead) return;
-      const float t = segmentCircle(ax, ay, bx, by, e.posX[k], e.posY[k], db.enemies[e.type[k]].size);
-      if (t < 0.0f) return;
-      if (t < hitT || (t == hitT && k < hit)) {
-        hitT = t;
-        hit = k;
-      }
-    });
-
-    if (hit == kInvalidIndex) {
-      if (p.life[i] <= 0.0f) {
-        p.remove(i);  // flew its range
-      } else {
-        ++i;
-      }
-      continue;
-    }
-
-    const BuildingDef& source = db.buildings[p.type[i]];
-    const float hx = ax + (bx - ax) * hitT, hy = ay + (by - ay) * hitT;
-    // Distance flown at impact as a fraction of range, for the falloff curve.
-    const float speed = source.projectile.speed;
-    // M2.2: range and splash are the shot's own (the tower's upgrades when it fired).
-    const float range = p.range[i];
-    const float flown = range - (p.life[i] + (1.0f - hitT) * dt) * speed;
-    const float fraction = range > 0.0f ? flown / range : 0.0f;
-    const float damage = p.damage[i];
-    const float splash = p.splash[i];
-    if (splash > 0.0f) {
-      const float reach = splash + pad;
-      world.grid.query(hx - reach, hy - reach, hx + reach, hy + reach, [&](uint32_t k) {
-        if (e.flags[k] & kEnemyDead) return;
-        const EnemyDef& def = db.enemies[e.type[k]];
-        const float dx = e.posX[k] - hx, dy = e.posY[k] - hy;
-        const float r = splash + def.size;  // the blast touches the enemy's disc
-        if (dx * dx + dy * dy > r * r) return;
-        damageEnemy(world, k, damage * damageMultiplier(db, source, def, fraction),
-                    source.projectile.type);
+    // M2.6 pierce: a shot may hit several enemies along this path, in order.
+    // `fromT` is where the search resumes after a pierced hit; `lastHit` keeps
+    // the pierced enemy out of the next searches (also on the next tick).
+    float fromT = 0.0f;
+    bool spent = false;
+    for (;;) {
+      uint32_t hit = kInvalidIndex;
+      float hitT = 2.0f;
+      const uint32_t skip = p.lastHit[i];
+      world.grid.query((ax < bx ? ax : bx) - pad, (ay < by ? ay : by) - pad,
+                       (ax > bx ? ax : bx) + pad, (ay > by ? ay : by) + pad, [&](uint32_t k) {
+        if ((e.flags[k] & kEnemyDead) || k == skip) return;
+        float t = segmentCircle(ax, ay, bx, by, e.posX[k], e.posY[k], db.enemies[e.type[k]].size);
+        // Contacts before fromT were hit (or pierced) already this tick.
+        if (t < 0.0f || t < fromT) return;
+        if (t < hitT || (t == hitT && k < hit)) {
+          hitT = t;
+          hit = k;
+        }
       });
-    } else {
+      if (hit == kInvalidIndex) break;
+
+      const BuildingDef& source = db.buildings[p.type[i]];
+      const float hx = ax + (bx - ax) * hitT, hy = ay + (by - ay) * hitT;
+      // Distance flown at impact as a fraction of range, for the falloff curve.
+      const float speed = source.projectile.speed;
+      // M2.2: range and splash are the shot's own (the tower's upgrades when it fired).
+      const float range = p.range[i];
+      const float flown = range - (p.life[i] + (1.0f - hitT) * dt) * speed;
+      const float fraction = range > 0.0f ? flown / range : 0.0f;
+      const float damage = p.damage[i];
+      const float splash = p.splash[i];
+      const float slow = p.slow[i];  // M2.6
+      const float slowSeconds = source.projectile.slowSeconds;
+      const float shieldBonus = p.shieldMult[i];
+      if (splash > 0.0f) {
+        const float reach = splash + pad;
+        world.grid.query(hx - reach, hy - reach, hx + reach, hy + reach, [&](uint32_t k) {
+          if (e.flags[k] & kEnemyDead) return;
+          const EnemyDef& def = db.enemies[e.type[k]];
+          const float dx = e.posX[k] - hx, dy = e.posY[k] - hy;
+          const float r = splash + def.size;  // the blast touches the enemy's disc
+          if (dx * dx + dy * dy > r * r) return;
+          applySlow(e, k, slow, slowSeconds);
+          damageEnemy(world, k, damage * damageMultiplier(db, source, def, fraction),
+                      source.projectile.type, shieldBonus);
+        });
+        spent = true;
+        break;
+      }
+      applySlow(e, hit, slow, slowSeconds);
       damageEnemy(world, hit, damage * damageMultiplier(db, source, db.enemies[e.type[hit]], fraction),
-                  source.projectile.type);
+                  source.projectile.type, shieldBonus);
+      if (p.pierce[i] == 0) {
+        spent = true;
+        break;
+      }
+      --p.pierce[i];
+      p.lastHit[i] = hit;
+      fromT = hitT;
     }
-    p.remove(i);
+
+    if (spent || p.life[i] <= 0.0f) {
+      p.remove(i);  // hit, or flew its range
+    } else {
+      ++i;
+    }
   }
 }
 

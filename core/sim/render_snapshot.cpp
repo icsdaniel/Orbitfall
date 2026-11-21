@@ -48,7 +48,8 @@ uint32_t fillEnemyRenderBuffer(const World& world, float* out, uint32_t maxInsta
   for (uint32_t i = 0; i < n; ++i) {
     const EnemyDef& def = db.enemies[e.type[i]];
     float* o = out + static_cast<size_t>(i) * kRenderFloatsPerInstance;
-    writeTransform(o, e.posX[i] - e.velX[i] * back, e.posY[i] - e.velY[i] * back, e.velX[i],
+    const float eb = back * speedFactor(e, i);  // M2.6: slowed enemies move less
+    writeTransform(o, e.posX[i] - e.velX[i] * eb, e.posY[i] - e.velY[i] * eb, e.velX[i],
                    e.velY[i], def.size);
     const float* color = params.enemyColors ? params.enemyColors + 4u * e.type[i] : nullptr;
     for (int c = 0; c < 4; ++c) o[8 + c] = color ? color[c] : 1.0f;

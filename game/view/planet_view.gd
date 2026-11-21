@@ -18,9 +18,15 @@ const BUILDING_OFFSET: float = 7.5
 const BUILDING_MIN_PX: float = 7.5
 ## Gap between a ground marker and the elevated marker above it (world units).
 const ELEVATED_GAP: float = 3.0
-## Link colour per aura stat: range, fire rate, damage, income.
+## Link colour per aura stat: range, fire rate, damage, income, detect (M2.6),
+## shield damage (M2.6).
 const LINK_COLORS: Array[Color] = [
-	Color(0.40, 0.85, 1.0), Color(1.0, 0.62, 0.25), Color(1.0, 0.35, 0.30), Color(1.0, 0.80, 0.30)]
+	Color(0.40, 0.85, 1.0), Color(1.0, 0.62, 0.25), Color(1.0, 0.35, 0.30), Color(1.0, 0.80, 0.30),
+	Color(0.45, 0.95, 0.55), Color(0.90, 0.45, 0.95)]
+## M2.6: bands of the gradient range ring (falloff curve) of the selected tower.
+const FALLOFF_BANDS: int = 10
+## M2.6: floats per Sun Lens beam in get_beams().
+const BEAM_FLOATS: int = 7
 const STAT_NAMES: Array[String] = ["range", "fire rate", "damage", "income"]
 
 var sim: Node
@@ -61,6 +67,8 @@ var site_modifiers: PackedFloat32Array = PackedFloat32Array()
 var adjacency_links: PackedInt32Array = PackedInt32Array()
 ## M2.7: drill state by anchor site: {heat, overheated, cooldown, cooldown_max}.
 var drill_states: Dictionary[int, Dictionary] = {}
+## M2.6: Sun Lens beams of the latest tick (see SimServer.get_beams).
+var lens_beams: PackedFloat32Array = PackedFloat32Array()
 
 var _beam: Node2D
 var _font: Font
@@ -107,6 +115,8 @@ func sync() -> void:
 		site_owners = sim.get_site_owners()
 		site_modifiers = sim.get_site_modifiers()
 		adjacency_links = sim.get_adjacency_links()
+		if sim.has_method(&"get_beams"):  # M2.6
+			lens_beams = sim.get_beams()
 	else:
 		# A sim without the M2.1 getters: one ring of 1-slot buildings.
 		layer_count = 1
@@ -325,6 +335,7 @@ func _draw() -> void:
 	_draw_shade_wedges()
 	_draw_ghost_arcs()
 	_draw_slots()
+	_draw_lens_beams()
 	_draw_selection()
 
 
@@ -575,7 +586,7 @@ func _draw_selection() -> void:
 		if arc > 0.0 and tower_range > 0.0:
 			var origin: Vector2 = dir * (radius + (elevated_height if selected_layer > 0 else 0.0))
 			var sector: PackedVector2Array = sector_polygon(origin, angle, arc, tower_range)
-			draw_colored_polygon(sector, Color(color, 0.10))
+			_draw_falloff_ring(origin, angle, arc, tower_range, def.get("falloff", PackedFloat32Array()), color)
 			sector.append(sector[0])
 			draw_polyline(sector, Color(color, 0.75), 1.5 * px, true)
 			draw_line(sector[0], sector[0] + dir * tower_range, Color(color, 0.35), 1.0 * px, true)
@@ -591,6 +602,68 @@ func _draw_selection() -> void:
 			ShapeDraw.draw(self, Palette.shape_of(def.get("shape", 0)), centre,
 				br, angle + PI * 0.5, Color(ghost, 0.6), 0.8)
 	draw_arc(centre, br + 3.5, 0.0, TAU, 24, Palette.TEXT, maxf(1.2, 2.0 * px), true)
+
+
+## M2.6 gradient range ring: the arc sector filled in bands whose opacity
+## follows the tower's damage falloff curve (Flak bright close, Railgun even).
+func _draw_falloff_ring(
+		origin: Vector2, axis: float, arc: float, tower_range: float, falloff: Variant, color: Color
+) -> void:
+	var curve: PackedFloat32Array = falloff if falloff is PackedFloat32Array else PackedFloat32Array()
+	var top: float = 1.0
+	for i: int in range(1, curve.size(), 2):
+		top = maxf(top, curve[i])
+	var steps: int = maxi(6, int(arc * 24.0))
+	for band: int in FALLOFF_BANDS:
+		var t0: float = float(band) / float(FALLOFF_BANDS)
+		var t1: float = float(band + 1) / float(FALLOFF_BANDS)
+		var mult: float = falloff_at(curve, 0.5 * (t0 + t1))
+		var points: PackedVector2Array = PackedVector2Array()
+		for k: int in steps + 1:
+			var a: float = axis - arc + 2.0 * arc * float(k) / float(steps)
+			points.append(origin + Vector2.from_angle(a) * tower_range * t1)
+		for k: int in range(steps, -1, -1):
+			var a: float = axis - arc + 2.0 * arc * float(k) / float(steps)
+			points.append(origin + Vector2.from_angle(a) * tower_range * t0)
+		draw_colored_polygon(points, Color(color, 0.03 + 0.17 * mult / top))
+
+
+## Falloff multiplier at `t` (distance / range) of a curve [t0, m0, t1, m1, ...];
+## 1 for an empty curve. Same interpolation as core falloffAt.
+static func falloff_at(curve: PackedFloat32Array, t: float) -> float:
+	var n: int = curve.size() >> 1
+	if n == 0:
+		return 1.0
+	if t <= curve[0]:
+		return curve[1]
+	for k: int in range(1, n):
+		var t0: float = curve[2 * k - 2]
+		var t1: float = curve[2 * k]
+		if t <= t1:
+			var span: float = t1 - t0
+			if span <= 0.0:
+				return curve[2 * k + 1]
+			return lerpf(curve[2 * k - 1], curve[2 * k + 1], (t - t0) / span)
+	return curve[2 * n - 1]
+
+
+## M2.6 Sun Lens beams: a warm line whose width and brightness follow the beam
+## power (ramp x channel), so an Eclipser shading the panels visibly dims it;
+## Overcharge adds a white core.
+func _draw_lens_beams() -> void:
+	var px: float = 1.0 / maxf(view_zoom, 0.01)
+	for i: int in range(0, lens_beams.size() - BEAM_FLOATS + 1, BEAM_FLOATS):
+		var from: Vector2 = Vector2(lens_beams[i], lens_beams[i + 1])
+		var to: Vector2 = Vector2(lens_beams[i + 2], lens_beams[i + 3])
+		var power: float = clampf(lens_beams[i + 4], 0.0, 4.0)
+		var over: bool = lens_beams[i + 5] > 0.5
+		var shown: float = clampf(power, 0.0, 1.0)
+		draw_line(from, to, Color(Palette.SUN_WARM, 0.15 + 0.35 * shown), (2.0 + 6.0 * shown) * px, true)
+		draw_line(from, to, Color(Palette.SUN_WARM.lightened(0.3), 0.35 + 0.6 * shown),
+			(0.8 + 1.8 * shown) * px, true)
+		if over:
+			draw_line(from, to, Color(1.0, 1.0, 1.0, 0.9), 1.6 * px, true)
+		draw_circle(to, (2.0 + 4.0 * shown) * px, Color(Palette.SUN_WARM, 0.3 + 0.5 * shown))
 
 
 ## Reach of a building's auras along the ring: `radius` slots past each end of

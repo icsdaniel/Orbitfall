@@ -170,6 +170,8 @@ TEST_CASE("M1 content is unchanged by M2.3: Kinetic and Explosive towers, 1x on 
   const ContentDB db = shippedDb();
   for (const BuildingDef& b : db.buildings) {
     if (!b.hasProjectile) continue;
+    // M2.6 towers have their own falloff curves and types (test_towers_content.cpp).
+    if (b.id != "gatling" && b.id != "cannon") continue;
     for (const char* id : {"drifter_red", "drifter_blue", "drifter_green", "dart", "eclipser"}) {
       const EnemyDef& e = db.enemies[static_cast<size_t>(db.enemy_index(id))];
       CAPTURE(b.id);

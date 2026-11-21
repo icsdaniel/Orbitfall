@@ -50,7 +50,9 @@ namespace {
 // One tick of an Eclipser: fly to the hover point on the sun line over the
 // most lit panels, keep tracking it while the hover timer runs, then descend
 // straight down. Velocity is kept up to date for shot leading and rendering.
-void moveEclipser(World& world, uint32_t i, const EnemyDef& def, float dt) {
+// M2.6: `dt` is the slowed step (sim dt x speedFactor), `tickDt` the tick's
+// own dt (hover timer, velocity).
+void moveEclipser(World& world, uint32_t i, const EnemyDef& def, float dt, float tickDt) {
   EnemyPool& e = world.enemies;
   EclipserState state = eclipserState(e.flags[i]);
   float x = e.posX[i], y = e.posY[i];
@@ -81,12 +83,13 @@ void moveEclipser(World& world, uint32_t i, const EnemyDef& def, float dt) {
       ny = y + dy / dist * step;
     }
     if (state == EclipserState::Hover) {
-      e.timer[i] -= dt;
+      e.timer[i] -= tickDt;
       if (e.timer[i] <= 0.0f) state = EclipserState::Descend;
     }
   }
-  e.velX[i] = (nx - x) / dt;
-  e.velY[i] = (ny - y) / dt;
+  // Unslowed velocity: speedFactor scales it wherever it is used.
+  e.velX[i] = dt > 0.0f ? (nx - x) / dt : 0.0f;
+  e.velY[i] = dt > 0.0f ? (ny - y) / dt : 0.0f;
   e.posX[i] = nx;
   e.posY[i] = ny;
   e.flags[i] = static_cast<uint16_t>((e.flags[i] & ~kEnemyStateMask) |
@@ -146,13 +149,22 @@ void enemyMovement(World& world, float dt) {
   EnemyPool& e = world.enemies;
   for (uint32_t i = 0; i < e.count; ++i) {
     const EnemyDef& def = db.enemies[e.type[i]];
+    // M2.6: a slowed enemy covers less ground for as long as the slow lasts.
+    const float step = dt * speedFactor(e, i);
+    if (e.slowTime[i] > 0.0f) {
+      e.slowTime[i] -= dt;
+      if (e.slowTime[i] <= 0.0f) {
+        e.slowTime[i] = 0.0f;
+        e.slow[i] = 0.0f;
+      }
+    }
     if (def.behavior == EnemyBehavior::Eclipser && def.hasHover) {
-      moveEclipser(world, i, def, dt);
+      moveEclipser(world, i, def, step, dt);
     } else if (def.behavior == EnemyBehavior::Bomber && def.hasBomber) {
-      moveBomber(world, i, def, dt);
+      moveBomber(world, i, def, step);  // M2.6: slowed like the rest
     } else {
-      e.posX[i] += e.velX[i] * dt;
-      e.posY[i] += e.velY[i] * dt;
+      e.posX[i] += e.velX[i] * step;
+      e.posY[i] += e.velY[i] * step;
     }
   }
 }

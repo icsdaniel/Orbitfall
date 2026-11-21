@@ -29,6 +29,7 @@ enum class EventType : uint8_t {
   ShieldAbsorbed,  // a = slot, b = falling type, x/y = where, value = energy left
   ShieldOffline,   // a = slot
   ShieldOnline,    // a = slot (recharged, full)
+  BuildingActivated, // M2.6: a = slot, b = building index, value = cooldown (s, before light)
   // M2.7 drills (nothing is damaged; only the drill's uptime changes):
   DrillOverheated,  // a = site, b = building index, x = instability level, value = shutdown seconds
   DrillRestarted,   // a = site, b = building index, x = instability level after the restart
@@ -50,6 +51,7 @@ enum class RejectReason : int32_t {
   WrongLayer,        // the building may not stand on that layer
   SupportsElevated,  // selling a foundation that carries an elevated building
   UpgradeBlocked,   // M2.2: no such path, top tier reached, or capped by the other path
+  ActiveNotReady,   // M2.6: the active ability is running or cooling down
 };
 
 // Generic payload; each emitting system documents which fields it fills.

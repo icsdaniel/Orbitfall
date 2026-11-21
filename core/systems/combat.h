@@ -50,6 +50,8 @@ float damageMultiplier(const ContentDB& db, const BuildingDef& source, const Ene
 // M2.3: a shield absorbs first (damage x shieldMultiplier(type)); what is left
 // over after it breaks goes on to the hit points, and the entity loses its
 // Shielded trait bit so the glow ring disappears.
-bool damageEnemy(World& world, uint32_t i, float damage, DamageType type = DamageType::Kinetic);
+// M2.6: `shieldBonus` multiplies what reaches a shield (Amplifier aura).
+bool damageEnemy(World& world, uint32_t i, float damage, DamageType type = DamageType::Kinetic,
+                 float shieldBonus = 1.0f);
 
 }  // namespace orbitfall

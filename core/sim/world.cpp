@@ -96,6 +96,9 @@ void initWorld(World& world, const SimConfig& config) {
   world.slotTargets.assign(world.siteCount(), kInvalidIndex);
   world.auraLinks.clear();
   world.auraLinks.reserve(world.siteCount() * 4);
+  world.beams.clear();
+  world.beams.reserve(world.siteCount());  // M2.6: at most one beam per site
+  world.channel = 0.0f;
   world.rng.seed(config.seed);
   world.commandsApplied = 0;
   world.commandDigest = 0;
@@ -183,6 +186,11 @@ uint64_t hashWorld(const World& world) {
     h.add(b.charge);
     h.add(b.heat);      // M2.7
     h.add(b.overheat);  // M2.7
+    h.add(b.missAcc);  // M2.6
+    h.add(b.ramp);
+    h.add(b.beamTarget);
+    h.add(b.activeCooldown);
+    h.add(b.activeTime);
   }
   h.array(world.rng.s, 4);
   h.add(world.commandsApplied);

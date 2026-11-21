@@ -26,6 +26,13 @@ struct BuildingStats {
   float income = 0.0f;  // panelRate (panels) or drillRate (drills, M2.7)
   float instability = 0.0f;  // M2.7: a drill's weight in the instability curve
   float cooling = 0.0f;      // M2.7: a cooler's cooling (before litCoolingMult)
+  // M2.6
+  float slow = 0.0f;            // projectile slow fraction
+  float pierce = 0.0f;          // extra enemies a shot passes (whole number when used)
+  float auraAmount = 1.0f;      // multiplier on every aura amount
+  float auraRadius = 0.0f;      // slots added to every aura radius
+  float activeCooldown = 0.0f;  // seconds
+  float activePower = 1.0f;     // active damage multiplier
 
   float get(UpgradeStat s) const;
 };
