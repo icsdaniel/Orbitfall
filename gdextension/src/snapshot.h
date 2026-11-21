@@ -106,6 +106,9 @@ struct Snapshot {
   float beamStrength = 0.0f;
   float incomePerSecond = 0.0f;
   float litFraction = 0.0f;           // lit unshaded panels / panels
+  float channel = 0.0f;               // M2.6: World::channel
+  std::vector<float> beams;           // M2.6: 7 floats per Sun Lens beam (see get_beams)
+  std::vector<float> siteActives;     // M2.6: 2 per site: active cooldown left, active time left
   std::vector<float> shadeIntervals;  // pairs of world angles, merged
   // --- render buffers at alpha 1 (16 floats per instance) plus velocities ---
   uint32_t enemyCount = 0;
@@ -189,6 +192,26 @@ inline void fill_snapshot(const orbitfall::World& w, const RunStatics& run, Snap
   s.beamStrength = w.beamStrength;
   s.incomePerSecond = w.incomePerSecond;
   s.litFraction = panels > 0 ? static_cast<float>(earning) / static_cast<float>(panels) : 0.0f;
+  // M2.6
+  s.channel = w.channel;
+  s.beams.resize(w.beams.size() * 7);
+  for (size_t i = 0; i < w.beams.size(); ++i) {
+    const BeamShot& b = w.beams[i];
+    float* o = s.beams.data() + i * 7;
+    o[0] = b.x0;
+    o[1] = b.y0;
+    o[2] = b.x1;
+    o[3] = b.y1;
+    o[4] = b.power;
+    o[5] = b.overcharged ? 1.0f : 0.0f;
+    o[6] = static_cast<float>(b.site);
+  }
+  s.siteActives.resize(sites * 2);
+  for (size_t i = 0; i < sites; ++i) {
+    const BuildingSlot& b = w.site(static_cast<uint32_t>(i));
+    s.siteActives[2 * i] = b.activeCooldown;
+    s.siteActives[2 * i + 1] = b.activeTime;
+  }
   const uint32_t pairsMax = w.shadeCount < kMaxShadePairs ? w.shadeCount : kMaxShadePairs;
   s.shadeIntervals.resize(static_cast<size_t>(pairsMax) * 2);
   const uint32_t pairs =
