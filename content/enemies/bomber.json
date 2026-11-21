@@ -1,0 +1,7 @@
+{
+  "id": "bomber", "behavior": "bomber", "layers": 1, "hp": 12,
+  "speed": 45, "size": 10, "landDamage": 4, "bounty": 3,
+  "traits": [], "shadowCaster": false, "hpBar": false, "popsInto": null,
+  "bomber": { "orbitRadius": 260, "orbitDegPerSec": 12, "dropSeconds": 2.5, "bombs": 4, "bomb": "bomb" },
+  "shape": "hexagon", "visual": { "color": "enemy.bomber" }
+}

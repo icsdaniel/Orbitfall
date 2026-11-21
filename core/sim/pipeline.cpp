@@ -1,6 +1,7 @@
 #include "sim/pipeline.h"
 
 #include "sim/world.h"
+#include "systems/falling.h"
 #include "systems/systems.h"
 
 namespace orbitfall {
@@ -32,6 +33,11 @@ Pipeline defaultPipeline() {
   p.add("towerFire", towerFire);
   p.add("projectileMovement", projectileMovement);
   p.add("collisions", collisions);
+  // M2.10: falling objects move and are telegraphed, shields recharge and
+  // absorb, whatever is left hits the planet (HP only).
+  p.add("fallingObjects", fallingObjects);
+  p.add("shields", shields);
+  p.add("fallingImpact", fallingImpact);
   p.add("landing", landing);
   p.add("income", income);
   p.add("cleanup", cleanup);

@@ -26,6 +26,7 @@ struct SimConfig {
   uint32_t commandLogCapacity = 16384;  // logged commands before the replay log grows
   uint32_t enemyCapacity = 16384;       // fixed; spawns beyond it are refused
   uint32_t projectileCapacity = 32768;  // fixed; shots beyond it are refused
+  uint32_t fallingCapacity = 4096;      // M2.10: fixed; falling objects beyond it are refused
   // Loaded content; must outlive the world. nullptr gives the bare M0 sim.
   const ContentDB* content = nullptr;
   // Wave set to play (index into content->waveSets); it names the planet and
@@ -47,6 +48,7 @@ enum SlotFlag : uint8_t {
   kSlotLit = 1u << 0,        // inside the sun beam
   kSlotShaded = 1u << 1,     // inside the beam but in an enemy's shadow
   kSlotHasTarget = 1u << 2,  // a tower with an enemy in arc and range
+  kSlotShieldOffline = 1u << 3,  // M2.10: a shield at 0 energy, recharging
 };
 
 // One entry per slot of the planet's ring. Buildings are few, so this is a
@@ -72,6 +74,9 @@ struct BuildingSlot {
   float damageMult = 1.0f;
   float incomeMult = 1.0f;
   uint8_t tiers[kUpgradePaths] = {0, 0};  // M2.2: bought tiers per upgrade path (anchors)
+  // M2.10 shields: energy left, and recharge progress (seconds at 1x) while offline.
+  float energy = 0.0f;
+  float charge = 0.0f;
 };
 
 // One adjacency link (M2.1), for the Build view: `source` buffs `target`.
@@ -128,6 +133,7 @@ struct World {
   float waveTime = 0.0f;          // sim seconds since the wave started
   float intermissionTime = 0.0f;  // real seconds in this intermission (auto-start)
   std::vector<uint16_t> spawned;  // per spawn entry of the current wave: units out so far
+  std::vector<uint16_t> volleysSpawned;  // M2.10: per volley of the current wave: objects out so far
 
   uint32_t waveCount() const { return waveSet ? static_cast<uint32_t>(waveSet->waves.size()) : 0u; }
 
@@ -175,6 +181,7 @@ struct World {
   // --- entity pools (fixed capacity from SimConfig, reserved in initWorld) ---
   EnemyPool enemies;
   ProjectilePool projectiles;
+  FallingPool falling;  // M2.10
 
   // --- derived each tick (not hashed) ---
   SpatialGrid grid;              // enemies by position, rebuilt by spatialRebuild

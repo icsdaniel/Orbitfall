@@ -540,6 +540,10 @@ func _draw_selection() -> void:
 			draw_polyline(sector, Color(color, 0.75), 1.5 * px, true)
 			draw_line(sector[0], sector[0] + dir * tower_range, Color(color, 0.35), 1.0 * px, true)
 		_draw_aura_reach(def, first, width)
+		if str(def.get("kind", "")) == "shield":  # M2.10: the dome it raises
+			var half: float = float(def.get("shield_width", 0.0)) * 0.5
+			SkyThreats.draw_dome(self, angle, half, radius + float(def.get("shield_height", 0.0)),
+				radius, Color(Palette.SHIELD, 0.8), 2.0 * px)
 		if owner < 0:
 			var ok: bool = ghost_fits(selected_slot, selected_layer, ghost_building)
 			var ghost: Color = color if ok else Palette.THREAT
@@ -575,6 +579,8 @@ func _draw_lanes() -> void:
 	var seen: Dictionary[int, bool] = {}
 	var px: float = 1.0 / maxf(view_zoom, 0.01)
 	for entry: Dictionary in entries:
+		if bool(entry.get("volley", false)):
+			continue  # M2.10: volleys land from the sky; SkyThreats marks them
 		var bearing: float = Palette.angle_of(entry.get("lane_bearing", 0.0))
 		var key: int = roundi(rad_to_deg(bearing))
 		if seen.has(key):

@@ -85,6 +85,21 @@ func _init() -> void:
 	_box.add_child(actions)
 
 
+## M2.10: info line of a shield: its live energy (from get_shields, when given)
+## and how it recharges.
+static func shield_note(def: Dictionary, state: Dictionary = {}) -> String:
+	var energy: float = float(def.get("shield_energy", 0.0))
+	var line: String = "Shield %d° wide, %d energy" % [
+		roundi(rad_to_deg(float(def.get("shield_width", 0.0)))), roundi(energy)]
+	if not state.is_empty():
+		if bool(state.get("online", true)):
+			line = "Shield up: %d / %d energy" % [roundi(float(state.get("energy", 0.0))), roundi(energy)]
+		else:
+			line = "Shield DOWN: recharging %d%%" % roundi(float(state.get("charge_frac", 0.0)) * 100.0)
+	return line + "\nRecharges %ds after a break, faster while lit" % roundi(
+		float(def.get("recharge_seconds", 0.0)))
+
+
 func is_open() -> bool:
 	return visible
 

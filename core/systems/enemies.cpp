@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "sim/world.h"
+#include "systems/falling.h"
 #include "systems/systems.h"
 
 namespace orbitfall {
@@ -92,6 +93,51 @@ void moveEclipser(World& world, uint32_t i, const EnemyDef& def, float dt) {
                                      (static_cast<uint16_t>(state) << kEnemyStateShift));
 }
 
+// M2.10: one tick of a Bomber (BomberState). Bombs fall from where it is.
+void moveBomber(World& world, uint32_t i, const EnemyDef& def, float dt) {
+  EnemyPool& e = world.enemies;
+  BomberState state = bomberState(e.flags[i]);
+  int dropped = bombsDropped(e.flags[i]);
+  const float x = e.posX[i], y = e.posY[i];
+  const float dist = std::sqrt(x * x + y * y);
+  float nx = x, ny = y;
+  const BomberDef& b = def.bomber;
+  if (state == BomberState::Approach) {
+    const float step = def.speed * dt;
+    if (dist - step <= b.orbitRadius && dist > 0.0f) {
+      nx = x / dist * b.orbitRadius;
+      ny = y / dist * b.orbitRadius;
+      state = b.bombs > dropped ? BomberState::Orbit : BomberState::Dive;
+      e.timer[i] = 0.5f * b.dropSeconds;  // first bomb half a period after arriving
+    } else if (dist > 0.0f) {
+      nx = x - x / dist * step;
+      ny = y - y / dist * step;
+    }
+  } else if (state == BomberState::Orbit) {
+    const float angle = std::atan2(y, x) + b.orbitSpeed * dt;
+    nx = std::cos(angle) * b.orbitRadius;
+    ny = std::sin(angle) * b.orbitRadius;
+    e.timer[i] -= dt;
+    if (e.timer[i] <= 0.0f) {
+      spawnFalling(world, b.bomb, angle, b.orbitRadius);  // a full pool drops the bomb
+      ++dropped;
+      e.timer[i] += b.dropSeconds;
+      if (dropped >= b.bombs) state = BomberState::Dive;
+    }
+  } else if (dist > 0.0f) {
+    const float step = def.speed * dt;
+    nx = x - x / dist * step;
+    ny = y - y / dist * step;
+  }
+  e.velX[i] = (nx - x) / dt;
+  e.velY[i] = (ny - y) / dt;
+  e.posX[i] = nx;
+  e.posY[i] = ny;
+  e.flags[i] = static_cast<uint16_t>((e.flags[i] & ~(kEnemyStateMask | kEnemyBombMask)) |
+                                     (static_cast<uint16_t>(state) << kEnemyStateShift) |
+                                     (static_cast<uint16_t>(dropped) << kEnemyBombShift));
+}
+
 }  // namespace
 
 void enemyMovement(World& world, float dt) {
@@ -102,6 +148,8 @@ void enemyMovement(World& world, float dt) {
     const EnemyDef& def = db.enemies[e.type[i]];
     if (def.behavior == EnemyBehavior::Eclipser && def.hasHover) {
       moveEclipser(world, i, def, dt);
+    } else if (def.behavior == EnemyBehavior::Bomber && def.hasBomber) {
+      moveBomber(world, i, def, dt);
     } else {
       e.posX[i] += e.velX[i] * dt;
       e.posY[i] += e.velY[i] * dt;

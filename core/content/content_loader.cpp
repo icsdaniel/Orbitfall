@@ -55,7 +55,8 @@ constexpr Named<Shape> kShapes[] = {
     {"disc", Shape::Disc}};
 constexpr Named<BuildingKind> kBuildingKinds[] = {{"tower", BuildingKind::Tower},
                                                   {"panel", BuildingKind::Panel},
-                                                  {"support", BuildingKind::Support}};
+                                                  {"support", BuildingKind::Support},
+                                                  {"shield", BuildingKind::Shield}};  // M2.10
 constexpr Named<BuildingLayer> kBuildingLayers[] = {{"ground", BuildingLayer::Ground},
                                                     {"elevated", BuildingLayer::Elevated},
                                                     {"any", BuildingLayer::Any}};
@@ -75,7 +76,8 @@ constexpr Named<TargetingMode> kTargetingModes[] = {{"first", TargetingMode::Fir
 constexpr Named<SunPathType> kSunPathTypes[] = {{"constant_drift", SunPathType::ConstantDrift},
                                                 {"fixed", SunPathType::Fixed}};
 constexpr Named<EnemyBehavior> kEnemyBehaviors[] = {{"lane", EnemyBehavior::Lane},
-                                                    {"eclipser", EnemyBehavior::Eclipser}};
+                                                    {"eclipser", EnemyBehavior::Eclipser},
+                                                    {"bomber", EnemyBehavior::Bomber}};  // M2.10
 // M2.2: stats an upgrade tier may modify, and how.
 constexpr Named<UpgradeStat> kUpgradeStats[] = {
     {"damage", UpgradeStat::Damage}, {"fireRate", UpgradeStat::FireRate},
@@ -275,6 +277,7 @@ class Obj {
 struct PendingEnemy {
   std::string where;
   std::string popsInto;
+  std::string bomb;  // M2.10: the falling object a Bomber drops
 };
 struct PendingSpawn {
   std::string lane, enemy;
@@ -283,6 +286,7 @@ struct PendingWaveSet {
   std::string where;
   std::string planet, sun;
   std::vector<std::vector<PendingSpawn>> spawns;  // per wave
+  std::vector<std::vector<std::string>> volleys;  // M2.10: falling object id per volley, per wave
 };
 
 struct Loader {
@@ -332,6 +336,7 @@ struct Loader {
     if (o.has("upgradeExclusiveTier"))  // M2.2
       o.integer("upgradeExclusiveTier", r.upgradeExclusiveTier,
                 Range{0.0, false, static_cast<double>(kMaxUpgradeTiers)});
+    if (o.has("fallingWarnSeconds")) o.num("fallingWarnSeconds", r.fallingWarnSeconds, kNonNeg);  // M2.10
   }
 
   // {"kinetic": 0.5, ...} -> out[type]. The floor is checked in resolve().
@@ -464,6 +469,16 @@ struct Loader {
       read_falloff(o, b);
     } else if (kindOk && b.kind == BuildingKind::Panel) {
       o.num("panelRate", b.panelRate, kNonNeg);
+    } else if (kindOk && b.kind == BuildingKind::Shield) {  // M2.10
+      const Obj sh = o.object("shield");
+      if (sh.valid()) {
+        sh.angle("widthDeg", b.shield.width, Range{0.0, true, 360.0});
+        sh.num("height", b.shield.height, kPositive);
+        sh.num("energy", b.shield.energy, kPositive);
+        sh.num("rechargeSeconds", b.shield.rechargeSeconds, kPositive);
+        if (sh.has("regenPerSec")) sh.num("regenPerSec", b.shield.regenPerSec, kNonNeg);
+        if (sh.has("upkeepPerSec")) sh.num("upkeepPerSec", b.shield.upkeepPerSec, kNonNeg);
+      }
     }
     if (kindOk && o.has("paths")) read_paths(o, b);  // M2.2
     buildingWhere.push_back(o.where());
@@ -640,6 +655,18 @@ struct Loader {
       o.field_error("traits", "'shielded' needs a 'shield' amount > 0");
     if (e.shield > 0.0f) e.traits |= kTraitShielded;
     if (o.has("hpBarSegments")) o.integer("hpBarSegments", e.hpBarSegments, Range{1.0, false, 64.0});
+    PendingEnemy pe;
+    if (e.behavior == EnemyBehavior::Bomber) {  // M2.10
+      const Obj bo = o.object("bomber");
+      if (bo.valid()) {
+        e.hasBomber = true;
+        bo.num("orbitRadius", e.bomber.orbitRadius, kPositive);
+        bo.angle("orbitDegPerSec", e.bomber.orbitSpeed, kAny);
+        bo.num("dropSeconds", e.bomber.dropSeconds, kPositive);
+        bo.integer("bombs", e.bomber.bombs, Range{0.0, false, 63.0});
+        bo.str("bomb", pe.bomb);
+      }
+    }
     if (e.behavior == EnemyBehavior::Eclipser) {
       const Obj h = o.object("hover");
       if (h.valid()) {
@@ -653,11 +680,22 @@ struct Loader {
           h.field_error("spawnRadius", "must be >= hoverRadius");
       }
     }
-    PendingEnemy pe;
     pe.where = o.where();
     if (o.has("popsInto")) o.str("popsInto", pe.popsInto);
     pendingEnemies.push_back(std::move(pe));
     db.enemies.push_back(std::move(e));
+  }
+
+  // M2.10: content/falling/<id>.json.
+  void read_falling(const Obj& o, const std::string& stem) {
+    FallingDef f;
+    if (!read_id(o, stem, db.fallingIds, db.falling.size(), f.id)) return;
+    o.num("damage", f.damage, kNonNeg);
+    o.num("speed", f.speed, kPositive);
+    o.num("size", f.size, kPositive);
+    if (o.has("spawnRadius")) o.num("spawnRadius", f.spawnRadius, kPositive);
+    read_visual(o, f.visual, true);
+    db.falling.push_back(std::move(f));
   }
 
   void read_wave_set(const Obj& o, const std::string& stem) {
@@ -668,6 +706,7 @@ struct Loader {
     o.str("planet", pw.planet);
     o.str("sun", pw.sun);
     if (o.has("autoStartSeconds")) o.num("autoStartSeconds", ws.autoStartSeconds, kNonNeg);
+    if (o.has("startStardust")) o.num("startStardust", ws.startStardust, kNonNeg);  // M2.10
     if (const Value* waves = o.array("waves")) {
       if (waves->array.empty()) o.field_error("waves", "must not be empty");
       for (size_t i = 0; i < waves->array.size(); ++i) {
@@ -683,6 +722,27 @@ struct Loader {
         }
         w.num("lightMult", wave.lightMult, kPositive);
         w.num("spawnSeconds", wave.spawnSeconds, kPositive);
+        // M2.10: optional volleys of falling objects; a wave with volleys may
+        // have no lane spawns.
+        std::vector<std::string> volleyIds;
+        if (w.has("falling")) {
+          if (const Value* fall = w.array("falling")) {
+            for (size_t j = 0; j < fall->array.size(); ++j) {
+              const Obj v = w.element("falling", *fall, j);
+              if (!v.valid()) continue;
+              VolleyDef volley;
+              std::string id;
+              v.str("object", id);
+              v.angle("bearingDeg", volley.bearing, kAny);
+              if (v.has("spreadDeg")) v.angle("spreadDeg", volley.spread, Range{0.0, false, 180.0});
+              v.integer("count", volley.count, Range{1.0, false, 100000.0});
+              if (v.has("startSeconds")) v.num("startSeconds", volley.startSeconds, kNonNeg);
+              v.num("seconds", volley.seconds, kNonNeg);
+              wave.volleys.push_back(volley);
+              volleyIds.push_back(std::move(id));
+            }
+          }
+        }
         const Obj fc = w.object("forecast");
         if (fc.valid()) {
           fc.integer("exactAhead", wave.forecast.exactAhead, Range{0.0, false, 1000.0});
@@ -691,7 +751,8 @@ struct Loader {
             fc.field_error("iconsAhead", "must be >= exactAhead");
         }
         if (const Value* spawns = w.array("spawns")) {
-          if (spawns->array.empty()) w.field_error("spawns", "must not be empty");
+          if (spawns->array.empty() && wave.volleys.empty())
+            w.field_error("spawns", "must not be empty (unless the wave has 'falling' volleys)");
           for (size_t j = 0; j < spawns->array.size(); ++j) {
             const Obj s = w.element("spawns", *spawns, j);
             if (!s.valid()) continue;
@@ -706,6 +767,7 @@ struct Loader {
         }
         ws.waves.push_back(std::move(wave));
         pw.spawns.push_back(std::move(pending));
+        pw.volleys.push_back(std::move(volleyIds));
       }
     }
     pendingWaveSets.push_back(std::move(pw));
@@ -770,6 +832,12 @@ struct Loader {
         if (m < floor)
           err(pe.where, std::string("damageMult: '") + dt.name + "': multiplier " + fmt(m) + floorMsg);
       }
+      if (e.hasBomber) {  // M2.10
+        e.bomber.bomb = db.falling_index(pe.bomb);
+        if (e.bomber.bomb == kNoIndex) err(pe.where, "'bomber': 'bomb': unknown falling object id '" + pe.bomb + "'");
+      }
+      if (e.behavior == EnemyBehavior::Bomber && !e.hasBomber)
+        err(pe.where, "missing field 'bomber' (behavior 'bomber')");
       if (!pe.popsInto.empty()) {
         e.popsInto = db.enemy_index(pe.popsInto);
         if (e.popsInto == kNoIndex)
@@ -830,6 +898,22 @@ struct Loader {
             if (spawn.lane == kNoIndex)
               err(where, "'lane': unknown lane '" + ps.lane + "' on planet '" + planet->id + "'");
           }
+        }
+        // M2.10 volleys: the object must exist and start above the planet.
+        for (size_t v = 0; v < ws.waves[w].volleys.size(); ++v) {
+          VolleyDef& volley = ws.waves[w].volleys[v];
+          const std::string& id = pw.volleys[w][v];
+          const std::string where =
+              pw.where + ": waves[" + std::to_string(w) + "]: falling[" + std::to_string(v) + "]";
+          if (id.empty()) continue;
+          volley.falling = db.falling_index(id);
+          if (volley.falling == kNoIndex) {
+            err(where, "'object': unknown falling object id '" + id + "'");
+            continue;
+          }
+          const FallingDef& f = db.falling[static_cast<size_t>(volley.falling)];
+          if (planet != nullptr && !(f.spawnRadius > planet->radius))
+            err(where, "'object': '" + id + "' needs a 'spawnRadius' above the planet's radius to fall in a volley");
         }
       }
     }
@@ -899,6 +983,8 @@ bool load_content_from_strings(const std::map<std::string, std::string>& files, 
       loader.read_enemy(o, stem);
     } else if (category == "waves") {
       loader.read_wave_set(o, stem);
+    } else if (category == "falling") {  // M2.10
+      loader.read_falling(o, stem);
     } else {
       errors.push_back(kv.first + ": unknown content category '" + category + "'");
     }

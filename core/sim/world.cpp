@@ -63,6 +63,13 @@ void initWorld(World& world, const SimConfig& config) {
     if (!world.waveSet->waves.empty()) world.lightMult = world.waveSet->waves[0].lightMult;
   }
   world.spawned.assign(maxSpawns, 0);
+  size_t maxVolleys = 0;  // M2.10
+  if (world.waveSet != nullptr) {
+    for (const WaveDef& wave : world.waveSet->waves) {
+      if (wave.volleys.size() > maxVolleys) maxVolleys = wave.volleys.size();
+    }
+  }
+  world.volleysSpawned.assign(maxVolleys, 0);
   world.waveTime = 0.0f;
   world.intermissionTime = 0.0f;
   world.commandLog.clear();
@@ -80,6 +87,7 @@ void initWorld(World& world, const SimConfig& config) {
   world.waveIndex = 0;
   world.enemiesSpawned = 0;
   world.stardust = world.planet ? world.planet->startStardust : 0.0f;
+  if (world.waveSet != nullptr && world.waveSet->startStardust >= 0.0f) world.stardust = world.waveSet->startStardust;
   world.slots.assign(world.planet ? static_cast<size_t>(world.planet->slots) : 0, BuildingSlot());
   world.elevated.assign(world.planet && world.planet->elevatedLayer ? world.slots.size() : 0,
                         BuildingSlot());
@@ -98,6 +106,9 @@ void initWorld(World& world, const SimConfig& config) {
   }
   world.projectiles.clear();
   world.projectiles.overflowCount = 0;
+  if (world.falling.capacity != config.fallingCapacity) world.falling.reserve(config.fallingCapacity);  // M2.10
+  world.falling.clear();
+  world.falling.overflowCount = 0;
   // The grid covers the furthest spawn point; cells are a fixed fraction of it.
   world.maxEnemyRadius = 0.0f;
   float extent = world.planet ? world.planet->radius * 2.0f : 1.0f;
@@ -155,6 +166,7 @@ uint64_t hashWorld(const World& world) {
   h.add(world.waveTime);
   h.add(world.intermissionTime);
   h.array(world.spawned.data(), world.spawned.size());
+  h.array(world.volleysSpawned.data(), world.volleysSpawned.size());
   h.add(world.stardust);
   for (uint32_t s = 0; s < world.siteCount(); ++s) {
     const BuildingSlot& b = world.site(s);
@@ -165,6 +177,8 @@ uint64_t hashWorld(const World& world) {
     h.add(b.cooldown);
     h.add(b.anchor);
     for (const uint8_t t : b.tiers) h.add(t);  // M2.2
+    h.add(b.energy);
+    h.add(b.charge);
   }
   h.array(world.rng.s, 4);
   h.add(world.commandsApplied);
@@ -172,6 +186,7 @@ uint64_t hashWorld(const World& world) {
   h.add(world.events.totalEmitted);
   world.enemies.hashInto(h);
   world.projectiles.hashInto(h);
+  world.falling.hashInto(h);
   return h.state;
 }
 

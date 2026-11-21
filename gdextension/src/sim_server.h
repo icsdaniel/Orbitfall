@@ -142,6 +142,26 @@ class SimServer : public Node {
   // Id of the current run's planet ("" before the first new_run).
   String get_planet_id() const;
   // --- end M2.8 ---
+  // --- M2.10 falling objects and shields ---
+  // Falling objects (meteors, bombs) in the BatchRenderer layout, interpolated
+  // like the enemies: custom = shape id, colour tier, 0, 0.
+  PackedFloat32Array get_falling_buffer();
+  int64_t get_falling_count() const { return curr_->fallingCount; }
+  // Objects within get_falling_warn_seconds() of impact: {pos: Vector2 (now),
+  // impact: Vector2 (on the surface), bearing (world rad), eta (s), damage,
+  // falling (def index), shield_slot (the online shield covering that bearing
+  // now, or -1)}.
+  TypedArray<Dictionary> get_falling_warnings() const;
+  float get_falling_warn_seconds() const;
+  // Placed shields: {slot, angle (world rad, interpolated), half_width (rad),
+  // dome_radius, energy, energy_max, energy_frac, online, charge_frac
+  // (recharge progress while offline), lit (charging lightChargeMult x faster)}.
+  TypedArray<Dictionary> get_shields() const;
+  // {index, id, name, damage, speed, size, spawn_radius, shape, color}.
+  TypedArray<Dictionary> get_falling_defs() const;
+  // Wave set ids in new_run(seed, wave_set) order (m1 is 0; m2_storm is the demo).
+  PackedStringArray get_wave_sets() const;
+  // --- end M2.10 ---
   Dictionary get_debug_stats() const;
   bool set_tunable(const String& path, float value);
   TypedArray<Dictionary> drain_events();
@@ -213,6 +233,7 @@ class SimServer : public Node {
   orbitfall_binding::Snapshot* prev_ = &buffers_[0];
   orbitfall_binding::Snapshot* curr_ = &buffers_[1];
   std::vector<float> enemyColors_;  // RGBA per enemy def; read by the sim thread, written while idle
+  std::vector<float> fallingColors_;  // M2.10: RGBA per falling def, same rules
   std::unordered_map<std::string, Color> palette_;
   uint64_t hashCache_ = 0;
   uint32_t hashCacheTick_ = 0xFFFFFFFFu;

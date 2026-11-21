@@ -32,7 +32,7 @@ func setup(sim_node: Node, play_mode: String) -> void:
 	for def: Dictionary in sim.get_building_defs():
 		if str(def.get("kind", "")) == "panel":
 			_panel = def
-		else:
+		elif str(def.get("kind", "tower")) == "tower":  # M2.10: not shields or supports
 			towers.append(def)
 	towers.sort_custom(func(x: Dictionary, y: Dictionary) -> bool:
 		return float(x.get("cost", 0.0)) < float(y.get("cost", 0.0)))

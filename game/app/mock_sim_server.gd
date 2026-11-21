@@ -15,6 +15,7 @@ const PHASE_LOST: int = 3
 const FLAG_LIT: int = 1
 const FLAG_SHADED: int = 2
 const FLAG_TARGET: int = 4
+const FLAG_SHIELD_OFFLINE: int = 8  # M2.10
 ## M2.3: damage types and trait bits, in engine order (core/content/content.h).
 const DAMAGE_TYPES: PackedStringArray = [
 	"kinetic", "explosive", "energy", "cryo", "emp", "pierce"]
@@ -146,6 +147,21 @@ var _lit_fraction: float = 0.0
 var _ms_per_tick: float = 0.0
 var _enemy_buffer: PackedFloat32Array = PackedFloat32Array()
 var _projectile_buffer: PackedFloat32Array = PackedFloat32Array()
+# --- M2.10 falling objects and shields (crude: Bombers do not drop bombs here) ---
+var _falling_defs: Array[Dictionary] = []
+var _wave_set_docs: Array[Dictionary] = []
+var _wave_set_index: int = 0
+var _planet_start_stardust: float = 150.0
+var _warn_seconds: float = 3.0
+var _light_charge: float = 2.0
+var _f_bearing: PackedFloat32Array = PackedFloat32Array()
+var _f_dist: PackedFloat32Array = PackedFloat32Array()
+var _f_def: PackedInt32Array = PackedInt32Array()
+var _f_warned: PackedByteArray = PackedByteArray()
+var _volley_queue: Array[Dictionary] = []
+var _slot_energy: PackedFloat32Array = PackedFloat32Array()
+var _slot_charge: PackedFloat32Array = PackedFloat32Array()
+var _falling_buffer: PackedFloat32Array = PackedFloat32Array()
 
 
 func _init() -> void:
@@ -192,6 +208,9 @@ func new_run(run_seed: int, wave_set: int = 0, planet_id: String = "") -> void:
 		planet = _find_planet(_default_planet)
 	if not planet.is_empty():
 		_apply_planet(planet)
+	if wave_set >= 0 and wave_set < _wave_set_docs.size():  # M2.10: pick the wave set
+		_wave_set_index = wave_set
+		_parse_waves(_wave_set_docs[wave_set], PackedStringArray())
 	_reset_run()
 
 
@@ -258,6 +277,9 @@ func place_building(slot: int, building: int, aim_offset: float = 0.0, layer: in
 	_slot_building[site] = building
 	_slot_aim[site] = aim_offset
 	_slot_cooldown[site] = 0.0
+	_slot_energy[site] = float(_buildings[building].get("shield_energy", 0.0))  # M2.10
+	_slot_charge[site] = 0.0
+	_slot_flags[site] &= ~FLAG_SHIELD_OFFLINE
 	for k: int in width:
 		_site_owner[base + (first + k) % _slot_count] = site
 	_set_tiers(site, [0, 0])  # M2.2
@@ -516,6 +538,7 @@ func start_wave() -> void:
 	_phase = PHASE_WAVE
 	_wave_time = 0.0
 	_build_spawn_queue()
+	_build_volley_queue()
 	_emit(&"WaveStarted", _wave_index, 0)
 
 
@@ -725,6 +748,11 @@ func get_building_defs() -> Array[Dictionary]:
 			"arc": b["arc"], "range": b["range"], "kind": b["kind"], "shape": b["shape"],
 			"color": b["color"], "footprint": b["footprint"], "layer": b["layer"],
 			"auras": b["auras"], "fire_rate": b["fire_rate"], "panel_rate": b["panel_rate"],
+			# M2.10 (zeros for non-shields; width is the full arc in rad)
+			"shield_width": b.get("shield_width", 0.0), "shield_height": b.get("shield_height", 0.0),
+			"shield_energy": b.get("shield_energy", 0.0),
+			"recharge_seconds": b.get("recharge_seconds", 0.0),
+			"regen_per_sec": b.get("regen_per_sec", 0.0), "upkeep_per_sec": 0.0,
 			# M2.3
 			"damage_type": b["damage_type"], "damage_type_name": b["damage_type_name"],
 			"damage": b["damage"], "splash": b["splash"],
@@ -825,6 +853,10 @@ func get_forecast(count: int) -> Array[Dictionary]:
 					"count": int(spawn["count"]) if exact else -1,
 					"shadow_caster": def["shadow_caster"],
 				})
+				entries[-1]["falling"] = -1  # M2.10
+				entries[-1]["volley"] = false
+				entries[-1]["spread"] = 0.0
+				entries[-1]["drops"] = int(def.get("drops", -1))
 				if exact and bool(def["shadow_caster"]):
 					# Crude guess: the Eclipser parks on the sun line where the sun
 					# will be once it has flown in.
@@ -833,11 +865,93 @@ func get_forecast(count: int) -> Array[Dictionary]:
 					var half: float = asin(clampf(float(def["size"]) / _radius, 0.0, 1.0))
 					ghost.append(centre - half)
 					ghost.append(centre + half)
+		if icons:  # M2.10: volleys of falling objects
+			var volleys: Array = wave.get("volleys", [])
+			for v: Dictionary in volleys:
+				entries.append({
+					"lane_bearing": v["bearing"], "enemy": -1, "falling": v["falling"],
+					"volley": true, "spread": v["spread"], "drops": -1,
+					"count": int(v["count"]) if exact else -1, "shadow_caster": false,
+				})
 		out.append({
 			"wave": w + 1, "light_mult": wave["light_mult"], "exact": exact,
 			"entries": entries, "eclipser_ghost_arcs": ghost,
 		})
 	return out
+
+
+# --- M2.10 falling objects and shields ---
+func get_falling_count() -> int:
+	return _f_dist.size()
+
+
+func get_falling_buffer() -> PackedFloat32Array:
+	var n: int = _f_dist.size()
+	_falling_buffer.resize(n * F)
+	for i: int in n:
+		var def: Dictionary = _falling_defs[_f_def[i]]
+		var dir: Vector2 = Vector2.from_angle(_f_bearing[i])
+		var size: float = float(def["size"])
+		BatchRenderer.write_instance(
+			_falling_buffer, i,
+			Transform2D(dir.angle() - PI * 0.5, Vector2(size, size), 0.0, dir * _f_dist[i]),
+			Palette.color_of(def["color"]), BatchRenderer.make_custom(int(def["shape"]), -1))
+	return _falling_buffer
+
+
+func get_falling_warnings() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for i: int in _f_dist.size():
+		var eta: float = _falling_eta(i)
+		if eta > _warn_seconds:
+			continue
+		var dir: Vector2 = Vector2.from_angle(_f_bearing[i])
+		out.append({
+			"pos": dir * _f_dist[i], "impact": dir * _radius, "bearing": _f_bearing[i],
+			"eta": eta, "damage": float(_falling_defs[_f_def[i]]["damage"]),
+			"falling": _f_def[i], "shield_slot": _shield_covering(_f_bearing[i]),
+		})
+	return out
+
+
+func get_falling_warn_seconds() -> float:
+	return _warn_seconds
+
+
+func get_shields() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for slot: int in _slot_count:
+		var b: int = _slot_building[slot]
+		if b < 0 or str(_buildings[b]["kind"]) != "shield":
+			continue
+		var def: Dictionary = _buildings[b]
+		var energy_max: float = float(def["shield_energy"])
+		var online: bool = _slot_flags[slot] & FLAG_SHIELD_OFFLINE == 0
+		out.append({
+			"slot": slot, "angle": TAU * float(slot) / float(_slot_count) + get_planet_rotation(),
+			"half_width": float(def["shield_width"]) * 0.5,
+			"dome_radius": _radius + float(def["shield_height"]),
+			"energy": _slot_energy[slot], "energy_max": energy_max,
+			"energy_frac": _slot_energy[slot] / energy_max if energy_max > 0.0 else 0.0,
+			"online": online,
+			"charge_frac": 0.0 if online else _slot_charge[slot] / maxf(float(def["recharge_seconds"]), 0.001),
+			"lit": _slot_flags[slot] & (FLAG_LIT | FLAG_SHADED) == FLAG_LIT,
+		})
+	return out
+
+
+func get_falling_defs() -> Array[Dictionary]:
+	return _falling_defs.duplicate(true)
+
+
+func get_wave_sets() -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	for doc: Dictionary in _wave_set_docs:
+		out.append(str(doc.get("id", "?")))
+	if out.is_empty():
+		out.append("mock")
+	return out
+# --- end M2.10 ---
 
 
 # ---------------------------------------------------------------- M2.8 home planets
@@ -880,6 +994,7 @@ func _apply_planet(planet: Dictionary) -> void:
 	_rot_accel = deg_to_rad(float(planet.get("rotAccel", 360.0)))
 	_rot_damping = float(planet.get("rotDamping", 4.0))
 	_start_stardust = float(planet.get("startStardust", 150.0))
+	_planet_start_stardust = _start_stardust  # M2.10
 	_sell_refund = float(planet.get("sellRefund", 0.7))
 	_surface_time_scale = float(planet.get("surfaceTimeScale", 0.75))
 	_layer_count = 2 if bool(planet.get("elevatedLayer", true)) else 1
@@ -972,6 +1087,13 @@ func debug_spawn(enemy_id: String, pos: Vector2) -> void:
 	_update_light()
 
 
+## M2.10 test/screenshot helper: a falling object of the given def id at (bearing, dist).
+func debug_spawn_falling(falling_id: String, bearing: float, dist: float) -> void:
+	for d: Dictionary in _falling_defs:
+		if d["id"] == falling_id:
+			_add_falling(int(d["index"]), bearing, dist)
+
+
 ## Test helper: jump to the next intermission (or to victory after the last wave).
 func debug_skip_wave() -> void:
 	_e_hp.fill(-1.0)
@@ -999,8 +1121,9 @@ func _record(method: StringName, args: Array) -> void:
 	calls.append({"method": method, "args": args})
 
 
-func _emit(type: StringName, a: int, b: int, pos: Vector2 = Vector2.ZERO) -> void:
-	_events.append({"type": String(type), "tick": _tick, "a": a, "b": b, "x": pos.x, "y": pos.y})
+func _emit(type: StringName, a: int, b: int, pos: Vector2 = Vector2.ZERO, value: float = 0.0) -> void:
+	_events.append({
+		"type": String(type), "tick": _tick, "a": a, "b": b, "x": pos.x, "y": pos.y, "value": value})
 	if _events.size() > 4096:
 		_events = _events.slice(2048)
 
@@ -1033,6 +1156,15 @@ func _reset_run() -> void:
 	_site_owner.resize(sites)
 	_site_owner.fill(-1)
 	_recompute_layout()
+	_slot_energy.resize(sites)
+	_slot_energy.fill(0.0)
+	_slot_charge.resize(sites)
+	_slot_charge.fill(0.0)
+	_f_bearing.clear()
+	_f_dist.clear()
+	_f_def.clear()
+	_f_warned.clear()
+	_volley_queue.clear()
 	_e_pos.clear()
 	_e_prev.clear()
 	_e_def.clear()
@@ -1117,8 +1249,10 @@ func _step() -> void:
 		_sun = wrapf(_sun + _sun_speed * TICK, -PI, PI)
 		_wave_time += TICK
 		_step_spawns()
+		_step_volleys()
 		_step_enemies()
 		_update_light()
+		_step_falling()
 		_step_towers()
 		_step_projectiles()
 		_compact_enemies()
@@ -1383,8 +1517,113 @@ func _compact_enemies() -> void:
 		_update_light()
 
 
+# --- M2.10 crude falling objects and shields ---
+func _build_volley_queue() -> void:
+	_volley_queue.clear()
+	var volleys: Array = _waves[_wave_index].get("volleys", [])
+	for v: Dictionary in volleys:
+		var n: int = int(v["count"])
+		for k: int in n:
+			_volley_queue.append({
+				"t": float(v["start"]) + float(v["seconds"]) * float(k) / float(n),
+				"falling": v["falling"],
+				"bearing": float(v["bearing"]) + _rng.randf_range(-1.0, 1.0) * float(v["spread"]),
+			})
+	_volley_queue.sort_custom(_spawn_before)
+
+
+func _step_volleys() -> void:
+	while not _volley_queue.is_empty() and float(_volley_queue[0]["t"]) <= _wave_time:
+		var v: Dictionary = _volley_queue.pop_front()
+		var def: Dictionary = _falling_defs[int(v["falling"])]
+		_add_falling(int(v["falling"]), float(v["bearing"]), float(def["spawn_radius"]))
+
+
+func _add_falling(def_index: int, bearing: float, dist: float) -> void:
+	_f_def.append(def_index)
+	_f_bearing.append(bearing)
+	_f_dist.append(dist)
+	_f_warned.append(0)
+
+
+func _falling_eta(i: int) -> float:
+	return maxf(_f_dist[i] - _radius, 0.0) / maxf(float(_falling_defs[_f_def[i]]["speed"]), 0.001)
+
+
+func _shield_covering(bearing: float) -> int:
+	var best: int = -1
+	var best_energy: float = -1.0
+	for slot: int in _slot_count:
+		var b: int = _slot_building[slot]
+		if b < 0 or str(_buildings[b]["kind"]) != "shield" or _slot_flags[slot] & FLAG_SHIELD_OFFLINE:
+			continue
+		var centre: float = TAU * float(slot) / float(_slot_count) + _rot
+		if absf(angle_difference(centre, bearing)) <= float(_buildings[b]["shield_width"]) * 0.5 \
+				and _slot_energy[slot] > best_energy:
+			best = slot
+			best_energy = _slot_energy[slot]
+	return best
+
+
+func _step_falling() -> void:
+	for slot: int in _slot_count:  # recharge, lightChargeMult x while lit
+		var b: int = _slot_building[slot]
+		if b < 0 or str(_buildings[b]["kind"]) != "shield":
+			continue
+		var lit: bool = _slot_flags[slot] & (FLAG_LIT | FLAG_SHADED) == FLAG_LIT
+		var rate: float = TICK * (_light_charge if lit else 1.0)
+		if _slot_flags[slot] & FLAG_SHIELD_OFFLINE:
+			_slot_charge[slot] += rate
+			if _slot_charge[slot] >= float(_buildings[b]["recharge_seconds"]):
+				_slot_flags[slot] &= ~FLAG_SHIELD_OFFLINE
+				_slot_energy[slot] = float(_buildings[b]["shield_energy"])
+				_slot_charge[slot] = 0.0
+				_emit(&"ShieldOnline", slot, 0)
+		else:
+			_slot_energy[slot] = minf(_slot_energy[slot] + float(_buildings[b]["regen_per_sec"]) * rate,
+				float(_buildings[b]["shield_energy"]))
+	var i: int = _f_dist.size() - 1
+	while i >= 0:
+		var def: Dictionary = _falling_defs[_f_def[i]]
+		_f_dist[i] -= float(def["speed"]) * TICK
+		var dir: Vector2 = Vector2.from_angle(_f_bearing[i])
+		if _f_warned[i] == 0 and _falling_eta(i) <= _warn_seconds:
+			_f_warned[i] = 1
+			_emit(&"FallingWarning", _f_def[i], _shield_covering(_f_bearing[i]), dir * _radius, _falling_eta(i))
+		var gone: bool = false
+		var slot: int = _shield_covering(_f_bearing[i])
+		if slot >= 0 and _f_dist[i] <= _radius + float(_buildings[_slot_building[slot]]["shield_height"]):
+			_slot_energy[slot] = maxf(_slot_energy[slot] - float(def["damage"]), 0.0)
+			_emit(&"ShieldAbsorbed", slot, _f_def[i], dir * _f_dist[i], _slot_energy[slot])
+			if _slot_energy[slot] <= 0.0:
+				_slot_flags[slot] |= FLAG_SHIELD_OFFLINE
+				_slot_charge[slot] = 0.0
+				_emit(&"ShieldOffline", slot, 0)
+			gone = true
+		elif _f_dist[i] <= _radius:
+			_hp = maxf(_hp - float(def["damage"]), 0.0)
+			_emit(&"FallingImpact", _f_def[i], 0, dir * _radius, float(def["damage"]))
+			if _hp <= 0.0 and _phase == PHASE_WAVE:
+				_phase = PHASE_LOST
+				_emit(&"GameOver", _wave_index, 0)
+			gone = true
+		if gone:
+			var last: int = _f_dist.size() - 1
+			_f_dist[i] = _f_dist[last]
+			_f_bearing[i] = _f_bearing[last]
+			_f_def[i] = _f_def[last]
+			_f_warned[i] = _f_warned[last]
+			_f_dist.resize(last)
+			_f_bearing.resize(last)
+			_f_def.resize(last)
+			_f_warned.resize(last)
+		i -= 1
+
+
 func _check_wave_end() -> void:
 	if _phase != PHASE_WAVE or not _spawn_queue.is_empty() or not _e_pos.is_empty():
+		return
+	if not _volley_queue.is_empty() or not _f_dist.is_empty():  # M2.10
 		return
 	_emit(&"WaveCleared", _wave_index, 0)
 	_wave_index += 1
@@ -1491,6 +1730,8 @@ func _load_json_content(errors: PackedStringArray) -> void:
 	if waves_list.is_empty():
 		errors.append("mock: no wave set under %s, using the built-in sample" % _content_dir)
 		return
+	_wave_set_docs = waves_list
+	_wave_set_index = 0
 	var wave_set: Dictionary = waves_list[0]
 	_default_planet = str(wave_set.get("planet", "medium"))
 	_planets = _read_dir("planets")  # M2.8: all home planets for the picker
@@ -1504,6 +1745,18 @@ func _load_json_content(errors: PackedStringArray) -> void:
 	_exclusive_tier = int(rules.get("upgradeExclusiveTier", 2))  # M2.2
 	_surface_ease = float(rules.get("surfaceTimeEaseSeconds", 0.3))
 	_elevated_bonus = float(rules.get("elevatedRangeBonus", 0.15))
+	_warn_seconds = float(rules.get("fallingWarnSeconds", 3.0))  # M2.10
+	_light_charge = float(rules.get("lightChargeMult", 2.0))
+	_falling_defs = []
+	for d: Dictionary in _read_dir("falling"):
+		var fv: Dictionary = d.get("visual", {})
+		_falling_defs.append({
+			"index": _falling_defs.size(), "id": str(d.get("id", "?")),
+			"name": str(d.get("id", "?")).capitalize(), "damage": float(d.get("damage", 1.0)),
+			"speed": float(d.get("speed", 60.0)), "size": float(d.get("size", 6.0)),
+			"spawn_radius": float(d.get("spawnRadius", 0.0)),
+			"shape": int(SHAPES.get(str(fv.get("shape", "star")), 4)), "color": str(fv.get("color", "")),
+		})
 	if not planet.is_empty():
 		_apply_planet(planet)
 	if not sun.is_empty():
@@ -1526,6 +1779,13 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				float(shot.get("splash", 0.0)), float(shot.get("speed", 0.0)),
 				float(d.get("panelRate", 0.0)), str(visual.get("shape", "square")))
 			b["color"] = str(visual.get("color", ""))
+			if d.get("shield") is Dictionary:  # M2.10
+				var sh: Dictionary = d["shield"]
+				b["shield_width"] = deg_to_rad(float(sh.get("widthDeg", 60.0)))
+				b["shield_height"] = float(sh.get("height", 40.0))
+				b["shield_energy"] = float(sh.get("energy", 24.0))
+				b["recharge_seconds"] = float(sh.get("rechargeSeconds", 12.0))
+				b["regen_per_sec"] = float(sh.get("regenPerSec", 0.0))
 			if b["kind"] == "tower":
 				var type_name: String = str(shot.get("type", "kinetic"))
 				b["damage_type"] = maxi(DAMAGE_TYPES.find(type_name), 0)
@@ -1579,6 +1839,19 @@ func _load_json_content(errors: PackedStringArray) -> void:
 		enemy_ids[str(e["id"])] = int(e["index"])
 	for e: Dictionary in _enemies:
 		e["pops_into"] = int(enemy_ids.get(str(e.get("_pops_into_id", "")), -1))
+	_parse_waves(wave_set, errors)
+
+
+## Waves of one wave set document (planet, lanes, enemies and falling objects loaded).
+func _parse_waves(wave_set: Dictionary, errors: PackedStringArray) -> void:
+	var enemy_ids: Dictionary[String, int] = {}
+	for e: Dictionary in _enemies:
+		enemy_ids[str(e["id"])] = int(e["index"])
+	var falling_ids: Dictionary[String, int] = {}
+	for f: Dictionary in _falling_defs:
+		falling_ids[str(f["id"])] = int(f["index"])
+	var start: float = float(wave_set.get("startStardust", -1.0))
+	_start_stardust = start if start >= 0.0 else _planet_start_stardust
 	_waves = []
 	var waves: Array = wave_set.get("waves", [])
 	for w: Dictionary in waves:
@@ -1595,7 +1868,20 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				"bearing": float(_lanes.get(str(sp.get("lane", "")), 0.0)),
 				"lane": str(sp.get("lane", "")),
 			})
+		var volleys: Array[Dictionary] = []  # M2.10
+		var raw_volleys: Array = w.get("falling", [])
+		for v: Dictionary in raw_volleys:
+			var fid: String = str(v.get("object", ""))
+			if not falling_ids.has(fid):
+				errors.append("mock: unknown falling object '%s'" % fid)
+				continue
+			volleys.append({
+				"falling": falling_ids[fid], "bearing": deg_to_rad(float(v.get("bearingDeg", 0.0))),
+				"spread": deg_to_rad(float(v.get("spreadDeg", 0.0))), "count": int(v.get("count", 1)),
+				"start": float(v.get("startSeconds", 0.0)), "seconds": float(v.get("seconds", 0.0)),
+			})
 		_waves.append({
+			"volleys": volleys,
 			"light_mult": float(w.get("lightMult", 1.0)),
 			"spawn_seconds": float(w.get("spawnSeconds", 15.0)),
 			"exact_ahead": int(forecast.get("exactAhead", 1)),

@@ -103,12 +103,14 @@ TEST_CASE("every shipped content file loads with zero errors") {
   const Files files = shipped_files();
   // Every file ended up as exactly one definition (rules.json is the +1).
   CHECK(files.size() == db.planets.size() + db.suns.size() + db.buildings.size() +
-                            db.enemies.size() + db.waveSets.size() + 2);
+                            db.enemies.size() + db.waveSets.size() + db.falling.size() + 2);
   CHECK(db.planets.size() == 3);  // M2.8: small, medium, large
   CHECK(db.suns.size() == 1);
-  CHECK(db.buildings.size() == 3);
-  CHECK(db.enemies.size() == 5);
-  CHECK(db.waveSets.size() == 1);
+  CHECK(db.buildings.size() == 4);  // M2.10: + shield
+  CHECK(db.enemies.size() == 6);    // M2.10: + bomber
+  CHECK(db.waveSets.size() == 2);   // M2.10: + the m2_storm demo set
+  CHECK(db.falling.size() == 2);    // M2.10: meteor, bomb
+  CHECK(db.wave_set_index("m1") == 0);  // the M1 run stays wave set 0
 }
 
 TEST_CASE("loading from strings matches loading from the directory") {

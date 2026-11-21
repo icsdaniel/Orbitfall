@@ -14,6 +14,9 @@ enum EnemyFlag : uint16_t {
   // Bits 1-2: EclipserState for hovering enemies.
   kEnemyStateShift = 1,
   kEnemyStateMask = 3u << 1,
+  // M2.10: bits 3-8 count the bombs a Bomber has dropped.
+  kEnemyBombShift = 3,
+  kEnemyBombMask = 63u << 3,
 };
 
 // Behaviour state of an EnemyBehavior::Eclipser unit (BRIEF §8.2).
@@ -21,6 +24,15 @@ enum class EclipserState : uint16_t { Approach = 0, Hover = 1, Descend = 2 };
 inline EclipserState eclipserState(uint16_t flags) {
   return static_cast<EclipserState>((flags & kEnemyStateMask) >> kEnemyStateShift);
 }
+
+// M2.10: behaviour state of an EnemyBehavior::Bomber unit (same bits): fly in
+// on its lane to orbitRadius, circle the planet dropping a bomb every
+// dropSeconds, then dive at the planet.
+enum class BomberState : uint16_t { Approach = 0, Orbit = 1, Dive = 2 };
+inline BomberState bomberState(uint16_t flags) {
+  return static_cast<BomberState>((flags & kEnemyStateMask) >> kEnemyStateShift);
+}
+inline int bombsDropped(uint16_t flags) { return (flags & kEnemyBombMask) >> kEnemyBombShift; }
 
 // Spawner hook: adds one enemy of `enemyType` (index into ContentDB::enemies)
 // on lane `lane` of the planet, at the spawn radius on the lane bearing (plus
