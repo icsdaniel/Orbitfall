@@ -220,6 +220,28 @@ class SimServer : public Node {
   PackedFloat32Array get_site_actives() const;
   // --- M2.6 towers batch 1 (end) ---
 
+  // --- M2.11 bent aim and focus fire (begin) ---
+  // set_aim(slot, offset) (above) snaps to get_aim_rules().offsets, costs
+  // reaim_cost_frac of the building's cost and is refused mid-wave: emits
+  // AimChanged {a: site, b: building, x: offset rad, value: cost} or
+  // CommandRejected {b: 4 Unaffordable / 6 NotAllowed / 7 WrongPhase, x: 3}.
+  // Per site: the aim offset (rad) added to the slot normal.
+  PackedFloat32Array get_site_aims() const;
+  // Mount steps and focus numbers from rules.json: {offsets: PackedFloat32Array
+  // (rad), reaim_cost_frac, between_waves_only, focus_bonus, focus_cap,
+  // focus_radius, lens_merge}.
+  Dictionary get_aim_rules() const;
+  // Stardust a re-aim of the building on `slot` costs; -1 when there is none
+  // or it has no aim mount.
+  float get_reaim_cost(int64_t slot) const;
+  // Focus points: [{local: Vector2 (planet frame), pos: Vector2 (world, at the
+  // interpolated rotation), radius, feeders: PackedInt32Array (sites),
+  // lenses: int, mult: float (damage multiplier inside)}].
+  Array get_focus_points() const;
+  // get_beams(): the overcharged float gains +2 for a merged Lens beam (from
+  // the focus point outward).
+  // --- M2.11 bent aim and focus fire (end) ---
+
   // --- extras (not in CONTRACT.md) ---
   // Colours for palette keys that are not colour tiers ("enemy.eclipser"); default white.
   void set_palette(const Dictionary& colors);

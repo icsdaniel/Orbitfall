@@ -8,6 +8,7 @@
 #include "sim/world.h"
 #include "systems/buildings.h"
 #include "systems/enemies.h"
+#include "systems/focus.h"
 #include "systems/systems.h"
 #include "systems/upgrades.h"
 
@@ -214,6 +215,10 @@ void towerTargeting(World& world, float /*dt*/) {
     const TowerAim aim = towerAim(world, s);
     const BuildingStats stats = slotStats(*def, b);  // M2.2 upgrades x M2.1 elevated/auras
     const TargetingMode mode = static_cast<TargetingMode>(b.mode);
+    // M2.11: the zones this tower feeds, in world space, when it prefers them.
+    float zx[kMaxZonesPerTower], zy[kMaxZonesPerTower], zr2[kMaxZonesPerTower];
+    const int zones = db.rules.focus.preferZone ? feederZones(world, s, zx, zy, zr2) : 0;
+    bool bestIn = false;
     uint32_t best = kInvalidIndex;
     float bestKey = 0.0f, bestTie = 0.0f;
     world.grid.query(aim.x - stats.range, aim.y - stats.range, aim.x + stats.range,
@@ -229,13 +234,22 @@ void towerTargeting(World& world, float /*dt*/) {
       } else if (mode == TargetingMode::Close) {
         key = (ex - aim.x) * (ex - aim.x) + (ey - aim.y) * (ey - aim.y);
       }
-      const bool better = best == kInvalidIndex || key < bestKey ||
-                          (key == bestKey && (toPlanet < bestTie || (toPlanet == bestTie && i < best)));
-      if (better) {
-        best = i;
-        bestKey = key;
-        bestTie = toPlanet;
+      bool in = false;  // M2.11: inside a zone this tower feeds
+      for (int z = 0; z < zones && !in; ++z) {
+        const float dx = ex - zx[z], dy = ey - zy[z];
+        in = dx * dx + dy * dy <= zr2[z];
       }
+      if (best != kInvalidIndex && in != bestIn) {
+        if (!in) return;
+      } else if (best != kInvalidIndex) {
+        const bool better = key < bestKey ||
+                            (key == bestKey && (toPlanet < bestTie || (toPlanet == bestTie && i < best)));
+        if (!better) return;
+      }
+      best = i;
+      bestIn = in;
+      bestKey = key;
+      bestTie = toPlanet;
     });
     if (best != kInvalidIndex) {
       b.flags |= kSlotHasTarget;
@@ -299,6 +313,7 @@ void towerFire(World& world, float dt) {
     p.range[k] = stats.range;
     p.splash[k] = stats.splash;
     p.type[k] = static_cast<uint16_t>(b.type);
+    p.site[k] = static_cast<uint16_t>(s);  // M2.11: focus zones it feeds
     p.slow[k] = stats.slow;  // M2.6
     p.shieldMult[k] = b.shieldDamageMult;
     p.pierce[k] = static_cast<uint16_t>(stats.pierce > 0.0f ? stats.pierce + 0.5f : 0.0f);
@@ -361,6 +376,8 @@ void collisions(World& world, float dt) {
       const float slow = p.slow[i];  // M2.6
       const float slowSeconds = source.projectile.slowSeconds;
       const float shieldBonus = p.shieldMult[i];
+      // M2.11 focus fire: a hit inside a zone the firing tower feeds.
+      const float focus = focusBonusAt(world, p.site[i], hx, hy);
       if (splash > 0.0f) {
         const float reach = splash + pad;
         world.grid.query(hx - reach, hy - reach, hx + reach, hy + reach, [&](uint32_t k) {
@@ -370,14 +387,14 @@ void collisions(World& world, float dt) {
           const float r = splash + def.size;  // the blast touches the enemy's disc
           if (dx * dx + dy * dy > r * r) return;
           applySlow(e, k, slow, slowSeconds);
-          damageEnemy(world, k, damage * damageMultiplier(db, source, def, fraction),
+          damageEnemy(world, k, damage * focus * damageMultiplier(db, source, def, fraction),
                       source.projectile.type, shieldBonus);
         });
         spent = true;
         break;
       }
       applySlow(e, hit, slow, slowSeconds);
-      damageEnemy(world, hit, damage * damageMultiplier(db, source, db.enemies[e.type[hit]], fraction),
+      damageEnemy(world, hit, damage * focus * damageMultiplier(db, source, db.enemies[e.type[hit]], fraction),
                   source.projectile.type, shieldBonus);
       if (p.pierce[i] == 0) {
         spent = true;

@@ -8,6 +8,8 @@
   "surfaceTimeEaseSeconds": 0.3,
   "elevatedRangeBonus": 0.15,
   "upgradeExclusiveTier": 2,
+  "aim": { "offsetsDeg": [-60, -30, 0, 30, 60], "reaimCostFrac": 0.1, "reaimBetweenWavesOnly": true },
+  "focus": { "bonusPerExtra": 0.25, "cap": 0.5, "radius": 50, "minAltitude": 10, "lensMerge": true, "preferZone": true },
   "instability": {
     "curve": [[0, 0], [1, 0.2], [2, 0.45], [3, 0.8], [4, 1.2], [6, 2.2]],
     "threshold": 1.0,

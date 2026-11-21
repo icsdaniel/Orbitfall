@@ -409,6 +409,34 @@ struct InstabilityDef {
   float overheatSeconds = 10.0f;
 };
 
+// M2.11 bent aim (rules.json "aim", optional; DESIGN Q33 default "re-aim
+// between waves"). Aim-mounted towers fire along slot normal + offset. Without
+// the block any offset within +-kMaxAimOffsetDeg is allowed and SetAim is free
+// at any time (the M1 behaviour).
+struct AimRulesDef {
+  std::vector<float> offsets;        // rad, ascending; offsets snap to the nearest (empty = free)
+  float reaimCostFrac = 0.0f;        // SetAim costs this fraction of the building's cost
+  bool reaimBetweenWavesOnly = false;  // SetAim refused (WrongPhase) while a wave runs
+};
+
+// M2.11 focus fire (rules.json "focus", optional; DESIGN Q34). Where the aim
+// axes of two or more aim-mounted towers cross within their ranges a focus
+// point forms in the planet frame. A hit inside its zone (radius `radius`)
+// from a feeding tower deals x(1 + min(bonusPerExtra x (feeders - 1), cap)).
+// Two or more beam towers (Sun Lens) feeding one zone merge into one beam
+// beyond it with summed power that pierces. Without the block there is no bonus
+// and no merge (points are still solved, for the UI).
+struct FocusRulesDef {
+  float bonusPerExtra = 0.0f;  // +25% = 0.25 per feeding tower beyond the first
+  float cap = 0.0f;            // total bonus cap (0.5 = +50%)
+  float radius = 50.0f;        // zone radius; crossings closer than this merge into one point
+  float minAltitude = 10.0f;   // crossings lower than this above the surface are ignored
+  bool lensMerge = false;
+  // Towers feeding a zone pick targets inside it before any other (then by
+  // their targeting mode), as players expect focus fire to do (toy D7).
+  bool preferZone = false;
+};
+
 struct RulesDef {  // content/rules.json: global tunables
   int tickRate = 30;
   float killBounty = 1.0f;  // multiplier on EnemyDef::bounty
@@ -423,6 +451,8 @@ struct RulesDef {  // content/rules.json: global tunables
   int upgradeExclusiveTier = 2;
   float fallingWarnSeconds = 3.0f;  // M2.10: falling objects are telegraphed this long before impact
   InstabilityDef instability;  // M2.7
+  AimRulesDef aim;      // M2.11
+  FocusRulesDef focus;  // M2.11
 };
 
 struct ContentDB {

@@ -97,7 +97,9 @@ void initWorld(World& world, const SimConfig& config) {
   world.auraLinks.clear();
   world.auraLinks.reserve(world.siteCount() * 4);
   world.beams.clear();
-  world.beams.reserve(world.siteCount());  // M2.6: at most one beam per site
+  world.beams.reserve(world.siteCount() * 2);  // M2.6: one beam per site (+ M2.11 merged beams)
+  world.focus.clear();
+  world.focus.reserve(kMaxFocusPoints);  // M2.11
   world.channel = 0.0f;
   world.rng.seed(config.seed);
   world.commandsApplied = 0;
