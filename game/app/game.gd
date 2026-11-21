@@ -289,6 +289,7 @@ func _build_scene() -> void:
 	hud.build_menu.sell_requested.connect(_on_sell_requested)
 	hud.build_menu.build_above_requested.connect(_on_build_above_requested)
 	hud.build_menu.upgrade_requested.connect(_on_upgrade_requested)
+	hud.build_menu.activate_requested.connect(_on_activate_requested)  # M2.6
 	hud.build_menu.closed.connect(_on_menu_closed)
 
 
@@ -428,6 +429,21 @@ func _building_extra(slot: int, layer: int, owner: int) -> Dictionary:
 	if kind == "shield":  # M2.10: live energy and the recharge rule
 		notes.append(BuildMenu.shield_note(planet_view.building_def(planet_view.site_building(owner)),
 			_shield_state(owner)))
+	# M2.6: auras that are not multipliers (Radar detection, Amplifier shield damage).
+	var links: PackedInt32Array = planet_view.adjacency_links
+	var seen: Dictionary[int, bool] = {}
+	for i: int in range(0, links.size() - 2, 3):
+		if links[i + 1] != owner or seen.has(links[i + 2]):
+			continue
+		seen[links[i + 2]] = true
+		if links[i + 2] == 4:
+			notes.append("Sees camo (Radar)")
+		elif links[i + 2] == 5:
+			notes.append("x2 against shields (Amplifier)")
+	# M2.6: the Sun Lens shows the light it channels.
+	if planet_view.building_def(planet_view.site_building(owner)).get("projectile_kind", -1) == 2 \
+			and sim.has_method(&"get_channel"):
+		notes.append("Channelling %d%% of the panels' light" % roundi(float(sim.get_channel()) * 100.0))
 	var carrying: bool = false
 	if layer == 0 and planet_view.layer_count > 1:
 		var first: int = planet_view.site_slot(owner)
@@ -541,6 +557,7 @@ func _on_sell_requested() -> void:
 ## M2.2: keeps the open building's upgrade paths current (tiers, affordability,
 ## Build view only). Rebuilt only when something it shows changed.
 func _refresh_upgrades(force: bool = false) -> void:
+	_refresh_active()
 	if selected_slot < 0 or not hud.build_menu.is_open() or not sim.has_method(&"get_slot_upgrades"):
 		_upgrade_key = ""
 		planet_view.selected_stats = {}
@@ -565,6 +582,26 @@ func _on_upgrade_requested(path: int) -> void:
 	if selected_slot < 0 or bands.band != BandController.Band.SURFACE:
 		return
 	sim.upgrade_building(planet_view.site_of(selected_slot, selected_layer), path)
+
+
+## M2.6: keeps the open building's active button (Overcharge) current.
+func _refresh_active() -> void:
+	if selected_slot < 0 or not hud.build_menu.is_open() or not sim.has_method(&"get_site_actives"):
+		return
+	var owner: int = planet_view.site_owner(planet_view.site_of(selected_slot, selected_layer))
+	if owner < 0:
+		return
+	var actives: PackedFloat32Array = sim.get_site_actives()
+	if 2 * owner + 1 < actives.size():
+		hud.build_menu.set_active_state(actives[2 * owner], actives[2 * owner + 1])
+
+
+## M2.6: tap the tower, then its active button (or F): Overcharge. Works in
+## both views; the sim refuses it while it cools down.
+func _on_activate_requested() -> void:
+	if selected_slot < 0 or not sim.has_method(&"activate_building"):
+		return
+	sim.activate_building(planet_view.site_of(selected_slot, selected_layer))
 
 
 func _on_menu_closed() -> void:

@@ -14,6 +14,13 @@ const TIER_NAMES: Array[String] = [
 const NAMED: Dictionary[String, Color] = {
 	"tower.cannon": Color(0.93, 0.55, 0.25),
 	"tower.gatling": Color(0.45, 0.85, 0.95),
+	# M2.6 towers batch 1
+	"tower.flak": Color(0.95, 0.40, 0.30),
+	"tower.railgun": Color(0.75, 0.80, 1.0),
+	"tower.cryo": Color(0.55, 0.95, 1.0),
+	"tower.radar": Color(0.45, 0.95, 0.55),
+	"tower.amplifier": Color(0.90, 0.45, 0.95),
+	"tower.sun_lens": Color(1.0, 0.86, 0.45),
 	"building.solar_panel": Color(0.35, 0.55, 1.0),
 	"planet.small": Color(0.22, 0.27, 0.36),  # M2.8
 	"planet.medium": Color(0.17, 0.22, 0.33),

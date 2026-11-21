@@ -11,7 +11,15 @@ signal sell_requested
 signal build_above_requested
 ## M2.2: buy the next tier of an upgrade path of the selected building.
 signal upgrade_requested(path: int)
+## M2.6: fire the active ability (Sun Lens Overcharge) of the selected building.
+signal activate_requested
 signal closed
+
+const LIST_COLUMNS: int = 2
+const BUTTON_WIDTH: float = 210.0
+const BUTTON_HEIGHT: float = 58.0
+## Height of the building list before it scrolls (canvas px of the 1280x720 base).
+const LIST_MAX_HEIGHT: float = 320.0
 
 var slot: int = -1
 ## Layer the menu is open for: 0 ground, 1 elevated (M2.1).
@@ -21,7 +29,15 @@ var previewed: int = -1
 var _box: VBoxContainer
 var _title: Label
 var _info: Label
-var _list: VBoxContainer
+## M2.6: two columns of building buttons in a scroll box, so a long roster
+## still fits a landscape phone (touch drag, mouse wheel; Left/Right or [ ]
+## pick, Enter builds).
+var _list: GridContainer
+var _scroll: ScrollContainer
+## M2.6: active ability button (Overcharge), shown for buildings that have one.
+var _active: Button
+var _active_name: String = ""
+var _active_key_text: String = ""
 var _build: Button
 var _sell: Button
 var _above: Button
@@ -51,9 +67,17 @@ func _init() -> void:
 	head.add_child(close_button)
 	_info = UiKit.label("", 18, Palette.TEXT_DIM)
 	_box.add_child(_info)
-	_list = VBoxContainer.new()
-	_list.add_theme_constant_override(&"separation", 6)
-	_box.add_child(_list)
+	_scroll = ScrollContainer.new()
+	_scroll.name = "BuildingScroll"
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_box.add_child(_scroll)
+	_list = GridContainer.new()
+	_list.name = "BuildingList"
+	_list.columns = LIST_COLUMNS
+	_list.add_theme_constant_override(&"h_separation", 6)
+	_list.add_theme_constant_override(&"v_separation", 6)
+	_scroll.add_child(_list)
 	_build = UiKit.button("Build", Vector2(230.0, 68.0), Color(0.14, 0.42, 0.24))
 	_build.name = "Build"
 	_build.pressed.connect(_on_build_pressed)
@@ -66,6 +90,12 @@ func _init() -> void:
 	_above.name = "BuildAbove"
 	_above.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_above.pressed.connect(_on_above_pressed)
+	_active_key_text = "" if phone else "  (F)"
+	_active = UiKit.button("Overcharge", Vector2(230.0, 62.0), Color(0.55, 0.42, 0.10))
+	_active.name = "Active"
+	_active.visible = false
+	_active.pressed.connect(func() -> void: activate_requested.emit())
+	_box.add_child(_active)
 	upgrades = UpgradePanel.new()
 	upgrades.name = "Upgrades"
 	upgrades.visible = false
@@ -130,7 +160,7 @@ func open_empty(
 		var footprint: int = int(def.get("footprint", 1))
 		if footprint > 1:
 			label += "  (%d slots)" % footprint
-		var b: Button = UiKit.button(label, Vector2(230.0, 62.0))
+		var b: Button = UiKit.button(label, Vector2(BUTTON_WIDTH, BUTTON_HEIGHT))
 		b.name = "Building%d" % index
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -151,7 +181,10 @@ func open_empty(
 		_costs[index] = cost
 		_names[index] = str(def.get("name", def.get("id", "?")))
 	_list.visible = true
+	_scroll.visible = true
+	_fit_scroll()
 	_build.visible = true
+	_active.visible = false
 	_sell.visible = false
 	_above.visible = false
 	upgrades.visible = false
@@ -161,7 +194,14 @@ func open_empty(
 	if _buttons.has(preferred):
 		_set_preview(preferred)
 	elif not _buttons.is_empty():
-		_set_preview(_buttons.keys()[0])
+		# M2.6: with nothing used yet, preview the first tower (not a support building).
+		var first: int = _buttons.keys()[0]
+		for def: Dictionary in defs:
+			var index: int = int(def.get("index", -1))
+			if _buttons.has(index) and str(def.get("kind", "")) == "tower":
+				first = index
+				break
+		_set_preview(first)
 	_refresh()
 
 
@@ -188,7 +228,13 @@ func open_building(
 	if carrying:
 		_info.text += "\nCarries a building: sell that one first"
 	_list.visible = false
+	_scroll.visible = false
 	_build.visible = false
+	# M2.6: the active ability (tap the button, or F with a keyboard).
+	var active: Dictionary = def.get("active", {})
+	_active_name = str(active.get("name", ""))
+	_active.visible = not active.is_empty()
+	set_active_state(0.0, 0.0)
 	_sell.visible = true
 	# A foundation in use stays pressable: the sim refuses the sale and the HUD
 	# toasts why; the button is only dimmed.
@@ -276,6 +322,74 @@ func above_button() -> Button:
 
 func info_text() -> String:
 	return _info.text
+
+
+## M2.6: refreshes the active button: `cooldown` seconds left before it can
+## fire again, `running` seconds left of the ability itself.
+func set_active_state(cooldown: float, running: float) -> void:
+	if not _active.visible:
+		return
+	if running > 0.0:
+		_active.text = "%s  %.0fs" % [_active_name, ceilf(running)]
+		_active.disabled = true
+	elif cooldown > 0.0:
+		_active.text = "%s in %.0fs" % [_active_name, ceilf(cooldown)]
+		_active.disabled = true
+	else:
+		_active.text = _active_name + _active_key_text
+		_active.disabled = false
+
+
+func active_button() -> Button:
+	return _active
+
+
+## M2.6: previews the next (+1) or previous (-1) building of the list.
+func step_preview(direction: int) -> void:
+	var keys: Array[int] = []
+	for child: Node in _list.get_children():
+		for index: int in _buttons:
+			if _buttons[index] == child:
+				keys.append(index)
+	if keys.is_empty():
+		return
+	var at: int = keys.find(previewed)
+	var next: int = keys[posmod(at + direction, keys.size())] if at >= 0 else keys[0]
+	_set_preview(next)
+	_scroll.ensure_control_visible(_buttons[next])
+
+
+## M2.6 keyboard path: Left/Right or [ ] pick a building, Enter builds; F fires
+## the selected building's active.
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not visible:
+		return
+	var key: InputEventKey = event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	var code: int = key.physical_keycode if key.physical_keycode != KEY_NONE else key.keycode
+	if _scroll.visible:
+		match code:
+			KEY_RIGHT, KEY_BRACKETRIGHT, KEY_TAB:
+				step_preview(-1 if key.shift_pressed else 1)
+				get_viewport().set_input_as_handled()
+			KEY_LEFT, KEY_BRACKETLEFT:
+				step_preview(-1)
+				get_viewport().set_input_as_handled()
+			KEY_ENTER, KEY_KP_ENTER:
+				_on_build_pressed()
+				get_viewport().set_input_as_handled()
+	elif code == KEY_F and _active.visible and not _active.disabled:
+		activate_requested.emit()
+		get_viewport().set_input_as_handled()
+
+
+## Caps the list's height so the menu fits a landscape phone; the rest scrolls.
+func _fit_scroll() -> void:
+	var rows: int = ceili(float(_buttons.size()) / float(LIST_COLUMNS))
+	var full: float = rows * (BUTTON_HEIGHT + 6.0)
+	_scroll.custom_minimum_size = Vector2(
+		LIST_COLUMNS * (BUTTON_WIDTH + 6.0), minf(full, LIST_MAX_HEIGHT))
 
 
 func _clear_list() -> void:

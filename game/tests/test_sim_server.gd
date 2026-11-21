@@ -231,7 +231,7 @@ func test_load_content_shipped_content_has_no_errors() -> void:
 	assert_float(server.get_surface_time_ease_seconds()).is_between(0.0, 5.0)
 
 	var buildings: Array[Dictionary] = server.get_building_defs()
-	assert_int(buildings.size()).is_equal(4)  # M2.10: + shield
+	assert_int(buildings.size()).is_equal(10)  # M2.10: + shield; M2.6: + six towers of batch 1
 	var ids: Array[String] = []
 	for def: Dictionary in buildings:
 		assert_bool(def.has_all(
