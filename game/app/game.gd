@@ -71,6 +71,7 @@ var _planet_arg: String = ""
 ## M2.10: index of the wave set to play (get_wave_sets); 0 = the default set.
 var wave_set: int = 0
 var _waves_arg: String = ""
+var _demo_shield_bearing: float = NAN
 
 
 func _ready() -> void:
@@ -651,6 +652,7 @@ func _setup_demo() -> void:
 		elif str(def.get("kind", "tower")) == "tower":  # M2.10: not shields or supports
 			towers.append(int(def.get("index", -1)))
 	var n: int = sim.get_slot_count()
+	_place_demo_shield(defs, n)  # M2.10
 	if panel >= 0:
 		for slot: int in [n - 3, n - 2, n - 1, 0, 1]:
 			sim.place_building(slot, panel, 0.0)
@@ -665,12 +667,47 @@ func _setup_demo() -> void:
 	if mock != null:
 		var sun: Vector2 = Vector2.from_angle(float(sim.get_sun_bearing()))
 		mock.debug_spawn("eclipser", sun * 260.0 + sun.orthogonal() * 22.0)
+		_spawn_demo_meteors(mock)  # M2.10
 		if _end_arg == "won":
 			mock.debug_set_phase(PHASE_WON)
 		elif _end_arg == "lost":
 			mock.debug_set_planet_hp(0.0)
 			mock.debug_set_phase(PHASE_LOST)
 	bands.update()
+
+
+## M2.10: a shield under the next wave's first volley (or a quarter turn round),
+## so demo screenshots show a dome catching meteors; on the mock also two meteors,
+## one over the shield and one that will hit the planet.
+func _place_demo_shield(defs: Array[Dictionary], n: int) -> void:
+	var shield: int = -1
+	for def: Dictionary in defs:
+		if str(def.get("kind", "")) == "shield":
+			shield = int(def.get("index", -1))
+	if shield < 0:
+		return
+	var bearing: float = PI * 0.5
+	var forecast: Array[Dictionary] = sim.get_forecast(1)
+	if not forecast.is_empty():
+		for entry: Dictionary in forecast[0].get("entries", []):
+			if bool(entry.get("volley", false)):
+				bearing = Palette.angle_of(entry.get("lane_bearing", bearing))
+				break
+	var slot: int = posmod(roundi(bearing / TAU * float(n)), n)
+	sim.place_building(slot, shield, 0.0)
+	_demo_shield_bearing = bearing
+
+
+## M2.10: on the mock, meteors in flight for the demo screenshot (after the demo
+## has stepped the sim): one warned over the shield, one warned that will hit the
+## planet, one still high up.
+func _spawn_demo_meteors(mock: MockSimServer) -> void:
+	if is_nan(_demo_shield_bearing):
+		return
+	var r: float = float(sim.get_planet_radius())
+	mock.debug_spawn_falling("meteor", _demo_shield_bearing, r + 150.0)
+	mock.debug_spawn_falling("meteor", _demo_shield_bearing + PI * 0.6, r + 120.0)
+	mock.debug_spawn_falling("bomb", _demo_shield_bearing - PI * 0.4, r + 330.0)
 
 
 ## M2.1 screenshot layout, between waves: towers with towers above them, and on
