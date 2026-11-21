@@ -16,6 +16,29 @@ int remainingLayers(const EnemyDef& def, float hp) {
   return layers < 1 ? 1 : (layers > def.layers ? def.layers : layers);
 }
 
+namespace {
+
+// Fills enemy `i` of `enemyType` at (x, y), heading for the planet centre.
+void initEnemy(World& world, uint32_t i, int enemyType, int lane, float x, float y) {
+  const EnemyDef& def = world.content->enemies[static_cast<size_t>(enemyType)];
+  EnemyPool& e = world.enemies;
+  const float len = std::sqrt(x * x + y * y);
+  const float dx = len > 0.0f ? x / len : 0.0f, dy = len > 0.0f ? y / len : 0.0f;
+  e.posX[i] = x;
+  e.posY[i] = y;
+  e.velX[i] = -dx * def.speed;
+  e.velY[i] = -dy * def.speed;
+  e.hp[i] = layerHp(def);
+  e.traits[i] = def.traits;
+  e.shield[i] = def.shield;
+  e.type[i] = static_cast<uint16_t>(enemyType);
+  e.spawnType[i] = static_cast<uint16_t>(enemyType);  // M2.5
+  e.lane[i] = static_cast<uint16_t>(lane);
+  ++world.enemiesSpawned;
+}
+
+}  // namespace
+
 uint32_t spawnEnemy(World& world, int enemyType, int lane) {
   if (world.content == nullptr || world.planet == nullptr) return kInvalidIndex;
   const ContentDB& db = *world.content;
@@ -30,19 +53,28 @@ uint32_t spawnEnemy(World& world, int enemyType, int lane) {
 
   const uint32_t i = world.enemies.add();
   if (i == kInvalidIndex) return kInvalidIndex;
-  const float dx = std::cos(bearing), dy = std::sin(bearing);
-  EnemyPool& e = world.enemies;
-  e.posX[i] = dx * radius;
-  e.posY[i] = dy * radius;
-  e.velX[i] = -dx * def.speed;
-  e.velY[i] = -dy * def.speed;
-  e.hp[i] = layerHp(def);
-  e.traits[i] = def.traits;
-  e.shield[i] = def.shield;
-  e.type[i] = static_cast<uint16_t>(enemyType);
-  e.lane[i] = static_cast<uint16_t>(lane);
-  ++world.enemiesSpawned;
+  initEnemy(world, i, enemyType, lane, std::cos(bearing) * radius, std::sin(bearing) * radius);
   return i;
+}
+
+uint32_t spawnEnemyAt(World& world, int enemyType, int lane, float x, float y) {
+  if (world.content == nullptr) return kInvalidIndex;
+  if (enemyType < 0 || enemyType >= static_cast<int>(world.content->enemies.size())) return kInvalidIndex;
+  const uint32_t i = world.enemies.add();
+  if (i == kInvalidIndex) return kInvalidIndex;
+  initEnemy(world, i, enemyType, lane, x, y);
+  return i;
+}
+
+int regrowParent(const ContentDB& db, int top, int current) {
+  const int n = static_cast<int>(db.enemies.size());
+  int t = top;
+  for (int steps = 0; t >= 0 && t < n && steps < n; ++steps) {
+    const int next = db.enemies[static_cast<size_t>(t)].popsInto;
+    if (next == current) return t;
+    t = next;
+  }
+  return kNoIndex;
 }
 
 namespace {
@@ -192,6 +224,61 @@ void landing(World& world, float /*dt*/) {
       world.phase = Phase::Lost;
       world.emit(EventType::GameOver, static_cast<int32_t>(world.waveIndex));
     }
+  }
+}
+
+// --- M2.5 enemies batch 1 ---
+
+void regrow(World& world, float dt) {
+  if (!world.running()) return;
+  const ContentDB& db = *world.content;
+  EnemyPool& e = world.enemies;
+  for (uint32_t i = 0; i < e.count; ++i) {
+    if (!(e.traits[i] & kTraitRegrow) || (e.flags[i] & kEnemyDead)) continue;
+    e.calm[i] += dt;
+    const EnemyDef& def = db.enemies[e.type[i]];
+    if (!(def.regrowSeconds > 0.0f) || e.calm[i] < def.regrowSeconds) continue;
+    e.calm[i] = 0.0f;
+    const int up = regrowParent(db, e.spawnType[i], e.type[i]);
+    if (up == kNoIndex) continue;  // at the layer it spawned with: nothing to regrow
+    const EnemyDef& next = db.enemies[static_cast<size_t>(up)];
+    world.emit(EventType::LayerRegrown, e.type[i], up, e.posX[i], e.posY[i]);
+    if (def.speed > 0.0f && next.speed != def.speed) {
+      const float scale = next.speed / def.speed;
+      e.velX[i] *= scale;
+      e.velY[i] *= scale;
+    }
+    e.type[i] = static_cast<uint16_t>(up);
+    e.hp[i] = layerHp(next);
+    // A broken shield stays broken (as on popping down); other traits follow the layer.
+    e.traits[i] = e.shield[i] > 0.0f ? next.traits : next.traits & ~static_cast<uint32_t>(kTraitShielded);
+  }
+}
+
+void splits(World& world, float /*dt*/) {
+  if (!world.running()) return;
+  const ContentDB& db = *world.content;
+  EnemyPool& e = world.enemies;
+  const uint32_t n = e.count;  // children are appended past n and are not visited
+  for (uint32_t i = 0; i < n; ++i) {
+    if ((e.flags[i] & (kEnemyDead | kEnemySplit)) != (kEnemyDead | kEnemySplit)) continue;
+    e.flags[i] &= static_cast<uint16_t>(~kEnemySplit);
+    const EnemyDef& def = db.enemies[e.type[i]];
+    if (def.splitInto == kNoIndex || def.splitCount <= 0) continue;
+    const float x = e.posX[i], y = e.posY[i];
+    const float len = std::sqrt(x * x + y * y);
+    // Sideways to the path (tangent to the planet), evenly over +-spread.
+    const float tx = len > 0.0f ? -y / len : 1.0f, ty = len > 0.0f ? x / len : 0.0f;
+    int spawned = 0;
+    for (int k = 0; k < def.splitCount; ++k) {
+      const float u = def.splitCount > 1
+                          ? 2.0f * static_cast<float>(k) / static_cast<float>(def.splitCount - 1) - 1.0f
+                          : 0.0f;
+      const float off = u * def.splitSpread;
+      if (spawnEnemyAt(world, def.splitInto, e.lane[i], x + tx * off, y + ty * off) != kInvalidIndex)
+        ++spawned;  // a full pool drops the child (overflowCount)
+    }
+    world.emit(EventType::EnemySplit, e.type[i], def.splitInto, x, y, static_cast<float>(spawned));
   }
 }
 

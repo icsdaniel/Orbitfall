@@ -330,6 +330,17 @@ struct EnemyDef {
   BomberDef bomber;
   float damageMult[kDamageTypeCount] = {1, 1, 1, 1, 1, 1};
   VisualDef visual;
+  // --- M2.5 enemies batch 1 ---
+  // Regrow (Spore): after regrowSeconds without taking any damage the unit
+  // regains one layer (steps back up its popsInto chain), never above the type
+  // it spawned as. 0 = no regrow. JSON: "regrow": {"seconds": s}.
+  float regrowSeconds = 0.0f;
+  // Splitter: killed by damage (not by landing), it splits into splitCount
+  // units of splitInto, spread evenly across +-splitSpread world units sideways
+  // to its path. JSON: "split": {"into": id, "count": n, "spread": u}.
+  int splitInto = kNoIndex;
+  int splitCount = 0;
+  float splitSpread = 0.0f;
 
   // BRIEF §6 landing damage.
   float land_damage(int remainingLayers) const {

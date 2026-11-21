@@ -22,6 +22,9 @@ class EntryIcon:
 	var volley: bool = false
 	## M2.10: the enemy drops falling objects (a bomber).
 	var drops: bool = false
+	## M2.5: trait bits (BatchRenderer.TRAIT_*), drawn as the same cues as in the
+	## world and the codex, so a Spore and a Splitter of one colour tell apart.
+	var traits: int = 0
 
 	func _init() -> void:
 		custom_minimum_size = Vector2(70.0, 56.0)
@@ -39,7 +42,7 @@ class EntryIcon:
 				Color(0.0, 0.0, 0.0, 0.75))
 		if volley:  # M2.10: fall streak behind the icon
 			draw_line(centre + Vector2(-16.0, -14.0), centre, Color(color, 0.55), 4.0, true)
-		ShapeDraw.draw(self, shape, centre, 12.0, 0.0, color, 1.5)
+		CodexPanel.draw_cued_shape(self, shape, centre, 12.0, color, traits & ~BatchRenderer.TRAIT_LAYERED)
 		if drops:  # M2.10: bomb dot under a bomber
 			draw_circle(centre + Vector2(11.0, 11.0), 4.5, Palette.named("falling.bomb"))
 		if count >= 0:
@@ -195,6 +198,7 @@ func _make_card(wave: Dictionary, is_next: bool, in_wave: bool) -> Control:
 			else _enemy_def(entry.get("enemy")))
 		icon.shape = Palette.shape_of(def.get("shape", 0))
 		icon.color = Palette.color_of(def.get("color", Palette.tier(0)))
+		icon.traits = 0 if icon.volley else int(def.get("traits", 0))  # M2.5
 		icon.count = int(entry.get("count", -1))
 		icon.bearing = Palette.angle_of(entry.get("lane_bearing", 0.0))
 		icon.shadow_caster = bool(entry.get("shadow_caster", false))

@@ -302,6 +302,7 @@ struct PendingEnemy {
   std::string where;
   std::string popsInto;
   std::string bomb;  // M2.10: the falling object a Bomber drops
+  std::string splitInto;  // M2.5: the enemy a Splitter splits into
 };
 struct PendingSpawn {
   std::string lane, enemy;
@@ -806,6 +807,23 @@ struct Loader {
           h.field_error("spawnRadius", "must be >= hoverRadius");
       }
     }
+    // --- M2.5: Regrow and Splitter (optional blocks; the trait bit follows the block) ---
+    if (o.has("regrow")) {
+      const Obj ro = o.object("regrow");
+      if (ro.valid()) ro.num("seconds", e.regrowSeconds, kPositive);
+    }
+    if (e.regrowSeconds > 0.0f) e.traits |= kTraitRegrow;
+    else if (e.traits & kTraitRegrow) o.field_error("traits", "'regrow' needs a 'regrow' block with 'seconds' > 0");
+    if (o.has("split")) {
+      const Obj so = o.object("split");
+      if (so.valid()) {
+        so.str("into", pe.splitInto);
+        so.integer("count", e.splitCount, Range{1.0, false, 8.0});
+        if (so.has("spread")) so.num("spread", e.splitSpread, kNonNeg);
+      }
+    }
+    if (e.splitCount > 0) e.traits |= kTraitSplitter;
+    else if (e.traits & kTraitSplitter) o.field_error("traits", "'splitter' needs a 'split' block");
     pe.where = o.where();
     if (o.has("popsInto")) o.str("popsInto", pe.popsInto);
     pendingEnemies.push_back(std::move(pe));
@@ -964,6 +982,12 @@ struct Loader {
       }
       if (e.behavior == EnemyBehavior::Bomber && !e.hasBomber)
         err(pe.where, "missing field 'bomber' (behavior 'bomber')");
+      if (!pe.splitInto.empty()) {  // M2.5
+        e.splitInto = db.enemy_index(pe.splitInto);
+        if (e.splitInto == kNoIndex) err(pe.where, "'split': 'into': unknown enemy id '" + pe.splitInto + "'");
+      } else if (e.splitCount > 0) {
+        err(pe.where, "'split': missing field 'into'");
+      }
       if (!pe.popsInto.empty()) {
         e.popsInto = db.enemy_index(pe.popsInto);
         if (e.popsInto == kNoIndex)
@@ -994,6 +1018,33 @@ struct Loader {
       if (e.layers != next.layers + 1)
         err(where, "'layers': " + std::to_string(e.layers) + " but popsInto '" + next.id + "' has " +
                        std::to_string(next.layers) + " (must be exactly one fewer)");
+    }
+
+    // M2.5: a split may not lead back to itself (it would never end), and a
+    // regrowing enemy must have layers to regrow.
+    for (size_t i = 0; i < db.enemies.size(); ++i) {
+      const EnemyDef& e = db.enemies[i];
+      const std::string& where = pendingEnemies[i].where;
+      if (e.regrowSeconds > 0.0f && e.layers < 2 && e.popsInto == kNoIndex) {
+        bool isLayer = false;  // the bottom of a chain regrows into the layer above
+        for (const EnemyDef& o : db.enemies) isLayer = isLayer || o.popsInto == static_cast<int>(i);
+        if (!isLayer) err(where, "'regrow': a single-layer enemy that no chain pops into has nothing to regrow");
+      }
+      if (e.splitInto == kNoIndex) continue;
+      // Every type reachable through splitInto and popsInto must never split back into i.
+      std::vector<int> seen(db.enemies.size(), 0), stack{e.splitInto};
+      bool loops = false;
+      while (!stack.empty() && !loops) {
+        const int cur = stack.back();
+        stack.pop_back();
+        if (cur == kNoIndex || seen[static_cast<size_t>(cur)]) continue;
+        seen[static_cast<size_t>(cur)] = 1;
+        if (cur == static_cast<int>(i)) loops = true;
+        const EnemyDef& c = db.enemies[static_cast<size_t>(cur)];
+        stack.push_back(c.splitInto);
+        stack.push_back(c.popsInto);
+      }
+      if (loops) err(where, "'split': splitting leads back to '" + e.id + "' (it would never end)");
     }
 
     for (size_t i = 0; i < db.waveSets.size(); ++i) {

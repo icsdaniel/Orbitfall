@@ -18,6 +18,9 @@ enum EnemyFlag : uint16_t {
   // M2.10: bits 3-8 count the bombs a Bomber has dropped.
   kEnemyBombShift = 3,
   kEnemyBombMask = 63u << 3,
+  // M2.5: killed by damage with a split to do; the splits system spawns the
+  // children before cleanup removes it.
+  kEnemySplit = 1u << 9,
 };
 
 // Behaviour state of an EnemyBehavior::Eclipser unit (BRIEF §8.2).
@@ -40,6 +43,14 @@ inline int bombsDropped(uint16_t flags) { return (flags & kEnemyBombMask) >> kEn
 // seeded jitter when content asks for it), heading for the planet. Returns the
 // pool index, or kInvalidIndex when the arguments are bad or the pool is full.
 uint32_t spawnEnemy(World& world, int enemyType, int lane);
+// M2.5: same, at world position (x, y), heading for the planet centre (used
+// for Splitter children). Returns kInvalidIndex when the pool is full.
+uint32_t spawnEnemyAt(World& world, int enemyType, int lane, float x, float y);
+
+// M2.5 Regrow: the layer above `current` in the popsInto chain that starts at
+// `top` (the type the unit spawned as), or kNoIndex when `current` is `top`
+// or not in that chain.
+int regrowParent(const ContentDB& db, int top, int current);
 
 // Layers left on an enemy of this definition with `hp` on its current layer
 // (BRIEF §6 landing: landDamagePerLayer * remaining layers).
