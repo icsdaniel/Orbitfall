@@ -51,7 +51,7 @@ func test_real_and_mock_sim_have_the_m2_6_block() -> void:
 		assert_bool(server.has_method(method)).override_failure_message("SimServer lacks " + method).is_true()
 		assert_bool(mock.has_method(method)).override_failure_message("mock lacks " + method).is_true()
 	var defs: Array[Dictionary] = server.get_building_defs()
-	assert_int(defs.size()).is_equal(9)
+	assert_int(defs.size()).is_equal(10)  # M2.10 shield + M2.6 six
 	var lens: Dictionary = defs[_index(defs, "sun_lens")]
 	assert_str(str(lens["name"])).is_equal("Sun Lens")
 	assert_int(int(lens["projectile_kind"])).is_equal(2)
