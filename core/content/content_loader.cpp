@@ -63,9 +63,12 @@ constexpr Named<BuildingLayer> kBuildingLayers[] = {{"ground", BuildingLayer::Gr
 constexpr Named<AuraStat> kAuraStats[] = {{"range", AuraStat::Range},
                                           {"fireRate", AuraStat::FireRate},
                                           {"damage", AuraStat::Damage},
-                                          {"income", AuraStat::Income}};
+                                          {"income", AuraStat::Income},
+                                          {"detect", AuraStat::Detect},          // M2.6
+                                          {"shieldDamage", AuraStat::ShieldDamage}};
 constexpr Named<ProjectileKind> kProjectileKinds[] = {{"dot", ProjectileKind::Dot},
-                                                      {"shell", ProjectileKind::Shell}};
+                                                      {"shell", ProjectileKind::Shell},
+                                                      {"beam", ProjectileKind::Beam}};  // M2.6
 constexpr Named<DamageType> kDamageTypes[] = {
     {"kinetic", DamageType::Kinetic}, {"explosive", DamageType::Explosive},
     {"energy", DamageType::Energy},   {"cryo", DamageType::Cryo},
@@ -82,7 +85,11 @@ constexpr Named<EnemyBehavior> kEnemyBehaviors[] = {{"lane", EnemyBehavior::Lane
 constexpr Named<UpgradeStat> kUpgradeStats[] = {
     {"damage", UpgradeStat::Damage}, {"fireRate", UpgradeStat::FireRate},
     {"range", UpgradeStat::Range},   {"arc", UpgradeStat::Arc},
-    {"splash", UpgradeStat::Splash}, {"income", UpgradeStat::Income}};
+    {"splash", UpgradeStat::Splash}, {"income", UpgradeStat::Income},
+    // M2.6
+    {"slow", UpgradeStat::Slow},     {"pierce", UpgradeStat::Pierce},
+    {"auraAmount", UpgradeStat::AuraAmount}, {"auraRadius", UpgradeStat::AuraRadius},
+    {"activeCooldown", UpgradeStat::ActiveCooldown}, {"activePower", UpgradeStat::ActivePower}};
 constexpr Named<ModOp> kModOps[] = {{"add", ModOp::Add}, {"mul", ModOp::Mul}};
 constexpr Named<uint32_t> kTraits[] = {
     {"camo", kTraitCamo},         {"armored", kTraitArmored},
@@ -376,6 +383,7 @@ struct Loader {
       t.str("effect", def.effect);
       if (t.has("easierWith")) t.str("easierWith", def.easierWith);
       if (t.has("mult")) read_type_mults(t, "mult", def.mult);
+      if (t.has("missChance")) t.num("missChance", def.missChance, Range{0.0, false, 0.75});  // M2.6
     }
   }
 
@@ -440,19 +448,40 @@ struct Loader {
     if (o.has("aimOffsetDeg"))
       o.angle("aimOffsetDeg", b.aimOffset, Range{-kMaxAimOffsetDeg, false, kMaxAimOffsetDeg});
     read_visual(o, b.visual, true);
+    b.name = b.id;  // M2.6: display name (the client capitalises the id when absent)
+    if (o.has("name")) o.str("name", b.name);
 
     if (kindOk && b.kind == BuildingKind::Tower) {
       o.angle("arcDeg", b.arc, Range{0.0, true, 180.0});
       o.num("range", b.range, kPositive);
-      o.num("fireRate", b.fireRate, kPositive);
       const Obj pr = o.object("projectile");
       if (pr.valid()) {
         b.hasProjectile = true;
         pr.named("kind", kProjectileKinds, b.projectile.kind);
-        pr.num("speed", b.projectile.speed, kPositive);
+        // M2.6: a beam has no flying shot: speed is optional (unused).
+        if (b.projectile.kind != ProjectileKind::Beam || pr.has("speed"))
+          pr.num("speed", b.projectile.speed, kPositive);
         pr.num("damage", b.projectile.damage, kNonNeg);
         pr.named("type", kDamageTypes, b.projectile.type);
         if (pr.has("splash")) pr.num("splash", b.projectile.splash, kNonNeg);
+        // M2.6 (optional)
+        if (pr.has("pierce")) pr.integer("pierce", b.projectile.pierce, Range{0.0, false, 32.0});
+        if (pr.has("slow")) pr.num("slow", b.projectile.slow, Range{0.0, false, kMaxSlow});
+        if (pr.has("slowSeconds")) pr.num("slowSeconds", b.projectile.slowSeconds, kNonNeg);
+      }
+      // M2.6: a beam deals damage per second and has no fire rate (default 1).
+      if (b.hasProjectile && b.projectile.kind == ProjectileKind::Beam && !o.has("fireRate")) {
+        b.fireRate = 1.0f;
+      } else {
+        o.num("fireRate", b.fireRate, kPositive);
+      }
+      if (o.has("beam")) {  // M2.6 Sun Lens
+        const Obj bo = o.object("beam");
+        if (bo.valid()) {
+          if (bo.has("rampSeconds")) bo.num("rampSeconds", b.beam.rampSeconds, kNonNeg);
+          if (bo.has("rampStart")) bo.num("rampStart", b.beam.rampStart, kUnit);
+          if (bo.has("channelFloor")) bo.num("channelFloor", b.beam.channelFloor, kUnit);
+        }
       }
       if (const Value* t = o.array("targeting")) {
         if (t->array.empty()) o.field_error("targeting", "a tower needs at least one mode");
@@ -480,9 +509,23 @@ struct Loader {
         if (sh.has("upkeepPerSec")) sh.num("upkeepPerSec", b.shield.upkeepPerSec, kNonNeg);
       }
     }
+    if (o.has("active")) read_active(o, b);  // M2.6
     if (kindOk && o.has("paths")) read_paths(o, b);  // M2.2
     buildingWhere.push_back(o.where());
     db.buildings.push_back(std::move(b));
+  }
+
+  // M2.6 "active": { "id", "name", "cooldown", "seconds", "damageMult" } or null.
+  void read_active(const Obj& o, BuildingDef& b) {
+    const Obj a = o.object("active");
+    if (!a.valid()) return;
+    b.hasActive = true;
+    a.str("id", b.active.id);
+    b.active.name = b.active.id;
+    if (a.has("name")) a.str("name", b.active.name);
+    a.num("cooldown", b.active.cooldown, kPositive);
+    a.num("seconds", b.active.seconds, kPositive);
+    if (a.has("damageMult")) a.num("damageMult", b.active.damageMult, Range{1.0, false, 20.0});
   }
 
   // "auras": [{ "stat", "amount", "radius", "affects": [kinds] }] (M2.1,
@@ -571,7 +614,24 @@ struct Loader {
     double value = 0.0;
     if (!statOk || !opOk) return;
     const bool forPanel = mod.stat == UpgradeStat::Income;
-    if (forPanel != (b.kind == BuildingKind::Panel)) {
+    const bool forAura = mod.stat == UpgradeStat::AuraAmount || mod.stat == UpgradeStat::AuraRadius;
+    const bool forActive =
+        mod.stat == UpgradeStat::ActiveCooldown || mod.stat == UpgradeStat::ActivePower;
+    // M2.6: aura stats need auras (any kind); active stats need an active.
+    if (forAura) {
+      if (b.auras.empty()) {
+        mo.field_error("stat", "'auraAmount' and 'auraRadius' need the building to have auras");
+        return;
+      }
+    } else if (forActive) {
+      if (!b.hasActive) {
+        mo.field_error("stat", "'activeCooldown' and 'activePower' need an 'active'");
+        return;
+      }
+    } else if (b.kind == BuildingKind::Support) {
+      mo.field_error("stat", "support buildings only take aura stats");
+      return;
+    } else if (forPanel != (b.kind == BuildingKind::Panel)) {
       mo.field_error("stat", forPanel ? "'income' only applies to panels"
                                       : "only 'income' applies to panels");
       return;
