@@ -10,6 +10,8 @@ extends Node2D
 ## playing live; with --ff-wave=N [--ff-seconds=S], --ff-shadow or --ff-end the run is
 ## first fast-forwarded to that moment (wave N running for S seconds, or its
 ## intermission when S < 0; the first enemy shadow on the planet; the end screen).
+## M2.8: a home planet picker opens before the first run and after Restart;
+## --planet=small|medium|large skips it (screenshots, bots), and so do --play and --demo.
 
 const PHASE_INTERMISSION: int = 0
 const PHASE_WAVE: int = 1
@@ -57,6 +59,12 @@ var _ff_wave: int = 0
 var _ff_seconds: float = 0.0
 var _ff_shadow: bool = false
 var _ff_end: bool = false
+## M2.8 home planets. Set planet_picker_enabled before the node enters the tree
+## to start straight away (tests). planet_id "" = the wave set's own planet.
+var planet_picker_enabled: bool = true
+var planet_id: String = ""
+var planet_picker: PlanetPicker
+var _planet_arg: String = ""
 
 
 func _ready() -> void:
@@ -65,6 +73,10 @@ func _ready() -> void:
 	_slot_pick_px = config.num("input", "slotPickPx", _slot_pick_px)
 	_create_sim()
 	_build_scene()
+	if _planet_arg != "":
+		planet_id = _planet_arg
+	if _planet_arg != "" or _play != "" or _demo:
+		planet_picker_enabled = false
 	_start_run(run_seed)
 	var start_band: String = _start_band if _start_band != "" else config.text("bands", "startBand", "surface")
 	bands.snap_to(BandController.Band.ORBIT if start_band == "orbit" else BandController.Band.SURFACE)
@@ -85,6 +97,7 @@ func _ready() -> void:
 		_select_site(_select_arg)  # M2.1: a site, so slot + N selects the elevated ring
 	if _debug_arg:
 		hud.set_debug_visible(true)
+	_open_planet_picker()
 
 
 func _process(delta: float) -> void:
@@ -136,6 +149,33 @@ func site_screen_position(site: int) -> Vector2:
 
 func restart() -> void:
 	_start_run(_new_seed())
+	_open_planet_picker()
+
+
+## M2.8: the picker sits over a fresh run on the last planet; picking another
+## planet restarts the run there with the same seed.
+func _open_planet_picker() -> void:
+	if not planet_picker_enabled or not sim.has_method(&"get_planet_defs"):
+		return
+	var defs: Array[Dictionary] = sim.get_planet_defs()
+	if defs.size() < 2:
+		return
+	clear_selection()
+	planet_picker.open(defs, _current_planet_id())
+
+
+func _current_planet_id() -> String:
+	if sim.has_method(&"get_planet_id"):
+		return str(sim.get_planet_id())
+	return planet_id
+
+
+func _on_planet_chosen(chosen: String) -> void:
+	if chosen == "" or chosen == _current_planet_id():
+		planet_id = chosen if chosen != "" else planet_id
+		return
+	planet_id = chosen
+	_start_run(run_seed)
 
 
 func clear_selection() -> void:
@@ -203,7 +243,18 @@ func _build_scene() -> void:
 	hud.name = "HUD"
 	add_child(hud)
 	hud.setup(sim, bands, input_router, config, camera)
-	input_router.ui_blocker = hud.is_point_over_ui
+
+	# M2.8: the planet picker sits on its own layer above the HUD and blocks the
+	# planet's gestures while it is open.
+	var picker_layer: CanvasLayer = CanvasLayer.new()
+	picker_layer.name = "PlanetPickerLayer"
+	picker_layer.layer = 20
+	add_child(picker_layer)
+	planet_picker = PlanetPicker.new()
+	picker_layer.add_child(planet_picker)
+	planet_picker.planet_chosen.connect(_on_planet_chosen)
+	input_router.ui_blocker = func(pos: Vector2) -> bool:
+		return planet_picker.visible or hud.is_point_over_ui(pos)
 
 	input_router.tapped.connect(_on_tapped)
 	input_router.long_pressed.connect(_on_long_pressed)
@@ -228,8 +279,14 @@ func _build_scene() -> void:
 
 func _start_run(new_seed: int) -> void:
 	run_seed = new_seed
-	sim.new_run(run_seed, 0)
+	if planet_id != "":
+		sim.new_run(run_seed, 0, planet_id)  # M2.8
+	else:
+		sim.new_run(run_seed, 0)
 	_phase = -1
+	# M2.8: the views fit the planet, whose size may have changed.
+	planet_view.sync()
+	bands.snap_to(bands.band)
 	bands.reset_time_scale()
 	input_router.reset_stats()
 	hud.debug_overlay.reset_stats()
@@ -501,6 +558,8 @@ func _parse_args() -> void:
 			_debug_arg = true
 		elif arg.begins_with("--seed="):
 			run_seed = arg.get_slice("=", 1).to_int()
+		elif arg.begins_with("--planet="):  # M2.8: skip the picker
+			_planet_arg = arg.get_slice("=", 1)
 		elif arg.begins_with("--band="):
 			_start_band = arg.get_slice("=", 1)
 		elif arg.begins_with("--select="):

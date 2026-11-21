@@ -126,6 +126,7 @@ struct RunOptions {
   int waveSet = 0;         // index into ContentDB::waveSets
   uint32_t maxWaves = 99;  // stop before this 0-based wave
   bool trace = false;      // print the state at every wave start
+  int planet = kNoIndex;   // M2.8: home planet (index into ContentDB::planets), kNoIndex = the wave set's
 };
 
 // Plays one run to the end (or `maxWaves`) and reports what happened.

@@ -3,11 +3,13 @@
 // balance targets.
 #include "bots/bots.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "content/content.h"
@@ -106,7 +108,50 @@ struct Bot {
         gatling(content.building_index("gatling")),
         cannon(content.building_index("cannon")),
         panel(content.building_index("solar_panel")),
-        drill(content.building_index("drill")) {}
+        drill(content.building_index("drill")) {
+    m1Layout();
+  }
+
+  // --- M1 bots' slot layout (M2.8: derived from the planet so every home
+  // planet plays the same plan; on the 36-slot medium planet these are the M1
+  // lists {3, 4, 2, 5, 1, 6}, {17, 16, 18, 15, 19, 14}, ...) ---
+  std::vector<int> laneA, laneB;  // towers under each lane, best first
+  std::vector<int> chaserPanels, chaserTowers;
+
+  int slotAt(int i) {
+    const int n = static_cast<int>(world().slotCount());
+    return n > 0 ? ((i % n) + n) % n : 0;
+  }
+  // Slots a tower can cover a lane from: within 35 degrees of it, nearest
+  // first, ties stepping toward the other lane; at most 6.
+  std::vector<int> m1LaneSlots(float bearing, float other) {
+    const World& w = world();
+    const int n = static_cast<int>(w.slotCount());
+    const int dir = wrapPi(other - bearing) >= 0.0f ? 1 : -1;
+    std::vector<std::pair<float, int>> near;  // (sort key, slot)
+    for (int i = 0; i < n; ++i) {
+      const float off = wrapPi(w.slotAngle(static_cast<uint32_t>(i)) - bearing);
+      const float dist = std::round(std::fabs(off) / kDeg * 100.0f) / 100.0f;
+      if (dist > 35.0f) continue;
+      const bool toward = (off > 0.0f ? 1 : -1) == dir;
+      near.push_back({dist * 2.0f + (toward || dist == 0.0f ? 0.0f : 1.0f), i});
+    }
+    std::stable_sort(near.begin(), near.end(),
+                     [](const std::pair<float, int>& x, const std::pair<float, int>& y) { return x.first < y.first; });
+    std::vector<int> out;
+    for (size_t k = 0; k < near.size() && k < 6; ++k) out.push_back(near[k].second);
+    return out;
+  }
+  void m1Layout() {
+    const World& w = world();
+    if (w.planet == nullptr || w.planet->lanes.size() < 2 || w.slotCount() == 0) return;
+    const float a = w.planet->lanes[0].bearing, b = w.planet->lanes[1].bearing;
+    laneA = m1LaneSlots(a, b);
+    laneB = m1LaneSlots(b, a);
+    static const int panels[] = {0, -1, 1, -2, 2, -3}, towers[] = {3, -4, 4, -5, 5, -6};
+    for (int q : panels) chaserPanels.push_back(slotAt(q));
+    for (int t : towers) chaserTowers.push_back(slotAt(t));
+  }
 
   World& world() { return sim.world(); }
 
@@ -190,7 +235,6 @@ struct Bot {
   // --- the M1 strategies' intermission plans -------------------------------
 
   void planTowers() {
-    static const std::vector<int> laneA = {3, 4, 2, 5, 1, 6}, laneB = {17, 16, 18, 15, 19, 14};
     // Lane A opens the run; afterwards keep the lanes level, A first.
     for (int guard = 0; guard < 16; ++guard) {
       const bool a = towersOn(laneA) <= towersOn(laneB);
@@ -200,7 +244,8 @@ struct Bot {
 
   void planChaser() {
     // Panels around local angle 0, towers right beside them.
-    static const std::vector<int> panels = {0, 35, 1, 34, 2, 33}, towers = {3, 32, 4, 31, 5, 30};
+    const std::vector<int>& panels = chaserPanels;
+    const std::vector<int>& towers = chaserTowers;
     for (int guard = 0; guard < 16; ++guard) {
       const int p = towersOn(panels), t = towersOn(towers);
       bool bought = false;
@@ -220,7 +265,6 @@ struct Bot {
   }
 
   void planSensible() {
-    static const std::vector<int> laneA = {3, 4, 2, 5, 1, 6}, laneB = {17, 16, 18, 15, 19, 14};
     std::vector<int> reserved = laneA;
     reserved.insert(reserved.end(), laneB.begin(), laneB.end());
     World& w = world();
@@ -879,6 +923,7 @@ RunResult play(const ContentDB& db, Strategy strategy, const RunOptions& options
   cfg.seed = options.seed;
   cfg.content = &db;
   cfg.waveSet = options.waveSet;
+  cfg.planetOverride = options.planet;  // M2.8
   Sim sim(cfg);
   World& w = sim.world();
   Bot bot(strategy, sim, db);

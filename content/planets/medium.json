@@ -1,5 +1,6 @@
 {
   "id": "medium",
+  "name": "Medium",
   "radius": 100,
   "slots": 36,
   "hp": 100,

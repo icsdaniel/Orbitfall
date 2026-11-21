@@ -104,7 +104,7 @@ TEST_CASE("every shipped content file loads with zero errors") {
   // Every file ended up as exactly one definition (rules.json is the +1).
   CHECK(files.size() == db.planets.size() + db.suns.size() + db.buildings.size() +
                             db.enemies.size() + db.waveSets.size() + 2);
-  CHECK(db.planets.size() == 1);
+  CHECK(db.planets.size() == 3);  // M2.8: small, medium, large
   CHECK(db.suns.size() == 1);
   CHECK(db.buildings.size() == 3);
   CHECK(db.enemies.size() == 5);
@@ -131,7 +131,8 @@ TEST_CASE("id lookup returns indices, kNoIndex for unknown ids") {
     CHECK(db.enemy_index(db.enemies[i].id) == static_cast<int>(i));
   for (size_t i = 0; i < db.buildings.size(); ++i)
     CHECK(db.building_index(db.buildings[i].id) == static_cast<int>(i));
-  CHECK(db.planet_index("medium") == 0);
+  CHECK(db.planet_index(db.planets[1].id) == 1);
+  CHECK(db.planet_index("medium") != kNoIndex);
   CHECK(db.sun_index("default") == 0);
   CHECK(db.enemy_index("no_such_enemy") == kNoIndex);
   CHECK(db.building_index("") == kNoIndex);
@@ -167,7 +168,7 @@ TEST_CASE("sun and rules match the brief; lit arc is about 90 degrees") {
   CHECK(s.speed == doctest::Approx(1.5 * kDeg));
   CHECK(s.beamWidth == doctest::Approx(141));
   CHECK(s.baseStrength == doctest::Approx(1));
-  const float litArc = 2.0f * std::asin(s.beamWidth / (2.0f * db.planets[0].radius));
+  const float litArc = 2.0f * std::asin(s.beamWidth / (2.0f * db.planets[static_cast<size_t>(db.planet_index("medium"))].radius));
   CHECK(litArc / kDeg == doctest::Approx(90).epsilon(0.01));
 
   CHECK(db.rules.tickRate == 30);
@@ -490,7 +491,7 @@ TEST_CASE("rejects missing files and unknown categories") {
   CHECK(any_contains(load_errors(files), "rules.json", "missing file"));
 
   files = shipped_files();
-  files.erase("planets/medium.json");
+  for (const char* planet : {"planets/small.json", "planets/medium.json", "planets/large.json"}) files.erase(planet);
   const std::vector<std::string> errors = load_errors(files);
   CHECK(any_contains(errors, "no planet defined"));
   CHECK(any_contains(errors, "waves/m1.json", "unknown planet id 'medium'"));
@@ -565,8 +566,9 @@ TEST_CASE("M2.1 placement fields: shipped values, defaults and an aura building 
     std::vector<std::string> errors;
     REQUIRE_MESSAGE(load_content_from_strings(files, d, errors), joined(errors));
     CHECK(d.rules.elevatedRangeBonus == doctest::Approx(0.15f));
-    CHECK(d.planets[0].elevatedLayer);
-    CHECK(d.planets[0].elevatedHeight == doctest::Approx(10.0f));  // 10% of the radius
+    const PlanetDef& medium = d.planets[static_cast<size_t>(d.planet_index("medium"))];
+    CHECK(medium.elevatedLayer);
+    CHECK(medium.elevatedHeight == doctest::Approx(10.0f));  // 10% of the radius
     const BuildingDef& panel = d.buildings[static_cast<size_t>(d.building_index("solar_panel"))];
     CHECK(panel.footprint == 1);
     CHECK(panel.layer == BuildingLayer::Ground);

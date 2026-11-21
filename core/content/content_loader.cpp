@@ -21,6 +21,20 @@ std::vector<int> ContentDB::layer_chain(int enemy) const {
   return chain;
 }
 
+bool ContentDB::planet_fits_wave_set(int waveSet, int planet) const {
+  if (waveSet < 0 || waveSet >= static_cast<int>(waveSets.size())) return false;
+  if (planet < 0 || planet >= static_cast<int>(planets.size())) return false;
+  const int own = waveSets[static_cast<size_t>(waveSet)].planet;
+  if (own == planet) return true;
+  if (own < 0 || own >= static_cast<int>(planets.size())) return false;
+  const std::vector<LaneDef>& need = planets[static_cast<size_t>(own)].lanes;
+  const std::vector<LaneDef>& have = planets[static_cast<size_t>(planet)].lanes;
+  if (have.size() < need.size()) return false;
+  for (size_t i = 0; i < need.size(); ++i)
+    if (have[i].id != need[i].id) return false;
+  return true;
+}
+
 namespace {
 
 using mini_json::Value;
@@ -363,6 +377,8 @@ struct Loader {
   void read_planet(const Obj& o, const std::string& stem) {
     PlanetDef p;
     if (!read_id(o, stem, db.planetIds, db.planets.size(), p.id)) return;
+    if (o.has("name")) o.str("name", p.name);
+    if (p.name.empty()) p.name = p.id;
     o.num("radius", p.radius, kPositive);
     o.integer("slots", p.slots, Range{1.0, false, 4096.0});
     o.num("hp", p.hp, kPositive);

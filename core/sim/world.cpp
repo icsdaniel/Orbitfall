@@ -39,7 +39,10 @@ void initWorld(World& world, const SimConfig& config) {
   world.waveSet = nullptr;
   if (const ContentDB* db = config.content) {
     const bool hasSet = config.waveSet >= 0 && config.waveSet < static_cast<int>(db->waveSets.size());
-    const int planet = hasSet ? db->waveSets[static_cast<size_t>(config.waveSet)].planet : config.planet;
+    int planet = hasSet ? db->waveSets[static_cast<size_t>(config.waveSet)].planet : config.planet;
+    if (hasSet && config.planetOverride != kNoIndex && db->planet_fits_wave_set(config.waveSet, config.planetOverride)) {
+      planet = config.planetOverride;  // M2.8: the player's home planet
+    }
     if (planet >= 0 && planet < static_cast<int>(db->planets.size())) {
       world.planet = &db->planets[static_cast<size_t>(planet)];
     }
@@ -120,11 +123,12 @@ void initWorld(World& world, const SimConfig& config) {
   world.events.reserve(config.eventCapacity);
 }
 
-void initWorld(World& world, const ContentDB& content, uint32_t waveSet, uint64_t seed) {
+void initWorld(World& world, const ContentDB& content, uint32_t waveSet, uint64_t seed, int planet) {
   SimConfig config;
   config.seed = static_cast<uint32_t>(seed ^ (seed >> 32));
   config.content = &content;
   config.waveSet = static_cast<int>(waveSet);
+  config.planetOverride = planet;
   initWorld(world, config);
 }
 

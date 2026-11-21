@@ -56,7 +56,10 @@ class SimServer : public Node {
 
   // --- lifecycle ---
   PackedStringArray load_content(const String& dir);
-  void new_run(int64_t seed, int64_t wave_set);
+  // M2.8: `planet_id` picks the home planet ("" = the wave set's own, medium).
+  // An unknown id, or a planet without the wave set's lanes, is an error and
+  // falls back to the wave set's planet. Old two-argument calls are unchanged.
+  void new_run(int64_t seed, int64_t wave_set, const String& planet_id);
   void set_threaded(bool on);
   bool is_threaded() const;
   void step_ticks(int64_t n);
@@ -129,6 +132,16 @@ class SimServer : public Node {
   // Multiplier on damage of each type dealt to a shield.
   PackedFloat32Array get_shield_mults() const;
   // --- end M2.3 ---
+  // --- M2.8 home planets ---
+  // Every planet in content order, with the stats the picker shows:
+  // {index, id, name, radius, slots, hp, rot_max_speed (rad/s), rot_accel
+  // (rad/s^2), lit_arc (rad, under wave set 0's sun), lit_fraction (0..1),
+  // color (palette key), default (true for wave set 0's own planet), fits
+  // (can host wave set 0)}.
+  TypedArray<Dictionary> get_planet_defs() const;
+  // Id of the current run's planet ("" before the first new_run).
+  String get_planet_id() const;
+  // --- end M2.8 ---
   Dictionary get_debug_stats() const;
   bool set_tunable(const String& path, float value);
   TypedArray<Dictionary> drain_events();
@@ -188,6 +201,7 @@ class SimServer : public Node {
   orbitfall::ContentDB content_;
   bool contentLoaded_ = false;
   int waveSet_ = 0;
+  int planet_ = orbitfall::kNoIndex;  // M2.8: planet override of the current run
   uint32_t seed_ = 1;
   bool threadedWanted_ = false;
   bool debugScenario_ = false;

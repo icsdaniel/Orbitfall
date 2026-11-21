@@ -15,6 +15,7 @@
 #include "content/content_loader.h"
 #include "sim/mathx.h"
 #include "systems/combat.h"
+#include "systems/sun.h"
 #include "systems/upgrades.h"
 #include "systems/waves.h"
 #include "sim/version.h"
@@ -116,7 +117,8 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("core_answer"), &SimServer::core_answer);
 
   ClassDB::bind_method(D_METHOD("load_content", "dir"), &SimServer::load_content, DEFVAL(String("res://content")));
-  ClassDB::bind_method(D_METHOD("new_run", "seed", "wave_set"), &SimServer::new_run, DEFVAL(0));
+  ClassDB::bind_method(D_METHOD("new_run", "seed", "wave_set", "planet_id"), &SimServer::new_run, DEFVAL(0),
+                       DEFVAL(String()));
   ClassDB::bind_method(D_METHOD("set_threaded", "on"), &SimServer::set_threaded);
   ClassDB::bind_method(D_METHOD("is_threaded"), &SimServer::is_threaded);
   ClassDB::bind_method(D_METHOD("step_ticks", "n"), &SimServer::step_ticks);
@@ -175,6 +177,9 @@ void SimServer::_bind_methods() {
   ClassDB::bind_method(D_METHOD("get_damage_types"), &SimServer::get_damage_types);
   ClassDB::bind_method(D_METHOD("get_trait_defs"), &SimServer::get_trait_defs);
   ClassDB::bind_method(D_METHOD("get_shield_mults"), &SimServer::get_shield_mults);
+  // M2.8
+  ClassDB::bind_method(D_METHOD("get_planet_defs"), &SimServer::get_planet_defs);
+  ClassDB::bind_method(D_METHOD("get_planet_id"), &SimServer::get_planet_id);
   ClassDB::bind_method(D_METHOD("get_debug_stats"), &SimServer::get_debug_stats);
   ClassDB::bind_method(D_METHOD("set_tunable", "path", "value"), &SimServer::set_tunable);
   ClassDB::bind_method(D_METHOD("drain_events"), &SimServer::drain_events);
@@ -282,23 +287,36 @@ void SimServer::reset_run_state() {
   orbitfall_binding::fill_snapshot(sim_->world(), statics_, *prev_);
 }
 
-void SimServer::new_run(int64_t seed, int64_t wave_set) {
+void SimServer::new_run(int64_t seed, int64_t wave_set, const String& planet_id) {
   if (contentLoaded_) {
     ERR_FAIL_COND_MSG(wave_set < 0 || wave_set >= static_cast<int64_t>(content_.waveSets.size()),
                       "SimServer.new_run: wave_set out of range");
+  }
+  // M2.8: resolve the home planet before anything is torn down.
+  int planet = orbitfall::kNoIndex;
+  if (contentLoaded_ && !planet_id.is_empty()) {
+    const int found = content_.planet_index(planet_id.utf8().get_data());
+    if (found == orbitfall::kNoIndex) {
+      ERR_PRINT(String("SimServer.new_run: unknown planet '") + planet_id + "', playing the wave set's own");
+    } else if (!content_.planet_fits_wave_set(static_cast<int>(wave_set), found)) {
+      ERR_PRINT(String("SimServer.new_run: planet '") + planet_id + "' lacks the wave set's lanes");
+    } else {
+      planet = found;
+    }
   }
   stop_thread();
   // The same fold as core's content-aware initWorld, so the logged seed replays.
   const uint64_t wide = static_cast<uint64_t>(seed);
   seed_ = static_cast<uint32_t>(wide ^ (wide >> 32));
   waveSet_ = static_cast<int>(wave_set);
+  planet_ = planet;
 
   orbitfall::SimConfig config;
   config.seed = seed_;
   sim_ = std::make_unique<orbitfall::Sim>(config);
   if (contentLoaded_) {
     // The real game: planet, sun and waves of the wave set (starts in an intermission).
-    orbitfall::initWorld(sim_->world(), content_, static_cast<uint32_t>(waveSet_), wide);
+    orbitfall::initWorld(sim_->world(), content_, static_cast<uint32_t>(waveSet_), wide, planet_);
     // The binding keeps the replay log itself (get_command_log).
     sim_->world().recordCommands = false;
   }
@@ -485,13 +503,17 @@ void SimServer::set_time_scale(float scale, float ease_seconds) {
   queue(orbitfall::cmd::setTimeScale(0, scale, ease_seconds));
 }
 
-// Log layout (little-endian): magic "OLG1", seed u32, wave set i32, end tick u32,
-// command count u32, then count x 24-byte orbitfall::Command.
+// Log layout (little-endian): magic "OLG1", seed u32, wave set u32, end tick u32,
+// command count u32, then count x 24-byte orbitfall::Command. M2.8: the wave
+// set word holds the wave set in its low 16 bits and the planet index + 1 in
+// its high 16 bits (0 = the wave set's own planet, so older logs still replay).
 PackedByteArray SimServer::get_command_log() const {
   PackedByteArray out;
   out.resize(static_cast<int64_t>(kLogHeaderBytes + log_.size() * sizeof(Command)));
   uint8_t* p = out.ptrw();
-  const uint32_t header[5] = {kLogMagic, seed_, static_cast<uint32_t>(waveSet_), targetTick_,
+  const uint32_t setWord = (static_cast<uint32_t>(waveSet_) & 0xFFFFu) |
+                           (static_cast<uint32_t>(planet_ + 1) << 16);
+  const uint32_t header[5] = {kLogMagic, seed_, setWord, targetTick_,
                               static_cast<uint32_t>(log_.size())};
   std::memcpy(p, header, kLogHeaderBytes);
   if (!log_.empty()) std::memcpy(p + kLogHeaderBytes, log_.data(), log_.size() * sizeof(Command));
@@ -514,7 +536,11 @@ bool SimServer::replay(int64_t seed, const PackedByteArray& log) {
                         "SimServer.replay: corrupt command in log");
   }
 
-  new_run(seed, static_cast<int32_t>(header[2]));
+  const int logPlanet = static_cast<int>(header[2] >> 16) - 1;
+  String planetId;
+  if (logPlanet >= 0 && logPlanet < static_cast<int>(content_.planets.size()))
+    planetId = to_gd(content_.planets[static_cast<size_t>(logPlanet)].id);
+  new_run(seed, static_cast<int32_t>(header[2] & 0xFFFFu), planetId);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     pending_ = commands;  // already stamped with their original ticks
@@ -934,6 +960,41 @@ PackedFloat32Array SimServer::get_shield_mults() const {
 }
 // --- end M2.3 ---
 
+// --- M2.8 home planets ---
+TypedArray<Dictionary> SimServer::get_planet_defs() const {
+  TypedArray<Dictionary> out;
+  const orbitfall::WaveSetDef* ws = content_.waveSets.empty() ? nullptr : &content_.waveSets[0];
+  const float beam = ws != nullptr && ws->sun >= 0 && ws->sun < static_cast<int>(content_.suns.size())
+                         ? content_.suns[static_cast<size_t>(ws->sun)].beamWidth
+                         : 0.0f;
+  for (size_t i = 0; i < content_.planets.size(); ++i) {
+    const orbitfall::PlanetDef& p = content_.planets[i];
+    const float arc = orbitfall::litArc(p.radius, beam);
+    Dictionary d;
+    d["index"] = static_cast<int64_t>(i);
+    d["id"] = to_gd(p.id);
+    d["name"] = to_gd(p.name);
+    d["radius"] = p.radius;
+    d["slots"] = static_cast<int64_t>(p.slots);
+    d["hp"] = p.hp;
+    d["rot_max_speed"] = p.rotMaxSpeed;
+    d["rot_accel"] = p.rotAccel;
+    d["lit_arc"] = arc;
+    d["lit_fraction"] = arc / orbitfall::kTau;
+    d["color"] = to_gd(p.visual.color);
+    d["default"] = ws != nullptr && ws->planet == static_cast<int>(i);
+    d["fits"] = content_.planet_fits_wave_set(0, static_cast<int>(i));
+    out.push_back(d);
+  }
+  return out;
+}
+
+String SimServer::get_planet_id() const {
+  const orbitfall::PlanetDef* p = sim_->world().planet;
+  return p != nullptr ? to_gd(p->id) : String();
+}
+// --- end M2.8 ---
+
 namespace {
 Dictionary forecast_to_dict(const orbitfall::WaveForecast& f) {
   Dictionary d;
@@ -1029,8 +1090,9 @@ bool SimServer::set_tunable(const String& path, float value) {
   orbitfall::SunDef* sun = ws.sun >= 0 && ws.sun < static_cast<int>(content_.suns.size())
                                ? &content_.suns[static_cast<size_t>(ws.sun)]
                                : nullptr;
-  orbitfall::PlanetDef* planet = ws.planet >= 0 && ws.planet < static_cast<int>(content_.planets.size())
-                                     ? &content_.planets[static_cast<size_t>(ws.planet)]
+  const int runPlanet = planet_ != orbitfall::kNoIndex ? planet_ : ws.planet;  // M2.8
+  orbitfall::PlanetDef* planet = runPlanet >= 0 && runPlanet < static_cast<int>(content_.planets.size())
+                                     ? &content_.planets[static_cast<size_t>(runPlanet)]
                                      : nullptr;
   orbitfall::RulesDef& rules = content_.rules;
 

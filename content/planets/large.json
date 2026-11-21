@@ -1,0 +1,20 @@
+{
+  "id": "large",
+  "name": "Large",
+  "radius": 125,
+  "slots": 48,
+  "hp": 200,
+  "rotMaxSpeed": 60,
+  "rotAccel": 240,
+  "rotDamping": 4,
+  "startStardust": 150,
+  "lanes": [
+    { "id": "A", "bearingDeg": 30 },
+    { "id": "B", "bearingDeg": 170 }
+  ],
+  "surfaceTimeScale": 0.75,
+  "sellRefund": 0.7,
+  "elevatedLayer": true,
+  "elevatedHeight": 12,
+  "visual": { "shape": "circle", "color": "planet.large" }
+}
