@@ -4,6 +4,8 @@ extends PanelContainer
 ## Next wave exact (icons with counts, lane bearing, shadow-casters marked, light
 ## level as a sun icon fill); +2/+3 icons without counts; beyond: light level only.
 ## It shows exactly what get_forecast returns; it never guesses.
+## M2.10: volley entries (falling objects, enemy -1) show the falling object's icon
+## with a fall streak and the bearing it lands on; bombers that drop bombs get a dot.
 
 
 ## One enemy group in a wave card: shape icon, count, lane bearing, caster mark.
@@ -16,6 +18,10 @@ class EntryIcon:
 	var shadow_caster: bool = false
 	## Far waves: icon and lane arrow only (no count, no degrees).
 	var compact: bool = false
+	## M2.10: a volley of falling objects rather than a lane of enemies.
+	var volley: bool = false
+	## M2.10: the enemy drops falling objects (a bomber).
+	var drops: bool = false
 
 	func _init() -> void:
 		custom_minimum_size = Vector2(70.0, 56.0)
@@ -31,17 +37,22 @@ class EntryIcon:
 				centre + Vector2(-9.0, 10.0), centre + Vector2(9.0, 10.0),
 				centre + Vector2(14.0, 30.0), centre + Vector2(-14.0, 30.0)]),
 				Color(0.0, 0.0, 0.0, 0.75))
+		if volley:  # M2.10: fall streak behind the icon
+			draw_line(centre + Vector2(-16.0, -14.0), centre, Color(color, 0.55), 4.0, true)
 		ShapeDraw.draw(self, shape, centre, 12.0, 0.0, color, 1.5)
+		if drops:  # M2.10: bomb dot under a bomber
+			draw_circle(centre + Vector2(11.0, 11.0), 4.5, Palette.named("falling.bomb"))
 		if count >= 0:
 			draw_string(font, Vector2(36.0, 25.0), "x%d" % count,
 				HORIZONTAL_ALIGNMENT_LEFT, -1.0, 20, Palette.TEXT)
 		# Lane bearing: arrow flying toward the planet from that bearing, plus degrees.
 		var dir: Vector2 = Vector2.from_angle(bearing)
 		var c: Vector2 = Vector2(14.0, 45.0)
-		draw_line(c + dir * 9.0, c - dir * 5.0, Palette.THREAT, 2.0, true)
+		var arrow: Color = Palette.named("falling.meteor") if volley else Palette.THREAT
+		draw_line(c + dir * 9.0, c - dir * 5.0, arrow, 2.0, true)
 		draw_colored_polygon(PackedVector2Array([
 			c - dir * 9.0, c - dir * 2.0 + dir.orthogonal() * 4.5,
-			c - dir * 2.0 - dir.orthogonal() * 4.5]), Palette.THREAT)
+			c - dir * 2.0 - dir.orthogonal() * 4.5]), arrow)
 		if not compact:
 			draw_string(font, Vector2(30.0, 51.0),
 				"%d°" % roundi(wrapf(rad_to_deg(bearing), 0.0, 360.0)),
@@ -78,6 +89,7 @@ class SunIcon:
 var _row: HBoxContainer
 var _signature: String = ""
 var _enemy_defs: Array[Dictionary] = []
+var _falling_defs: Array[Dictionary] = []  # M2.10
 var _cards: int = 0
 var _entries: int = 0
 
@@ -93,6 +105,12 @@ func _init() -> void:
 
 func set_enemy_defs(defs: Array[Dictionary]) -> void:
 	_enemy_defs = defs
+	_signature = ""
+
+
+## M2.10: falling object definitions (get_falling_defs) for volley entries.
+func set_falling_defs(defs: Array[Dictionary]) -> void:
+	_falling_defs = defs
 	_signature = ""
 
 
@@ -171,7 +189,10 @@ func _make_card(wave: Dictionary, is_next: bool, in_wave: bool) -> Control:
 	box.add_child(icons)
 	for entry: Dictionary in entries:
 		var icon: EntryIcon = EntryIcon.new()
-		var def: Dictionary = _enemy_def(entry.get("enemy"))
+		icon.volley = bool(entry.get("volley", false))  # M2.10
+		icon.drops = int(entry.get("drops", -1)) >= 0
+		var def: Dictionary = (_find_def(_falling_defs, entry.get("falling")) if icon.volley
+			else _enemy_def(entry.get("enemy")))
 		icon.shape = Palette.shape_of(def.get("shape", 0))
 		icon.color = Palette.color_of(def.get("color", Palette.tier(0)))
 		icon.count = int(entry.get("count", -1))
@@ -188,7 +209,11 @@ func _make_card(wave: Dictionary, is_next: bool, in_wave: bool) -> Control:
 
 
 func _enemy_def(key: Variant) -> Dictionary:
-	for def: Dictionary in _enemy_defs:
+	return _find_def(_enemy_defs, key)
+
+
+func _find_def(defs: Array[Dictionary], key: Variant) -> Dictionary:
+	for def: Dictionary in defs:
 		if key is String or key is StringName:
 			if str(def.get("id", "")) == str(key):
 				return def
@@ -203,7 +228,7 @@ func _sign(forecast: Array[Dictionary]) -> String:
 		parts.append("%s:%s:%s" % [wave.get("wave"), wave.get("light_mult"), wave.get("exact")])
 		var entries: Array = wave.get("entries", [])
 		for entry: Dictionary in entries:
-			parts.append("%s,%s,%s,%s" % [
+			parts.append("%s,%s,%s,%s,%s" % [
 				entry.get("lane_bearing"), entry.get("enemy"), entry.get("count"),
-				entry.get("shadow_caster")])
+				entry.get("shadow_caster"), entry.get("falling")])
 	return "|".join(parts)

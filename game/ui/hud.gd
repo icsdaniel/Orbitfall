@@ -68,6 +68,8 @@ func setup(sim_node: Node, band_controller: BandController, input_router: InputR
 	_build_top_bar()
 	forecast = ForecastStrip.new()
 	forecast.set_enemy_defs(sim.get_enemy_defs())
+	if sim.has_method(&"get_falling_defs"):  # M2.10
+		forecast.set_falling_defs(sim.get_falling_defs())
 	_pin(forecast, 1.0, 0.0, Vector2(-80.0, 10.0), Control.GROW_DIRECTION_BEGIN, Control.GROW_DIRECTION_END)
 
 	debug_button = UiKit.button("DBG", Vector2(60.0, 56.0), Color(0.14, 0.16, 0.22))

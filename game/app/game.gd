@@ -12,6 +12,8 @@ extends Node2D
 ## intermission when S < 0; the first enemy shadow on the planet; the end screen).
 ## M2.8: a home planet picker opens before the first run and after Restart;
 ## --planet=small|medium|large skips it (screenshots, bots), and so do --play and --demo.
+## M2.10: --waves=ID runs that wave set (e.g. m2_storm, the meteor-storm demo; on
+## the web build also ?waves=ID); it skips the picker and plays on the set's planet.
 
 const PHASE_INTERMISSION: int = 0
 const PHASE_WAVE: int = 1
@@ -26,6 +28,7 @@ var config: ClientConfig
 var camera: OrbitCamera
 var planet_view: PlanetView
 var entity_view: EntityView
+var sky_threats: SkyThreats  # M2.10
 var input_router: InputRouter
 var bands: BandController
 var hud: Hud
@@ -65,6 +68,9 @@ var planet_picker_enabled: bool = true
 var planet_id: String = ""
 var planet_picker: PlanetPicker
 var _planet_arg: String = ""
+## M2.10: index of the wave set to play (get_wave_sets); 0 = the default set.
+var wave_set: int = 0
+var _waves_arg: String = ""
 
 
 func _ready() -> void:
@@ -77,6 +83,7 @@ func _ready() -> void:
 		planet_id = _planet_arg
 	if _planet_arg != "" or _play != "" or _demo:
 		planet_picker_enabled = false
+	_resolve_wave_set()  # M2.10
 	_start_run(run_seed)
 	var start_band: String = _start_band if _start_band != "" else config.text("bands", "startBand", "surface")
 	bands.snap_to(BandController.Band.ORBIT if start_band == "orbit" else BandController.Band.SURFACE)
@@ -108,6 +115,8 @@ func _process(delta: float) -> void:
 	planet_view.view_zoom = zoom
 	planet_view.surface_weight = bands.surface_weight
 	entity_view.view_zoom = zoom
+	sky_threats.view_zoom = zoom  # M2.10
+	sky_threats.surface_weight = bands.surface_weight
 	input_router.planet_centre = world_to_screen(Vector2.ZERO)
 	input_router.planet_radius_px = float(sim.get_planet_radius()) * zoom
 	_handle_events()
@@ -226,6 +235,11 @@ func _build_scene() -> void:
 	add_child(entity_view)
 	entity_view.renderer.camera = camera
 
+	sky_threats = SkyThreats.new()  # M2.10: shields, warnings, flashes over the entities
+	sky_threats.name = "SkyThreats"
+	sky_threats.sim = sim
+	add_child(sky_threats)
+
 	input_router = InputRouter.new()
 	input_router.name = "InputRouter"
 	input_router.sim = sim
@@ -280,9 +294,9 @@ func _build_scene() -> void:
 func _start_run(new_seed: int) -> void:
 	run_seed = new_seed
 	if planet_id != "":
-		sim.new_run(run_seed, 0, planet_id)  # M2.8
+		sim.new_run(run_seed, wave_set, planet_id)  # M2.8
 	else:
-		sim.new_run(run_seed, 0)
+		sim.new_run(run_seed, wave_set)  # M2.10: wave_set 0 unless --waves=
 	_phase = -1
 	# M2.8: the views fit the planet, whose size may have changed.
 	planet_view.sync()
@@ -328,6 +342,10 @@ func _handle_events() -> void:
 		elif str(event.get("type", "")) == "BuildingUpgraded":  # M2.2
 			planet_view.sync()
 			_refresh_upgrades(true)
+		elif sky_threats.handle_event(event):  # M2.10: impact / absorb flashes
+			pass
+		elif str(event.get("type", "")) == "ShieldOffline":  # M2.10
+			hud.toast("Shield down - recharging")
 
 
 func _refresh_forecast() -> void:
@@ -335,6 +353,7 @@ func _refresh_forecast() -> void:
 	var count: int = int(config.num("sim", "forecastCount", 5.0))
 	var forecast: Array[Dictionary] = sim.get_forecast(count)
 	planet_view.forecast = forecast
+	sky_threats.forecast = forecast  # M2.10
 	hud.show_forecast(forecast)
 
 
@@ -400,11 +419,14 @@ func _building_extra(slot: int, layer: int, owner: int) -> Dictionary:
 	var notes: Array[String] = []
 	var kind: String = str(planet_view.building_def(planet_view.site_building(owner)).get("kind", ""))
 	for stat: int in PlanetView.STAT_NAMES.size():
-		if (stat == 3) != (kind == "panel") or kind == "support":
+		if (stat == 3) != (kind == "panel") or kind == "support" or kind == "shield":
 			continue  # towers show range, fire rate, damage; panels show income
 		var mult: float = planet_view.site_modifier(owner, stat)
 		if absf(mult - 1.0) > 0.001:
 			notes.append("%+d%% %s" % [roundi((mult - 1.0) * 100.0), PlanetView.STAT_NAMES[stat]])
+	if kind == "shield":  # M2.10: live energy and the recharge rule
+		notes.append(BuildMenu.shield_note(planet_view.building_def(planet_view.site_building(owner)),
+			_shield_state(owner)))
 	var carrying: bool = false
 	if layer == 0 and planet_view.layer_count > 1:
 		var first: int = planet_view.site_slot(owner)
@@ -415,6 +437,16 @@ func _building_extra(slot: int, layer: int, owner: int) -> Dictionary:
 		"layer": layer, "notes": notes, "carrying": carrying,
 		"can_build_above": layer == 0 and planet_view.can_build_above(slot),
 	}
+
+
+## M2.10: get_shields entry of the shield on `site`, or {}.
+func _shield_state(site: int) -> Dictionary:
+	if not sim.has_method(&"get_shields"):
+		return {}
+	for shield: Dictionary in sim.get_shields():
+		if int(shield.get("slot", -1)) == site:
+			return shield
+	return {}
 
 
 func _select_site(site: int) -> void:
@@ -558,6 +590,8 @@ func _parse_args() -> void:
 			_debug_arg = true
 		elif arg.begins_with("--seed="):
 			run_seed = arg.get_slice("=", 1).to_int()
+		elif arg.begins_with("--waves="):  # M2.10: wave set id
+			_waves_arg = arg.get_slice("=", 1)
 		elif arg.begins_with("--planet="):  # M2.8: skip the picker
 			_planet_arg = arg.get_slice("=", 1)
 		elif arg.begins_with("--band="):
@@ -584,6 +618,24 @@ func _parse_args() -> void:
 		i += 1
 
 
+## M2.10: picks the wave set from --waves=ID or, on the web, ?waves=ID. A chosen
+## set plays on its own planet, so the planet picker is skipped.
+func _resolve_wave_set() -> void:
+	var wanted: String = _waves_arg
+	if wanted == "" and OS.has_feature("web"):
+		var query: Variant = JavaScriptBridge.eval("new URLSearchParams(location.search).get('waves') || ''")
+		wanted = str(query) if query != null else ""
+	if wanted == "" or not sim.has_method(&"get_wave_sets"):
+		return
+	var sets: PackedStringArray = sim.get_wave_sets()
+	var index: int = sets.find(wanted)
+	if index < 0:
+		push_warning("unknown wave set '%s' (have %s)" % [wanted, ", ".join(sets)])
+		return
+	wave_set = index
+	planet_picker_enabled = false
+
+
 ## Scripted mid-wave state for screenshots: panels in the beam, towers on both
 ## lanes, a wave in flight. Uses contract commands; extras only on the mock.
 func _setup_demo() -> void:
@@ -596,7 +648,7 @@ func _setup_demo() -> void:
 	for def: Dictionary in defs:
 		if str(def.get("kind", "")) == "panel":
 			panel = int(def.get("index", -1))
-		else:
+		elif str(def.get("kind", "tower")) == "tower":  # M2.10: not shields or supports
 			towers.append(int(def.get("index", -1)))
 	var n: int = sim.get_slot_count()
 	if panel >= 0:

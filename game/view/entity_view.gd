@@ -8,6 +8,7 @@ extends Node2D
 
 const ARCHETYPE_ENEMIES: int = 0
 const ARCHETYPE_PROJECTILES: int = 1
+const ARCHETYPE_FALLING: int = 2  # M2.10 meteors and bombs
 ## Shape diameter at instance scale 1: a shape of radius 1.
 const SHAPE_SIZE: float = 2.0
 
@@ -25,6 +26,8 @@ func _ready() -> void:
 	renderer.define_archetype(ARCHETYPE_PROJECTILES, SHAPE_SIZE)
 	renderer.set_archetype_pixel_limits(ARCHETYPE_ENEMIES, 7.0, 4096.0)
 	renderer.set_archetype_pixel_limits(ARCHETYPE_PROJECTILES, 5.0, 4096.0)
+	renderer.define_archetype(ARCHETYPE_FALLING, SHAPE_SIZE)  # M2.10
+	renderer.set_archetype_pixel_limits(ARCHETYPE_FALLING, 8.0, 4096.0)
 
 
 func _process(_delta: float) -> void:
@@ -40,6 +43,8 @@ func sync() -> void:
 	var shots: PackedFloat32Array = sim.get_projectile_buffer()
 	var shot_count: int = sim.get_projectile_count()
 	renderer.set_batch(ARCHETYPE_PROJECTILES, shots, shot_count)
+	if sim.has_method("get_falling_buffer"):  # M2.10
+		renderer.set_batch(ARCHETYPE_FALLING, sim.get_falling_buffer(), sim.get_falling_count())
 	_large_units = sim.get_large_units()
 	queue_redraw()
 
