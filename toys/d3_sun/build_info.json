@@ -1,0 +1,11 @@
+{
+  "version": "toy-d3_sun",
+  "kind": "toy",
+  "commit": "9e7a3fc4f88889478708046101d097b7994a3f5a",
+  "commit_short": "9e7a3fc",
+  "ref": "m2.4-weak-points",
+  "pr": 0,
+  "target": "template_release",
+  "date": "2026-11-22T20:27:56Z",
+  "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/45066492433"
+}

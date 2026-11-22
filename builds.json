@@ -1,0 +1,56 @@
+[
+  {
+    "path": "latest/",
+    "kind": "latest",
+    "version": "latest",
+    "commit_short": "b9c585f",
+    "ref": "main",
+    "date": "2026-11-22T20:41:16Z",
+    "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/45067743226"
+  },
+  {
+    "path": "m1.1/",
+    "kind": "milestone",
+    "version": "m1.1",
+    "commit_short": "d303d35",
+    "ref": "m1.1",
+    "date": "2026-11-21T10:05:53Z",
+    "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/44892598730"
+  },
+  {
+    "path": "m1/",
+    "kind": "milestone",
+    "version": "m1",
+    "commit_short": "93f9c8b",
+    "ref": "m1",
+    "date": "2026-11-14T21:43:59Z",
+    "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/43644304509"
+  },
+  {
+    "path": "toys/d2_rotation/",
+    "kind": "toy",
+    "version": "toy-d2_rotation",
+    "commit_short": "9e7a3fc",
+    "ref": "m2.4-weak-points",
+    "date": "2026-11-22T20:27:42Z",
+    "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/45066492433"
+  },
+  {
+    "path": "toys/d3_sun/",
+    "kind": "toy",
+    "version": "toy-d3_sun",
+    "commit_short": "9e7a3fc",
+    "ref": "m2.4-weak-points",
+    "date": "2026-11-22T20:27:56Z",
+    "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/45066492433"
+  },
+  {
+    "path": "toys/d7_bent_aim/",
+    "kind": "toy",
+    "version": "toy-d7_bent_aim",
+    "commit_short": "9e7a3fc",
+    "ref": "m2.4-weak-points",
+    "date": "2026-11-22T20:28:05Z",
+    "run_url": "https://github.com/icsdaniel/Orbitfall/actions/runs/45066492433"
+  }
+]
