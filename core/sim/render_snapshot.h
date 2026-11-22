@@ -31,6 +31,8 @@ struct RenderParams {
   // Placeholder projectile look, indexed by ProjectileKind (dot, shell).
   float projectileRadius[2] = {2.0f, 4.0f};
   float projectileColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  // M2.10: optional RGBA per falling definition (content order); nullptr = white.
+  const float* fallingColors = nullptr;
 };
 
 // Writes up to maxInstances enemies into `out` (16 floats each); returns the
@@ -43,5 +45,10 @@ uint32_t fillEnemyRenderBuffer(const World& world, float* out, uint32_t maxInsta
 // 0, projectile kind.
 uint32_t fillProjectileRenderBuffer(const World& world, float* out, uint32_t maxInstances,
                                     const RenderParams& params = RenderParams());
+
+// M2.10: same for falling objects. custom = shape id, colour tier, 0, seconds
+// to impact.
+uint32_t fillFallingRenderBuffer(const World& world, float* out, uint32_t maxInstances,
+                                 const RenderParams& params = RenderParams());
 
 }  // namespace orbitfall

@@ -1,0 +1,22 @@
+{
+  "id": "flak", "name": "Flak", "kind": "tower", "footprint": 1, "layer": "any", "cost": 85,
+  "arcDeg": 70, "range": 240, "fireRate": 2, "aimMount": true, "aimOffsetDeg": 0,
+  "projectile": { "kind": "shell", "speed": 700, "damage": 1.2, "type": "explosive", "splash": 18 },
+  "falloff": [[0, 1.6], [0.5, 1], [1, 0.5]],
+  "targeting": ["close", "first", "strong"],
+  "paths": [
+    { "id": "burst", "name": "Burst", "tiers": [
+      { "name": "Wider Burst", "cost": 50, "mods": [{ "stat": "splash", "op": "mul", "value": 1.2 }] },
+      { "name": "Hot Fuses", "cost": 75, "mods": [{ "stat": "damage", "op": "mul", "value": 1.2 }] },
+      { "name": "Shrapnel Cloud", "cost": 120, "mods": [{ "stat": "splash", "op": "mul", "value": 1.3 }] },
+      { "name": "Firestorm", "cost": 185, "mods": [{ "stat": "damage", "op": "mul", "value": 1.4 }, { "stat": "splash", "op": "mul", "value": 1.2 }] }
+    ] },
+    { "id": "screen", "name": "Screen", "tiers": [
+      { "name": "Quick Loader", "cost": 50, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.2 }] },
+      { "name": "Swivel Mount", "cost": 75, "mods": [{ "stat": "arc", "op": "add", "value": 10 }] },
+      { "name": "Twin Guns", "cost": 120, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.35 }] },
+      { "name": "Curtain Fire", "cost": 185, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.4 }, { "stat": "range", "op": "mul", "value": 1.1 }] }
+    ] }
+  ], "active": null,
+  "visual": { "shape": "hexagon", "color": "tower.flak" }
+}

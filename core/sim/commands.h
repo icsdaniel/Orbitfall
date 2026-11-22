@@ -18,6 +18,7 @@ enum class CommandType : uint8_t {
   StartWave,      // no payload
   SetTimeScale,   // value = scale (0 = pause), value2 = ease seconds (0 = instant)
   UpgradeBuilding,  // M2.2: slot, id = upgrade path index; buys that path's next tier
+  ActivateBuilding, // M2.6: slot; fires the building's active ability (Sun Lens Overcharge)
   Count
 };
 
@@ -82,6 +83,11 @@ inline Command upgradeBuilding(uint32_t tick, int32_t slot, int32_t path) {  // 
   Command c = make(tick, CommandType::UpgradeBuilding);
   c.slot = slot;
   c.id = path;
+  return c;
+}
+inline Command activateBuilding(uint32_t tick, int32_t slot) {  // M2.6
+  Command c = make(tick, CommandType::ActivateBuilding);
+  c.slot = slot;
   return c;
 }
 }  // namespace cmd

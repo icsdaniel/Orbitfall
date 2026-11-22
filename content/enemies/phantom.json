@@ -1,0 +1,6 @@
+{
+  "id": "phantom", "behavior": "lane", "layers": 1, "hp": 2,
+  "speed": 46, "size": 8, "landDamage": 2, "bounty": 2,
+  "traits": ["camo"], "shadowCaster": false, "hpBar": false, "popsInto": null,
+  "shape": "circle", "visual": { "color": "tier.blue" }
+}

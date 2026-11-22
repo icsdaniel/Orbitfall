@@ -1,0 +1,6 @@
+{
+  "id": "bubble", "behavior": "lane", "layers": 1, "hpPerLayer": 1,
+  "speed": 38, "size": 9, "landDamagePerLayer": 2, "bounty": 2,
+  "traits": ["shielded"], "shield": 3, "shadowCaster": false, "hpBar": false, "popsInto": null,
+  "shape": "circle", "visual": { "color": "tier.red" }
+}

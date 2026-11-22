@@ -15,6 +15,7 @@ const PHASE_LOST: int = 3
 const FLAG_LIT: int = 1
 const FLAG_SHADED: int = 2
 const FLAG_TARGET: int = 4
+const FLAG_SHIELD_OFFLINE: int = 8  # M2.10
 ## M2.3: damage types and trait bits, in engine order (core/content/content.h).
 const DAMAGE_TYPES: PackedStringArray = [
 	"kinetic", "explosive", "energy", "cryo", "emp", "pierce"]
@@ -28,6 +29,7 @@ const REJECT_INVALID_BUILDING: int = 2
 const REJECT_OCCUPIED: int = 3
 const REJECT_UNAFFORDABLE: int = 4
 const REJECT_EMPTY_SLOT: int = 5
+const REJECT_NOT_ALLOWED: int = 6  # M2.6
 const REJECT_WRONG_PHASE: int = 7
 const REJECT_NO_FOUNDATION: int = 8
 const REJECT_WRONG_LAYER: int = 9
@@ -36,14 +38,24 @@ const LAYER_GROUND: int = 0
 const LAYER_ELEVATED: int = 1
 const LAYER_ANY: int = 2
 const LAYER_NAMES: Dictionary[String, int] = {"ground": 0, "elevated": 1, "any": 2}
-const KIND_BITS: Dictionary[String, int] = {"tower": 1, "panel": 2, "support": 4}
-const AURA_STATS: Dictionary[String, int] = {"range": 0, "fireRate": 1, "damage": 2, "income": 3}
+const KIND_BITS: Dictionary[String, int] = {
+	"tower": 1, "panel": 2, "support": 4, "drill": 8, "cooler": 16}  # drill, cooler: M2.7
+const AURA_STATS: Dictionary[String, int] = {
+	"range": 0, "fireRate": 1, "damage": 2, "income": 3, "detect": 4, "shieldDamage": 5}  # M2.6: 4, 5
+## M2.6: aura stats that are multipliers in get_site_modifiers (the first four).
+const MULT_AURA_STATS: int = 4
+const REJECT_ACTIVE_NOT_READY: int = 12  # M2.6
+const PROJECTILE_KINDS: Dictionary[String, int] = {"dot": 0, "shell": 1, "beam": 2}  # M2.6
 const REJECT_UPGRADE_BLOCKED: int = 11  # M2.2
 ## M2.2: paths per building, and the stats an upgrade tier may modify (JSON name -> key).
 const UPGRADE_PATHS: int = 2
 const UPGRADE_STATS: Dictionary[String, String] = {
 	"damage": "damage", "fireRate": "fire_rate", "range": "range", "arc": "arc",
 	"splash": "splash", "income": "income",
+	"instability": "instability", "cooling": "cooling",  # M2.7
+	# M2.6
+	"slow": "slow", "pierce": "pierce", "auraAmount": "aura_amount", "auraRadius": "aura_radius",
+	"activeCooldown": "active_cooldown", "activePower": "active_power",
 }
 const SHAPES: Dictionary[String, int] = {
 	"circle": 0, "triangle": 1, "square": 2, "hexagon": 3, "star": 4,
@@ -128,6 +140,21 @@ var _links: PackedInt32Array = PackedInt32Array()
 ## M2.2: bought tiers, UPGRADE_PATHS entries per site.
 var _slot_tiers: PackedInt32Array = PackedInt32Array()
 var _exclusive_tier: int = 2
+## M2.7: drill heat (0..1) and overheat seconds left, per site; the rules.json
+## "instability" block; the derived global numbers.
+var _slot_heat: PackedFloat32Array = PackedFloat32Array()
+var _slot_overheat: PackedFloat32Array = PackedFloat32Array()
+var _instab_curve: PackedVector2Array = PackedVector2Array([Vector2(0, 0), Vector2(1, 0.2),
+	Vector2(2, 0.45), Vector2(3, 0.8), Vector2(4, 1.2), Vector2(6, 2.2)])
+var _instab_threshold: float = 1.0
+var _instab_rise_base: float = 0.08
+var _instab_rise_excess: float = 0.6
+var _instab_decay: float = 0.1
+var _instab_overheat: float = 10.0
+var _instability: float = 0.0
+var _instab_load: float = 0.0
+var _cooling: float = 0.0
+var _drill_income: float = 0.0
 
 var _e_pos: PackedVector2Array = PackedVector2Array()
 var _e_prev: PackedVector2Array = PackedVector2Array()
@@ -144,9 +171,26 @@ var _spawn_queue: Array[Dictionary] = []
 var _wave_time: float = 0.0
 var _events: Array[Dictionary] = []
 var _lit_fraction: float = 0.0
+## M2.6: site -> [active cooldown left, active time left] (s).
+var _actives: Dictionary[int, PackedFloat32Array] = {}
 var _ms_per_tick: float = 0.0
 var _enemy_buffer: PackedFloat32Array = PackedFloat32Array()
 var _projectile_buffer: PackedFloat32Array = PackedFloat32Array()
+# --- M2.10 falling objects and shields (crude: Bombers do not drop bombs here) ---
+var _falling_defs: Array[Dictionary] = []
+var _wave_set_docs: Array[Dictionary] = []
+var _wave_set_index: int = 0
+var _planet_start_stardust: float = 150.0
+var _warn_seconds: float = 3.0
+var _light_charge: float = 2.0
+var _f_bearing: PackedFloat32Array = PackedFloat32Array()
+var _f_dist: PackedFloat32Array = PackedFloat32Array()
+var _f_def: PackedInt32Array = PackedInt32Array()
+var _f_warned: PackedByteArray = PackedByteArray()
+var _volley_queue: Array[Dictionary] = []
+var _slot_energy: PackedFloat32Array = PackedFloat32Array()
+var _slot_charge: PackedFloat32Array = PackedFloat32Array()
+var _falling_buffer: PackedFloat32Array = PackedFloat32Array()
 
 
 func _init() -> void:
@@ -193,6 +237,9 @@ func new_run(run_seed: int, wave_set: int = 0, planet_id: String = "") -> void:
 		planet = _find_planet(_default_planet)
 	if not planet.is_empty():
 		_apply_planet(planet)
+	if wave_set >= 0 and wave_set < _wave_set_docs.size():  # M2.10: pick the wave set
+		_wave_set_index = wave_set
+		_parse_waves(_wave_set_docs[wave_set], PackedStringArray())
 	_reset_run()
 
 
@@ -257,11 +304,16 @@ func place_building(slot: int, building: int, aim_offset: float = 0.0, layer: in
 		return
 	_stardust -= cost
 	_slot_building[site] = building
-	_slot_aim[site] = aim_offset
+	_slot_aim[site] = _snap_aim(aim_offset) if bool(def.get("aim_mount", false)) else 0.0  # M2.11
 	_slot_cooldown[site] = 0.0
+	_slot_energy[site] = float(_buildings[building].get("shield_energy", 0.0))  # M2.10
+	_slot_charge[site] = 0.0
+	_slot_flags[site] &= ~FLAG_SHIELD_OFFLINE
 	for k: int in width:
 		_site_owner[base + (first + k) % _slot_count] = site
 	_set_tiers(site, [0, 0])  # M2.2
+	_slot_heat[site] = 0.0  # M2.7
+	_slot_overheat[site] = 0.0
 	_recompute_layout()
 	_emit(&"BuildingPlaced", site, building)
 	_emit(&"StardustChanged", int(_stardust), 0)
@@ -290,9 +342,12 @@ func sell_building(slot: int) -> void:
 	# M2.2: the refund covers the upgrades too.
 	var cost: float = float(_buildings[building]["cost"]) + _upgrade_spent(_buildings[building], _tiers(site))
 	_stardust += floorf(cost * _sell_refund)
+	_actives.erase(site)  # M2.6
 	_emit(&"BuildingSold", site, building)
 	_slot_building[site] = -1
 	_set_tiers(site, [0, 0])
+	_slot_heat[site] = 0.0  # M2.7
+	_slot_overheat[site] = 0.0
 	for k: int in width:
 		_site_owner[base + (first + k) % _slot_count] = -1
 	_recompute_layout()
@@ -301,6 +356,62 @@ func sell_building(slot: int) -> void:
 
 
 # --- M2.2 upgrade paths (begin) ---
+
+# --- M2.6 towers batch 1 (begin) ---
+
+func activate_building(slot: int) -> void:
+	_record(&"activate_building", [slot])
+	var owner: int = _anchor(slot)
+	if owner < 0:
+		var reason: int = REJECT_EMPTY_SLOT if slot >= 0 and slot < _slot_building.size() else REJECT_INVALID_SLOT
+		_emit(&"CommandRejected", slot, reason)
+		return
+	var def: Dictionary = _buildings[_slot_building[owner]]
+	if not def.has("active"):
+		_emit(&"CommandRejected", owner, REJECT_NOT_ALLOWED)
+		return
+	var state: PackedFloat32Array = _actives.get(owner, PackedFloat32Array([0.0, 0.0]))
+	if state[0] > 0.0 or state[1] > 0.0:
+		_emit(&"CommandRejected", owner, REJECT_ACTIVE_NOT_READY)
+		return
+	var stats: Dictionary = _stats(def, _tiers(owner))
+	_actives[owner] = PackedFloat32Array(
+		[float(stats["active_cooldown"]), float((def["active"] as Dictionary)["seconds"])])
+	_emit(&"BuildingActivated", owner, _slot_building[owner])
+
+
+## Lit, unshaded fraction of the panels (mock: by count, not capacity).
+func get_channel() -> float:
+	return _lit_fraction
+
+
+## The mock draws no Sun Lens beams.
+func get_beams() -> PackedFloat32Array:
+	return PackedFloat32Array()
+
+
+func get_site_actives() -> PackedFloat32Array:
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(2 * _slot_building.size())
+	for site: int in _actives:
+		if 2 * site + 1 < out.size():
+			out[2 * site] = _actives[site][0]
+			out[2 * site + 1] = _actives[site][1]
+	return out
+
+
+## Active timers; the cooldown runs lightChargeMult (2x) faster on a lit, unshaded site.
+func _step_actives() -> void:
+	for site: int in _actives.keys():
+		var state: PackedFloat32Array = _actives[site]
+		var flags: int = get_site_flags()[site] if site < _slot_building.size() else 0
+		var rate: float = 2.0 if (flags & 3) == 1 else 1.0
+		state[1] = maxf(state[1] - TICK, 0.0)
+		state[0] = maxf(state[0] - TICK * rate, 0.0)
+		_actives[site] = state
+
+# --- M2.6 towers batch 1 (end) ---
+
 
 func upgrade_building(slot: int, path: int) -> void:
 	_record(&"upgrade_building", [slot, path])
@@ -426,7 +537,17 @@ func _stats(def: Dictionary, tiers: Array[int]) -> Dictionary:
 	var stats: Dictionary = {
 		"damage": float(def["damage"]), "fire_rate": float(def["fire_rate"]),
 		"range": float(def["range"]), "arc": float(def["arc"]),
-		"splash": float(def["splash"]), "income": float(def["panel_rate"]),
+		"splash": float(def["splash"]),
+		# M2.7: income is drillRate on drills; instability and cooling are their own stats.
+		"income": float(def.get("drill_rate", 0.0)) if str(def["kind"]) == "drill"
+			else float(def["panel_rate"]),
+		"instability": float(def.get("instability", 0.0)),
+		"cooling": float(def.get("cooling", 0.0)),
+		# M2.6
+		"slow": float(def.get("slow", 0.0)), "pierce": float(def.get("pierce", 0)),
+		"aura_amount": 1.0, "aura_radius": 0.0,
+		"active_cooldown": float((def.get("active", {}) as Dictionary).get("cooldown", 0.0)),
+		"active_power": float((def.get("active", {}) as Dictionary).get("damage_mult", 1.0)),
 	}
 	var mul: Dictionary = {}
 	var paths: Array = def.get("paths", [])
@@ -499,10 +620,185 @@ func _read_paths(raw: Variant) -> Array[Dictionary]:
 # --- M2.2 upgrade paths (end) ---
 
 
+## M2.11: snaps to the mount steps, costs reaimCostFrac of the price, refused
+## mid-wave; emits AimChanged (value = cost) like the sim.
 func set_aim(slot: int, offset: float) -> void:
 	_record(&"set_aim", [slot, offset])
-	if slot >= 0 and slot < _slot_aim.size():
-		_slot_aim[slot] = offset
+	if slot < 0 or slot >= _site_owner.size():
+		_emit(&"CommandRejected", slot, REJECT_INVALID_SLOT, Vector2(3.0, 0.0))
+		return
+	var site: int = _site_owner[slot]
+	if site < 0 or _slot_building[site] < 0:
+		_emit(&"CommandRejected", slot, REJECT_EMPTY_SLOT, Vector2(3.0, 0.0))
+		return
+	var def: Dictionary = _buildings[_slot_building[site]]
+	if not bool(def.get("aim_mount", false)):
+		_emit(&"CommandRejected", site, REJECT_NOT_ALLOWED, Vector2(3.0, 0.0))
+		return
+	if _phase >= PHASE_WON or (_aim_between_waves and _phase == PHASE_WAVE):
+		_emit(&"CommandRejected", site, REJECT_WRONG_PHASE, Vector2(3.0, 0.0))
+		return
+	var snapped: float = _snap_aim(offset)
+	if is_equal_approx(snapped, _slot_aim[site]):
+		return
+	var cost: float = float(def["cost"]) * _reaim_cost_frac
+	if cost > _stardust + 0.0001:
+		_emit(&"CommandRejected", site, REJECT_UNAFFORDABLE, Vector2(3.0, 0.0), cost)
+		return
+	_stardust -= cost
+	_slot_aim[site] = snapped
+	_solve_focus()
+	_emit(&"AimChanged", site, _slot_building[site], Vector2(snapped, 0.0), cost)
+	_emit(&"StardustChanged", int(_stardust), 0)
+
+
+# --- M2.11 bent aim and focus fire (begin) ---
+## Mock focus fire: the same solver as core/systems/focus.cpp (pairs of aim
+## axes crossing within range, merged within the zone radius); the mock's
+## combat does not apply the bonus.
+var _aim_offsets: PackedFloat32Array = PackedFloat32Array()
+var _reaim_cost_frac: float = 0.0
+var _aim_between_waves: bool = false
+var _focus_rules: Dictionary = {
+	"bonus": 0.0, "cap": 0.0, "radius": 50.0, "min_altitude": 10.0, "lens_merge": false}
+var _focus: Array[Dictionary] = []
+
+
+func get_site_aims() -> PackedFloat32Array:
+	return _slot_aim.duplicate()
+
+
+func get_aim_rules() -> Dictionary:
+	return {
+		"offsets": _aim_offsets.duplicate(), "reaim_cost_frac": _reaim_cost_frac,
+		"between_waves_only": _aim_between_waves, "focus_bonus": _focus_rules["bonus"],
+		"focus_cap": _focus_rules["cap"], "focus_radius": _focus_rules["radius"],
+		"lens_merge": _focus_rules["lens_merge"],
+	}
+
+
+func get_reaim_cost(slot: int) -> float:
+	if slot < 0 or slot >= _site_owner.size():
+		return -1.0
+	var site: int = _site_owner[slot]
+	if site < 0 or _slot_building[site] < 0:
+		return -1.0
+	var def: Dictionary = _buildings[_slot_building[site]]
+	return float(def["cost"]) * _reaim_cost_frac if bool(def.get("aim_mount", false)) else -1.0
+
+
+func get_focus_points() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for f: Dictionary in _focus:
+		var local: Vector2 = f["local"]
+		var feeders: PackedInt32Array = f["feeders"]
+		out.append({
+			"local": local, "pos": local.rotated(_rot), "radius": float(_focus_rules["radius"]),
+			"feeders": feeders, "lenses": int(f["lenses"]), "mult": _focus_mult(feeders.size()),
+		})
+	return out
+
+
+func _focus_mult(feeders: int) -> float:
+	if feeders < 2:
+		return 1.0
+	return 1.0 + minf(float(_focus_rules["bonus"]) * float(feeders - 1), float(_focus_rules["cap"]))
+
+
+func _snap_aim(offset: float) -> float:
+	var limit: float = deg_to_rad(60.0)
+	var v: float = clampf(offset, -limit, limit) if is_finite(offset) else 0.0
+	if _aim_offsets.is_empty():
+		return v
+	var best: float = _aim_offsets[0]
+	for o: float in _aim_offsets:
+		if absf(o - v) < absf(best - v):
+			best = o
+	return best
+
+
+func _load_aim_rules(rules: Dictionary) -> void:
+	_aim_offsets = PackedFloat32Array()
+	_reaim_cost_frac = 0.0
+	_aim_between_waves = false
+	if rules.get("aim") is Dictionary:
+		var aim: Dictionary = rules["aim"]
+		for deg: Variant in aim.get("offsetsDeg", []):
+			_aim_offsets.append(deg_to_rad(float(deg)))
+		_reaim_cost_frac = float(aim.get("reaimCostFrac", 0.0))
+		_aim_between_waves = bool(aim.get("reaimBetweenWavesOnly", false))
+	if rules.get("focus") is Dictionary:
+		var f: Dictionary = rules["focus"]
+		_focus_rules = {
+			"bonus": float(f.get("bonusPerExtra", 0.0)), "cap": float(f.get("cap", 0.0)),
+			"radius": float(f.get("radius", 50.0)), "min_altitude": float(f.get("minAltitude", 10.0)),
+			"lens_merge": bool(f.get("lensMerge", false)),
+		}
+
+
+func _solve_focus() -> void:
+	_focus = []
+	var sites: int = _slot_building.size()
+	var radius: float = float(_focus_rules["radius"])
+	var min_dist: float = _radius + float(_focus_rules["min_altitude"])
+	var weights: Array[int] = []
+	for a: int in sites:
+		if not _feeds_focus(a):
+			continue
+		var ta: Vector2 = Vector2.from_angle(_site_angle(a)) * _site_radius(a)
+		var da: Vector2 = Vector2.from_angle(_site_angle(a) + _slot_aim[a])
+		var range_a: float = _focus_range(a)
+		for b: int in range(a + 1, sites):
+			if not _feeds_focus(b):
+				continue
+			var tb: Vector2 = Vector2.from_angle(_site_angle(b)) * _site_radius(b)
+			var db: Vector2 = Vector2.from_angle(_site_angle(b) + _slot_aim[b])
+			var cross: float = da.cross(db)
+			if absf(cross) < 0.0001:
+				continue
+			var e: Vector2 = tb - ta
+			var along_a: float = e.cross(db) / cross
+			var along_b: float = e.cross(da) / cross
+			if along_a <= 0.0 or along_b <= 0.0 or along_a > range_a or along_b > _focus_range(b):
+				continue
+			var p: Vector2 = ta + da * along_a
+			if p.length() < min_dist:
+				continue
+			var into: int = -1
+			for i: int in _focus.size():
+				var c: Vector2 = _focus[i]["local"]
+				if c.distance_to(p) < radius:
+					into = i
+					break
+			if into < 0:
+				_focus.append({"local": p, "feeders": PackedInt32Array(), "lenses": 0})
+				weights.append(0)
+				into = _focus.size() - 1
+			var w: float = float(weights[into])
+			var centre: Vector2 = _focus[into]["local"]
+			_focus[into]["local"] = (centre * w + p) / (w + 1.0)
+			weights[into] += 1
+			for site: int in [a, b]:
+				var feeders: PackedInt32Array = _focus[into]["feeders"]
+				if not feeders.has(site):
+					feeders.append(site)
+					_focus[into]["feeders"] = feeders
+					if bool(_buildings[_slot_building[site]].get("beam", false)):
+						_focus[into]["lenses"] = int(_focus[into]["lenses"]) + 1
+
+
+func _feeds_focus(site: int) -> bool:
+	var b: int = _slot_building[site]
+	if b < 0:
+		return false
+	var def: Dictionary = _buildings[b]
+	return str(def["kind"]) == "tower" and bool(def.get("aim_mount", false))
+
+
+func _focus_range(site: int) -> float:
+	var def: Dictionary = _buildings[_slot_building[site]]
+	return float(_site_stats(def, _tiers(site), site)["range"])
+# --- M2.11 bent aim and focus fire (end) ---
 
 
 func set_targeting(slot: int, mode: int) -> void:
@@ -517,6 +813,7 @@ func start_wave() -> void:
 	_phase = PHASE_WAVE
 	_wave_time = 0.0
 	_build_spawn_queue()
+	_build_volley_queue()
 	_emit(&"WaveStarted", _wave_index, 0)
 
 
@@ -726,10 +1023,26 @@ func get_building_defs() -> Array[Dictionary]:
 			"arc": b["arc"], "range": b["range"], "kind": b["kind"], "shape": b["shape"],
 			"color": b["color"], "footprint": b["footprint"], "layer": b["layer"],
 			"auras": b["auras"], "fire_rate": b["fire_rate"], "panel_rate": b["panel_rate"],
+			# M2.10 (zeros for non-shields; width is the full arc in rad)
+			"shield_width": b.get("shield_width", 0.0), "shield_height": b.get("shield_height", 0.0),
+			"shield_energy": b.get("shield_energy", 0.0),
+			"recharge_seconds": b.get("recharge_seconds", 0.0),
+			"regen_per_sec": b.get("regen_per_sec", 0.0), "upkeep_per_sec": 0.0,
 			# M2.3
 			"damage_type": b["damage_type"], "damage_type_name": b["damage_type_name"],
 			"damage": b["damage"], "splash": b["splash"],
 			"precision": b["precision"],  # M2.4
+			# M2.7
+			"drill_rate": b["drill_rate"], "instability": b["instability"],
+			"cooling": b["cooling"], "lit_cooling_mult": b["lit_cooling_mult"],
+			# M2.11 (same keys as the extension)
+			"aim_mount": b.get("aim_mount", false), "aim_offset": 0.0,
+			# M2.6
+			"falloff": b.get("falloff", PackedFloat32Array([0.0, 1.0, 1.0, 1.0])),
+			"projectile_kind": b.get("projectile_kind", 0 if b["kind"] == "tower" else -1),
+			"pierce": b.get("pierce", 0), "slow": b.get("slow", 0.0),
+			"slow_seconds": b.get("slow_seconds", 0.0), "channel_floor": b.get("channel_floor", 0.2),
+			"has_active": b.has("active"), "active": b.get("active", {}),
 		})
 	return out
 
@@ -747,6 +1060,9 @@ func get_enemy_defs() -> Array[Dictionary]:
 			"shield": e["shield"], "hp_bar_segments": e["hp_bar_segments"],
 			"land_damage": float(e["land_damage"]) * float(e["layers"]), "damage_mult": _enemy_mults(e),
 			"weak_point": (e["weak_point"] as Dictionary).duplicate(),  # M2.4
+			# M2.5
+			"regrow_seconds": e["regrow_seconds"], "splits_into": e["splits_into"],
+			"split_count": e["split_count"],
 		})
 	return out
 
@@ -846,13 +1162,6 @@ func get_weak_point_hint() -> Dictionary:
 	}
 
 
-func get_wave_sets() -> PackedStringArray:
-	var out: PackedStringArray = PackedStringArray()
-	for d: Dictionary in _read_dir("waves"):
-		out.append(str(d.get("id", "?")))
-	if out.is_empty():
-		out.append("sample")
-	return out
 # --- end M2.4 ---
 
 
@@ -876,6 +1185,10 @@ func get_forecast(count: int) -> Array[Dictionary]:
 					"count": int(spawn["count"]) if exact else -1,
 					"shadow_caster": def["shadow_caster"],
 				})
+				entries[-1]["falling"] = -1  # M2.10
+				entries[-1]["volley"] = false
+				entries[-1]["spread"] = 0.0
+				entries[-1]["drops"] = int(def.get("drops", -1))
 				if exact and bool(def["shadow_caster"]):
 					# Crude guess: the Eclipser parks on the sun line where the sun
 					# will be once it has flown in.
@@ -884,6 +1197,14 @@ func get_forecast(count: int) -> Array[Dictionary]:
 					var half: float = asin(clampf(float(def["size"]) / _radius, 0.0, 1.0))
 					ghost.append(centre - half)
 					ghost.append(centre + half)
+		if icons:  # M2.10: volleys of falling objects
+			var volleys: Array = wave.get("volleys", [])
+			for v: Dictionary in volleys:
+				entries.append({
+					"lane_bearing": v["bearing"], "enemy": -1, "falling": v["falling"],
+					"volley": true, "spread": v["spread"], "drops": -1,
+					"count": int(v["count"]) if exact else -1, "shadow_caster": false,
+				})
 		out.append({
 			"wave": w + 1, "light_mult": wave["light_mult"], "exact": exact,
 			"entries": entries, "eclipser_ghost_arcs": ghost,
@@ -891,7 +1212,197 @@ func get_forecast(count: int) -> Array[Dictionary]:
 	return out
 
 
+# --- M2.10 falling objects and shields ---
+func get_falling_count() -> int:
+	return _f_dist.size()
+
+
+func get_falling_buffer() -> PackedFloat32Array:
+	var n: int = _f_dist.size()
+	_falling_buffer.resize(n * F)
+	for i: int in n:
+		var def: Dictionary = _falling_defs[_f_def[i]]
+		var dir: Vector2 = Vector2.from_angle(_f_bearing[i])
+		var size: float = float(def["size"])
+		BatchRenderer.write_instance(
+			_falling_buffer, i,
+			Transform2D(dir.angle() - PI * 0.5, Vector2(size, size), 0.0, dir * _f_dist[i]),
+			Palette.color_of(def["color"]), BatchRenderer.make_custom(int(def["shape"]), -1))
+	return _falling_buffer
+
+
+func get_falling_warnings() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for i: int in _f_dist.size():
+		var eta: float = _falling_eta(i)
+		if eta > _warn_seconds:
+			continue
+		var dir: Vector2 = Vector2.from_angle(_f_bearing[i])
+		out.append({
+			"pos": dir * _f_dist[i], "impact": dir * _radius, "bearing": _f_bearing[i],
+			"eta": eta, "damage": float(_falling_defs[_f_def[i]]["damage"]),
+			"falling": _f_def[i], "shield_slot": _shield_covering(_f_bearing[i]),
+		})
+	return out
+
+
+func get_falling_warn_seconds() -> float:
+	return _warn_seconds
+
+
+func get_shields() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for slot: int in _slot_count:
+		var b: int = _slot_building[slot]
+		if b < 0 or str(_buildings[b]["kind"]) != "shield":
+			continue
+		var def: Dictionary = _buildings[b]
+		var energy_max: float = float(def["shield_energy"])
+		var online: bool = _slot_flags[slot] & FLAG_SHIELD_OFFLINE == 0
+		out.append({
+			"slot": slot, "angle": TAU * float(slot) / float(_slot_count) + get_planet_rotation(),
+			"half_width": float(def["shield_width"]) * 0.5,
+			"dome_radius": _radius + float(def["shield_height"]),
+			"energy": _slot_energy[slot], "energy_max": energy_max,
+			"energy_frac": _slot_energy[slot] / energy_max if energy_max > 0.0 else 0.0,
+			"online": online,
+			"charge_frac": 0.0 if online else _slot_charge[slot] / maxf(float(def["recharge_seconds"]), 0.001),
+			"lit": _slot_flags[slot] & (FLAG_LIT | FLAG_SHADED) == FLAG_LIT,
+		})
+	return out
+
+
+func get_falling_defs() -> Array[Dictionary]:
+	return _falling_defs.duplicate(true)
+
+
+func get_wave_sets() -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	for doc: Dictionary in _wave_set_docs:
+		out.append(str(doc.get("id", "?")))
+	if out.is_empty():
+		out.append("mock")
+	return out
+# --- end M2.10 ---
+
+
 # ---------------------------------------------------------------- M2.8 home planets
+
+# --- M2.7 drills, instability and coolers (begin) ---
+
+func get_instability() -> Dictionary:
+	var drills: int = 0
+	var overheated: int = 0
+	var coolers: int = 0
+	for site: int in _slot_building.size():
+		var b: int = _slot_building[site]
+		if b < 0:
+			continue
+		var kind: String = str(_buildings[b]["kind"])
+		if kind == "drill":
+			drills += 1
+			if _slot_overheat[site] > 0.0:
+				overheated += 1
+		elif kind == "cooler":
+			coolers += 1
+	return {
+		"level": _instability, "threshold": _instab_threshold, "load": _instab_load,
+		"cooling": _cooling, "drills": drills, "running": drills - overheated,
+		"overheated": overheated, "coolers": coolers, "drill_income": _drill_income,
+		"overheat_seconds": _instab_overheat,
+	}
+
+
+func get_drill_states() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for site: int in _slot_building.size():
+		var b: int = _slot_building[site]
+		if b < 0 or str(_buildings[b]["kind"]) != "drill":
+			continue
+		out.append({
+			"site": site, "building": b, "heat": _slot_heat[site],
+			"overheated": _slot_overheat[site] > 0.0, "cooldown": _slot_overheat[site],
+			"cooldown_max": _instab_overheat,
+		})
+	return out
+
+
+func get_drill_income_per_second() -> float:
+	return _drill_income
+
+
+func _instability_curve(load: float) -> float:
+	var c: PackedVector2Array = _instab_curve
+	if c.is_empty():
+		return 0.0
+	if c.size() == 1 or load <= c[0].x:
+		return c[0].y
+	for i: int in range(1, c.size()):
+		if load <= c[i].x:
+			var span: float = c[i].x - c[i - 1].x
+			var t: float = (load - c[i - 1].x) / span if span > 0.0 else 1.0
+			return lerpf(c[i - 1].y, c[i].y, t)
+	var a: Vector2 = c[c.size() - 2]
+	var z: Vector2 = c[c.size() - 1]
+	var slope: float = (z.y - a.y) / (z.x - a.x) if z.x > a.x else 0.0
+	return z.y + slope * (load - z.x)
+
+
+func _instability_level(load: float, cooling: float) -> float:
+	return maxf(_instability_curve(load) - cooling, 0.0)
+
+
+## As core systems/drills.cpp: global level, heat while above the threshold,
+## overheat at heat 1 for overheatSeconds; nothing is damaged.
+func _update_drills(dt: float) -> void:
+	var load: float = 0.0
+	var cooling: float = 0.0
+	for site: int in _slot_building.size():
+		var b: int = _slot_building[site]
+		if b < 0:
+			continue
+		var def: Dictionary = _buildings[b]
+		var kind: String = str(def["kind"])
+		if kind == "drill" and _slot_overheat[site] <= 0.0:
+			load += float(_stats(def, _tiers(site))["instability"])
+		elif kind == "cooler":
+			var lit: bool = (_slot_flags[site] & (FLAG_LIT | FLAG_SHADED)) == FLAG_LIT
+			cooling += float(_stats(def, _tiers(site))["cooling"]) \
+				* (float(def["lit_cooling_mult"]) if lit else 1.0)
+	var level: float = _instability_level(load, cooling)
+	_drill_income = 0.0
+	for site: int in _slot_building.size():
+		var b: int = _slot_building[site]
+		if b < 0 or str(_buildings[b]["kind"]) != "drill":
+			continue
+		var stats: Dictionary = _stats(_buildings[b], _tiers(site))
+		if dt > 0.0:
+			if _slot_overheat[site] > 0.0:
+				_slot_overheat[site] -= dt
+				if _slot_overheat[site] <= 0.0:
+					_slot_overheat[site] = 0.0
+					_slot_heat[site] = 0.0
+					load += float(stats["instability"])
+					level = _instability_level(load, cooling)
+					_emit(&"DrillRestarted", site, b)
+			elif level > _instab_threshold:
+				_slot_heat[site] += (_instab_rise_base + _instab_rise_excess * (level - _instab_threshold)) * dt
+				if _slot_heat[site] >= 1.0:
+					_slot_heat[site] = 1.0
+					_slot_overheat[site] = _instab_overheat
+					_emit(&"DrillOverheated", site, b)
+					load = maxf(load - float(stats["instability"]), 0.0)
+					level = _instability_level(load, cooling)
+			else:
+				_slot_heat[site] = maxf(_slot_heat[site] - _instab_decay * dt, 0.0)
+		if _slot_overheat[site] <= 0.0:
+			_drill_income += float(stats["income"]) * _site_mods[4 * site + 3]
+	_instab_load = load
+	_cooling = cooling
+	_instability = level
+
+# --- M2.7 drills, instability and coolers (end) ---
+
 
 func get_planet_defs() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
@@ -931,6 +1442,7 @@ func _apply_planet(planet: Dictionary) -> void:
 	_rot_accel = deg_to_rad(float(planet.get("rotAccel", 360.0)))
 	_rot_damping = float(planet.get("rotDamping", 4.0))
 	_start_stardust = float(planet.get("startStardust", 150.0))
+	_planet_start_stardust = _start_stardust  # M2.10
 	_sell_refund = float(planet.get("sellRefund", 0.7))
 	_surface_time_scale = float(planet.get("surfaceTimeScale", 0.75))
 	_layer_count = 2 if bool(planet.get("elevatedLayer", true)) else 1
@@ -1024,6 +1536,13 @@ func debug_spawn(enemy_id: String, pos: Vector2) -> void:
 	_update_light()
 
 
+## M2.10 test/screenshot helper: a falling object of the given def id at (bearing, dist).
+func debug_spawn_falling(falling_id: String, bearing: float, dist: float) -> void:
+	for d: Dictionary in _falling_defs:
+		if d["id"] == falling_id:
+			_add_falling(int(d["index"]), bearing, dist)
+
+
 ## Test helper: jump to the next intermission (or to victory after the last wave).
 func debug_skip_wave() -> void:
 	_e_hp.fill(-1.0)
@@ -1051,14 +1570,16 @@ func _record(method: StringName, args: Array) -> void:
 	calls.append({"method": method, "args": args})
 
 
-func _emit(type: StringName, a: int, b: int, pos: Vector2 = Vector2.ZERO) -> void:
-	_events.append({"type": String(type), "tick": _tick, "a": a, "b": b, "x": pos.x, "y": pos.y})
+func _emit(type: StringName, a: int, b: int, pos: Vector2 = Vector2.ZERO, value: float = 0.0) -> void:
+	_events.append({
+		"type": String(type), "tick": _tick, "a": a, "b": b, "x": pos.x, "y": pos.y, "value": value})
 	if _events.size() > 4096:
 		_events = _events.slice(2048)
 
 
 func _reset_run() -> void:
 	_rng.seed = _seed
+	_actives.clear()  # M2.6
 	_tick = 0
 	_phase = PHASE_INTERMISSION
 	_wave_index = 0
@@ -1082,9 +1603,23 @@ func _reset_run() -> void:
 	_slot_aim.fill(0.0)
 	_slot_tiers.resize(sites * UPGRADE_PATHS)
 	_slot_tiers.fill(0)
+	_slot_heat.resize(sites)  # M2.7
+	_slot_heat.fill(0.0)
+	_slot_overheat.resize(sites)
+	_slot_overheat.fill(0.0)
+	_drill_income = 0.0
 	_site_owner.resize(sites)
 	_site_owner.fill(-1)
 	_recompute_layout()
+	_slot_energy.resize(sites)
+	_slot_energy.fill(0.0)
+	_slot_charge.resize(sites)
+	_slot_charge.fill(0.0)
+	_f_bearing.clear()
+	_f_dist.clear()
+	_f_def.clear()
+	_f_warned.clear()
+	_volley_queue.clear()
 	_e_pos.clear()
 	_e_prev.clear()
 	_e_def.clear()
@@ -1146,13 +1681,15 @@ func _recompute_layout() -> void:
 				if _footprint_gap(s % _slot_count, sw, t % _slot_count,
 						int(target["footprint"])) > int(aura["radius"]):
 					continue
-				_site_mods[4 * t + int(aura["stat"])] += float(aura["amount"])
+				if int(aura["stat"]) < MULT_AURA_STATS:  # M2.6: detect / shield damage are not multipliers
+					_site_mods[4 * t + int(aura["stat"])] += float(aura["amount"])
 				_links.append_array(PackedInt32Array([s, t, int(aura["stat"])]))
 	for s: int in sites:
 		for k: int in 4:
 			_site_mods[4 * s + k] = maxf(1.0 + _site_mods[4 * s + k], 0.1)
 		if s >= _slot_count:
 			_site_mods[4 * s] *= 1.0 + _elevated_bonus
+	_solve_focus()  # M2.11
 
 
 func _light_mult(wave: int) -> float:
@@ -1169,16 +1706,21 @@ func _step() -> void:
 		_sun = wrapf(_sun + _sun_speed * TICK, -PI, PI)
 		_wave_time += TICK
 		_step_spawns()
+		_step_volleys()
 		_step_enemies()
 		_update_light()
+		_step_falling()
 		_step_towers()
+		_step_actives()
 		_step_projectiles()
 		_compact_enemies()
-		_stardust += _income * TICK
+		_update_drills(TICK)  # M2.7
+		_stardust += (_income + _drill_income) * TICK
 		_check_wave_end()
 	else:
 		_e_prev = _e_pos.duplicate()
 		_update_light()
+		_update_drills(0.0)
 	_ms_per_tick = lerpf(_ms_per_tick, float(Time.get_ticks_usec() - t0) / 1000.0, 0.1)
 
 
@@ -1435,8 +1977,113 @@ func _compact_enemies() -> void:
 		_update_light()
 
 
+# --- M2.10 crude falling objects and shields ---
+func _build_volley_queue() -> void:
+	_volley_queue.clear()
+	var volleys: Array = _waves[_wave_index].get("volleys", [])
+	for v: Dictionary in volleys:
+		var n: int = int(v["count"])
+		for k: int in n:
+			_volley_queue.append({
+				"t": float(v["start"]) + float(v["seconds"]) * float(k) / float(n),
+				"falling": v["falling"],
+				"bearing": float(v["bearing"]) + _rng.randf_range(-1.0, 1.0) * float(v["spread"]),
+			})
+	_volley_queue.sort_custom(_spawn_before)
+
+
+func _step_volleys() -> void:
+	while not _volley_queue.is_empty() and float(_volley_queue[0]["t"]) <= _wave_time:
+		var v: Dictionary = _volley_queue.pop_front()
+		var def: Dictionary = _falling_defs[int(v["falling"])]
+		_add_falling(int(v["falling"]), float(v["bearing"]), float(def["spawn_radius"]))
+
+
+func _add_falling(def_index: int, bearing: float, dist: float) -> void:
+	_f_def.append(def_index)
+	_f_bearing.append(bearing)
+	_f_dist.append(dist)
+	_f_warned.append(0)
+
+
+func _falling_eta(i: int) -> float:
+	return maxf(_f_dist[i] - _radius, 0.0) / maxf(float(_falling_defs[_f_def[i]]["speed"]), 0.001)
+
+
+func _shield_covering(bearing: float) -> int:
+	var best: int = -1
+	var best_energy: float = -1.0
+	for slot: int in _slot_count:
+		var b: int = _slot_building[slot]
+		if b < 0 or str(_buildings[b]["kind"]) != "shield" or _slot_flags[slot] & FLAG_SHIELD_OFFLINE:
+			continue
+		var centre: float = TAU * float(slot) / float(_slot_count) + _rot
+		if absf(angle_difference(centre, bearing)) <= float(_buildings[b]["shield_width"]) * 0.5 \
+				and _slot_energy[slot] > best_energy:
+			best = slot
+			best_energy = _slot_energy[slot]
+	return best
+
+
+func _step_falling() -> void:
+	for slot: int in _slot_count:  # recharge, lightChargeMult x while lit
+		var b: int = _slot_building[slot]
+		if b < 0 or str(_buildings[b]["kind"]) != "shield":
+			continue
+		var lit: bool = _slot_flags[slot] & (FLAG_LIT | FLAG_SHADED) == FLAG_LIT
+		var rate: float = TICK * (_light_charge if lit else 1.0)
+		if _slot_flags[slot] & FLAG_SHIELD_OFFLINE:
+			_slot_charge[slot] += rate
+			if _slot_charge[slot] >= float(_buildings[b]["recharge_seconds"]):
+				_slot_flags[slot] &= ~FLAG_SHIELD_OFFLINE
+				_slot_energy[slot] = float(_buildings[b]["shield_energy"])
+				_slot_charge[slot] = 0.0
+				_emit(&"ShieldOnline", slot, 0)
+		else:
+			_slot_energy[slot] = minf(_slot_energy[slot] + float(_buildings[b]["regen_per_sec"]) * rate,
+				float(_buildings[b]["shield_energy"]))
+	var i: int = _f_dist.size() - 1
+	while i >= 0:
+		var def: Dictionary = _falling_defs[_f_def[i]]
+		_f_dist[i] -= float(def["speed"]) * TICK
+		var dir: Vector2 = Vector2.from_angle(_f_bearing[i])
+		if _f_warned[i] == 0 and _falling_eta(i) <= _warn_seconds:
+			_f_warned[i] = 1
+			_emit(&"FallingWarning", _f_def[i], _shield_covering(_f_bearing[i]), dir * _radius, _falling_eta(i))
+		var gone: bool = false
+		var slot: int = _shield_covering(_f_bearing[i])
+		if slot >= 0 and _f_dist[i] <= _radius + float(_buildings[_slot_building[slot]]["shield_height"]):
+			_slot_energy[slot] = maxf(_slot_energy[slot] - float(def["damage"]), 0.0)
+			_emit(&"ShieldAbsorbed", slot, _f_def[i], dir * _f_dist[i], _slot_energy[slot])
+			if _slot_energy[slot] <= 0.0:
+				_slot_flags[slot] |= FLAG_SHIELD_OFFLINE
+				_slot_charge[slot] = 0.0
+				_emit(&"ShieldOffline", slot, 0)
+			gone = true
+		elif _f_dist[i] <= _radius:
+			_hp = maxf(_hp - float(def["damage"]), 0.0)
+			_emit(&"FallingImpact", _f_def[i], 0, dir * _radius, float(def["damage"]))
+			if _hp <= 0.0 and _phase == PHASE_WAVE:
+				_phase = PHASE_LOST
+				_emit(&"GameOver", _wave_index, 0)
+			gone = true
+		if gone:
+			var last: int = _f_dist.size() - 1
+			_f_dist[i] = _f_dist[last]
+			_f_bearing[i] = _f_bearing[last]
+			_f_def[i] = _f_def[last]
+			_f_warned[i] = _f_warned[last]
+			_f_dist.resize(last)
+			_f_bearing.resize(last)
+			_f_def.resize(last)
+			_f_warned.resize(last)
+		i -= 1
+
+
 func _check_wave_end() -> void:
 	if _phase != PHASE_WAVE or not _spawn_queue.is_empty() or not _e_pos.is_empty():
+		return
+	if not _volley_queue.is_empty() or not _f_dist.is_empty():  # M2.10
 		return
 	_emit(&"WaveCleared", _wave_index, 0)
 	_wave_index += 1
@@ -1496,6 +2143,10 @@ func _building(
 		# M2.1: slots covered, where it may stand, adjacency auras.
 		"footprint": 1, "layer": LAYER_ANY if kind == "tower" else LAYER_GROUND, "auras": [],
 		"precision": false,  # M2.4
+		# M2.7: drills and coolers.
+		"drill_rate": 0.0, "instability": 0.0, "cooling": 0.0, "lit_cooling_mult": 1.0,
+		# M2.11: towers have an aim mount unless the content says otherwise.
+		"aim_mount": kind == "tower", "beam": false,
 	}
 
 
@@ -1515,6 +2166,8 @@ func _enemy(
 		"hp_bar_segments": 4 if shadow_caster else 1,
 		"damage_mult": PackedFloat32Array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
 		"weak_point": {},  # M2.4: {mult, body_mult, window} when it has one
+		# M2.5
+		"regrow_seconds": 0.0, "splits_into": -1, "split_count": 0,
 	}
 
 
@@ -1545,6 +2198,8 @@ func _load_json_content(errors: PackedStringArray) -> void:
 	if waves_list.is_empty():
 		errors.append("mock: no wave set under %s, using the built-in sample" % _content_dir)
 		return
+	_wave_set_docs = waves_list
+	_wave_set_index = 0
 	var wave_set: Dictionary = waves_list[0]
 	_default_planet = str(wave_set.get("planet", "medium"))
 	_planets = _read_dir("planets")  # M2.8: all home planets for the picker
@@ -1559,6 +2214,31 @@ func _load_json_content(errors: PackedStringArray) -> void:
 	_surface_ease = float(rules.get("surfaceTimeEaseSeconds", 0.3))
 	_elevated_bonus = float(rules.get("elevatedRangeBonus", 0.15))
 	_weak_window_deg = float(rules.get("weakWindowDeg", 8.0))  # M2.4
+	_warn_seconds = float(rules.get("fallingWarnSeconds", 3.0))  # M2.10
+	_light_charge = float(rules.get("lightChargeMult", 2.0))
+	_load_aim_rules(rules)  # M2.11
+	_falling_defs = []
+	for d: Dictionary in _read_dir("falling"):
+		var fv: Dictionary = d.get("visual", {})
+		_falling_defs.append({
+			"index": _falling_defs.size(), "id": str(d.get("id", "?")),
+			"name": str(d.get("id", "?")).capitalize(), "damage": float(d.get("damage", 1.0)),
+			"speed": float(d.get("speed", 60.0)), "size": float(d.get("size", 6.0)),
+			"spawn_radius": float(d.get("spawnRadius", 0.0)),
+			"shape": int(SHAPES.get(str(fv.get("shape", "star")), 4)), "color": str(fv.get("color", "")),
+		})
+	if rules.get("instability") is Dictionary:  # M2.7
+		var ins: Dictionary = rules["instability"]
+		_instab_curve = PackedVector2Array()
+		var raw_curve: Array = ins.get("curve", [])
+		for pt: Variant in raw_curve:
+			if pt is Array and (pt as Array).size() == 2:
+				_instab_curve.append(Vector2(float(pt[0]), float(pt[1])))
+		_instab_threshold = float(ins.get("threshold", 1.0))
+		_instab_rise_base = float(ins.get("riseBase", 0.1))
+		_instab_rise_excess = float(ins.get("risePerExcess", 0.5))
+		_instab_decay = float(ins.get("decayPerSec", 0.1))
+		_instab_overheat = float(ins.get("overheatSeconds", 10.0))
 	if not planet.is_empty():
 		_apply_planet(planet)
 	if not sun.is_empty():
@@ -1581,6 +2261,15 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				float(shot.get("splash", 0.0)), float(shot.get("speed", 0.0)),
 				float(d.get("panelRate", 0.0)), str(visual.get("shape", "square")))
 			b["color"] = str(visual.get("color", ""))
+			b["aim_mount"] = bool(d.get("aimMount", false))  # M2.11
+			b["beam"] = str(shot.get("kind", "")) == "beam"
+			if d.get("shield") is Dictionary:  # M2.10
+				var sh: Dictionary = d["shield"]
+				b["shield_width"] = deg_to_rad(float(sh.get("widthDeg", 60.0)))
+				b["shield_height"] = float(sh.get("height", 40.0))
+				b["shield_energy"] = float(sh.get("energy", 24.0))
+				b["recharge_seconds"] = float(sh.get("rechargeSeconds", 12.0))
+				b["regen_per_sec"] = float(sh.get("regenPerSec", 0.0))
 			if b["kind"] == "tower":
 				var type_name: String = str(shot.get("type", "kinetic"))
 				b["damage_type"] = maxi(DAMAGE_TYPES.find(type_name), 0)
@@ -1602,6 +2291,35 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				})
 			b["auras"] = auras
 			b["paths"] = _read_paths(d.get("paths", []))  # M2.2
+			if b["kind"] == "drill":  # M2.7
+				b["drill_rate"] = float(d.get("drillRate", 0.0))
+				b["instability"] = float(d.get("instability", 1.0))
+			elif b["kind"] == "cooler":
+				b["cooling"] = float(d.get("cooling", 0.0))
+				b["lit_cooling_mult"] = float(d.get("litCoolingMult", 1.0))
+			# M2.6
+			b["name"] = str(d.get("name", b["name"]))
+			var curve: PackedFloat32Array = PackedFloat32Array()
+			var raw_curve: Array = d.get("falloff", [[0, 1], [1, 1]])
+			for point: Variant in raw_curve:
+				if point is Array and (point as Array).size() == 2:
+					curve.append(float(point[0]))
+					curve.append(float(point[1]))
+			b["falloff"] = curve
+			if b["kind"] == "tower":
+				b["projectile_kind"] = int(PROJECTILE_KINDS.get(str(shot.get("kind", "dot")), 0))
+			b["pierce"] = int(shot.get("pierce", 0))
+			b["slow"] = float(shot.get("slow", 0.0))
+			b["slow_seconds"] = float(shot.get("slowSeconds", 0.0))
+			b["channel_floor"] = float((d.get("beam", {}) as Dictionary).get("channelFloor", 0.2)) \
+				if d.get("beam") is Dictionary else 0.2
+			if d.get("active") is Dictionary:
+				var act: Dictionary = d["active"]
+				b["active"] = {
+					"id": str(act.get("id", "")), "name": str(act.get("name", act.get("id", ""))),
+					"cooldown": float(act.get("cooldown", 0.0)), "seconds": float(act.get("seconds", 0.0)),
+					"damage_mult": float(act.get("damageMult", 1.0)),
+				}
 			_buildings.append(b)
 	var enemy_ids: Dictionary[String, int] = {}
 	var enemy_list: Array[Dictionary] = _read_dir("enemies")
@@ -1638,11 +2356,35 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				}
 				e["traits"] = int(e["traits"]) | (1 << TRAIT_IDS.find("bulwark"))
 			e["_pops_into_id"] = str(d.get("popsInto", "")) if d.get("popsInto") != null else ""
+			# M2.5: Regrow and Splitter (the trait bit follows the block, as in core).
+			var regrow: Dictionary = d.get("regrow", {}) if d.get("regrow") is Dictionary else {}
+			e["regrow_seconds"] = float(regrow.get("seconds", 0.0))
+			if float(e["regrow_seconds"]) > 0.0:
+				e["traits"] = int(e["traits"]) | (1 << TRAIT_IDS.find("regrow"))
+			var split: Dictionary = d.get("split", {}) if d.get("split") is Dictionary else {}
+			e["split_count"] = int(split.get("count", 0))
+			e["_splits_into_id"] = str(split.get("into", ""))
+			if int(e["split_count"]) > 0:
+				e["traits"] = int(e["traits"]) | (1 << TRAIT_IDS.find("splitter"))
 			_enemies.append(e)
 	for e: Dictionary in _enemies:
 		enemy_ids[str(e["id"])] = int(e["index"])
 	for e: Dictionary in _enemies:
 		e["pops_into"] = int(enemy_ids.get(str(e.get("_pops_into_id", "")), -1))
+		e["splits_into"] = int(enemy_ids.get(str(e.get("_splits_into_id", "")), -1))  # M2.5
+	_parse_waves(wave_set, errors)
+
+
+## Waves of one wave set document (planet, lanes, enemies and falling objects loaded).
+func _parse_waves(wave_set: Dictionary, errors: PackedStringArray) -> void:
+	var enemy_ids: Dictionary[String, int] = {}
+	for e: Dictionary in _enemies:
+		enemy_ids[str(e["id"])] = int(e["index"])
+	var falling_ids: Dictionary[String, int] = {}
+	for f: Dictionary in _falling_defs:
+		falling_ids[str(f["id"])] = int(f["index"])
+	var start: float = float(wave_set.get("startStardust", -1.0))
+	_start_stardust = start if start >= 0.0 else _planet_start_stardust
 	_waves = []
 	var waves: Array = wave_set.get("waves", [])
 	for w: Dictionary in waves:
@@ -1659,7 +2401,20 @@ func _load_json_content(errors: PackedStringArray) -> void:
 				"bearing": float(_lanes.get(str(sp.get("lane", "")), 0.0)),
 				"lane": str(sp.get("lane", "")),
 			})
+		var volleys: Array[Dictionary] = []  # M2.10
+		var raw_volleys: Array = w.get("falling", [])
+		for v: Dictionary in raw_volleys:
+			var fid: String = str(v.get("object", ""))
+			if not falling_ids.has(fid):
+				errors.append("mock: unknown falling object '%s'" % fid)
+				continue
+			volleys.append({
+				"falling": falling_ids[fid], "bearing": deg_to_rad(float(v.get("bearingDeg", 0.0))),
+				"spread": deg_to_rad(float(v.get("spreadDeg", 0.0))), "count": int(v.get("count", 1)),
+				"start": float(v.get("startSeconds", 0.0)), "seconds": float(v.get("seconds", 0.0)),
+			})
 		_waves.append({
+			"volleys": volleys,
 			"light_mult": float(w.get("lightMult", 1.0)),
 			"spawn_seconds": float(w.get("spawnSeconds", 15.0)),
 			"exact_ahead": int(forecast.get("exactAhead", 1)),

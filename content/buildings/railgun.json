@@ -1,0 +1,23 @@
+{
+  "id": "railgun", "name": "Railgun", "kind": "tower", "footprint": 1, "layer": "any", "cost": 140,
+  "arcDeg": 15, "range": 650, "fireRate": 0.45, "aimMount": true, "aimOffsetDeg": 0,
+  "precision": true,
+  "projectile": { "kind": "dot", "speed": 2400, "damage": 6, "type": "pierce", "splash": 0, "pierce": 2 },
+  "falloff": [[0, 1], [1, 1]],
+  "targeting": ["strong", "first", "close"],
+  "paths": [
+    { "id": "slug", "name": "Heavy Slug", "tiers": [
+      { "name": "Dense Core", "cost": 85, "mods": [{ "stat": "damage", "op": "add", "value": 2 }] },
+      { "name": "Long Rails", "cost": 125, "mods": [{ "stat": "range", "op": "mul", "value": 1.15 }] },
+      { "name": "Tungsten Slug", "cost": 195, "mods": [{ "stat": "damage", "op": "mul", "value": 1.35 }] },
+      { "name": "Planet Splitter", "cost": 310, "mods": [{ "stat": "damage", "op": "mul", "value": 1.5 }, { "stat": "pierce", "op": "add", "value": 1 }] }
+    ] },
+    { "id": "coil", "name": "Coil Cycle", "tiers": [
+      { "name": "Fast Capacitors", "cost": 85, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.2 }] },
+      { "name": "Through-shot", "cost": 125, "mods": [{ "stat": "pierce", "op": "add", "value": 1 }] },
+      { "name": "Cooled Rails", "cost": 195, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.3 }] },
+      { "name": "Gauss Chain", "cost": 310, "mods": [{ "stat": "fireRate", "op": "mul", "value": 1.35 }, { "stat": "pierce", "op": "add", "value": 2 }] }
+    ] }
+  ], "active": null,
+  "visual": { "shape": "star", "color": "tower.railgun" }
+}

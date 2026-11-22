@@ -1,0 +1,7 @@
+{
+  "id": "spore_blue", "behavior": "lane", "layers": 2, "hpPerLayer": 1,
+  "speed": 36, "size": 8, "landDamagePerLayer": 1, "bounty": 1,
+  "traits": ["regrow"], "regrow": { "seconds": 2.5 },
+  "shadowCaster": false, "hpBar": false, "popsInto": "spore_red",
+  "shape": "circle", "visual": { "color": "tier.blue" }
+}

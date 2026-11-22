@@ -5,13 +5,15 @@ extends Node2D
 ## OrbitCamera, PlanetView, EntityView (BatchRenderer), InputRouter, BandController
 ## and the HUD, and turns UI intents into SimServer commands.
 ## User args (after `--`): --mock, --seed=N, --band=surface|orbit, --demo (scripted
-## mid-wave state on the mock), --demo-placement (M2.1 layout), --select=SITE, --debug, --end=won|lost (mock),
+## mid-wave state on the mock), --demo-placement (M2.1 layout), --demo-drills (M2.7), --select=SITE, --debug, --end=won|lost (mock),
 ## --screenshot PATH. Playtest bot (see autoplay.gd): --play=sensible|towers|none keeps
-## playing live; with --ff-wave=N [--ff-seconds=S], --ff-shadow or --ff-end the run is
+## playing live; with --ff-wave=N [--ff-seconds=S], --ff-shadow, --ff-beam=bright|dim (M2.6) or --ff-end the run is
 ## first fast-forwarded to that moment (wave N running for S seconds, or its
 ## intermission when S < 0; the first enemy shadow on the planet; the end screen).
 ## M2.8: a home planet picker opens before the first run and after Restart;
 ## --planet=small|medium|large skips it (screenshots, bots), and so do --play and --demo.
+## M2.10: --waves=ID runs that wave set (e.g. m2_storm, the meteor-storm demo; on
+## the web build also ?waves=ID); it skips the picker and plays on the set's planet.
 
 const PHASE_INTERMISSION: int = 0
 const PHASE_WAVE: int = 1
@@ -27,14 +29,11 @@ var camera: OrbitCamera
 var planet_view: PlanetView
 var entity_view: EntityView
 var weak_assist: WeakPointAssist  # M2.4
+var sky_threats: SkyThreats  # M2.10
 var input_router: InputRouter
 var bands: BandController
 var hud: Hud
 var run_seed: int = 0
-## M2.4: wave set played (index into get_wave_sets; 0 = "m1"). --waves=<id> or
-## the debug overlay's wave set button picks another, e.g. "trial_bulwark".
-var wave_set: int = 0
-var _waves_arg: String = ""
 
 var selected_slot: int = -1
 ## Layer of the selection: 0 ground, 1 elevated (M2.1).
@@ -46,12 +45,19 @@ var _frame: int = 0
 ## Set before the node enters the tree (or pass --mock) to skip the real SimServer.
 var force_mock: bool = false
 var _demo: bool = false
+## --demo-drills (M2.7, with --demo): six drills and a cooler on the night side,
+## so the heat rings, an overheated drill and the instability meter show.
+var _demo_drills: bool = false
 ## --demo-placement: an M2.1 layout for screenshots (elevated towers; on the
 ## mock also a wide building and an aura building, which M1 content lacks).
 var _demo_placement: bool = false
 var _start_band: String = ""
 var _tap_switched_view: bool = false
 var _upgrade_key: String = ""  # M2.2: what the open upgrade panel was built from
+## M2.11: mount steps and focus numbers (get_aim_rules), and the mount the next
+## aim-mounted building is placed with.
+var _aim_rules: Dictionary = {}
+var _build_aim: float = 0.0
 var _select_arg: int = -1
 var _debug_arg: bool = false
 var _end_arg: String = ""
@@ -64,12 +70,20 @@ var _ff_wave: int = 0
 var _ff_seconds: float = 0.0
 var _ff_shadow: bool = false
 var _ff_end: bool = false
+## M2.6 screenshots: --ff-beam=bright|dim stops at the first Sun Lens beam at
+## full power (panels lit) or dimmed by a shadow on the planet.
+var _ff_beam: String = ""
 ## M2.8 home planets. Set planet_picker_enabled before the node enters the tree
 ## to start straight away (tests). planet_id "" = the wave set's own planet.
 var planet_picker_enabled: bool = true
 var planet_id: String = ""
 var planet_picker: PlanetPicker
 var _planet_arg: String = ""
+## M2.10: index of the wave set to play (get_wave_sets); 0 = the default set.
+## M2.4: the debug overlay's wave set button cycles it (e.g. "trial_bulwark").
+var wave_set: int = 0
+var _waves_arg: String = ""
+var _demo_shield_bearing: float = NAN
 
 
 func _ready() -> void:
@@ -82,8 +96,7 @@ func _ready() -> void:
 		planet_id = _planet_arg
 	if _planet_arg != "" or _play != "" or _demo:
 		planet_picker_enabled = false
-	if _waves_arg != "":
-		wave_set = maxi(wave_set_ids().find(_waves_arg), 0)
+	_resolve_wave_set()  # M2.10
 	_start_run(run_seed)
 	var start_band: String = _start_band if _start_band != "" else config.text("bands", "startBand", "surface")
 	bands.snap_to(BandController.Band.ORBIT if start_band == "orbit" else BandController.Band.SURFACE)
@@ -116,6 +129,8 @@ func _process(delta: float) -> void:
 	planet_view.surface_weight = bands.surface_weight
 	entity_view.view_zoom = zoom
 	weak_assist.view_zoom = zoom
+	sky_threats.view_zoom = zoom  # M2.10
+	sky_threats.surface_weight = bands.surface_weight
 	input_router.planet_centre = world_to_screen(Vector2.ZERO)
 	input_router.planet_radius_px = float(sim.get_planet_radius()) * zoom
 	_handle_events()
@@ -253,6 +268,10 @@ func _build_scene() -> void:
 	weak_assist.name = "WeakPointAssist"
 	weak_assist.sim = sim
 	add_child(weak_assist)
+	sky_threats = SkyThreats.new()  # M2.10: shields, warnings, flashes over the entities
+	sky_threats.name = "SkyThreats"
+	sky_threats.sim = sim
+	add_child(sky_threats)
 
 	input_router = InputRouter.new()
 	input_router.name = "InputRouter"
@@ -303,6 +322,8 @@ func _build_scene() -> void:
 	hud.build_menu.sell_requested.connect(_on_sell_requested)
 	hud.build_menu.build_above_requested.connect(_on_build_above_requested)
 	hud.build_menu.upgrade_requested.connect(_on_upgrade_requested)
+	hud.build_menu.activate_requested.connect(_on_activate_requested)  # M2.6
+	hud.build_menu.aim_step_requested.connect(_on_aim_step_requested)  # M2.11
 	hud.build_menu.closed.connect(_on_menu_closed)
 
 
@@ -311,7 +332,7 @@ func _start_run(new_seed: int) -> void:
 	if planet_id != "":
 		sim.new_run(run_seed, wave_set, planet_id)  # M2.8
 	else:
-		sim.new_run(run_seed, wave_set)
+		sim.new_run(run_seed, wave_set)  # M2.10: wave_set 0 unless --waves=
 	_phase = -1
 	# M2.8: the views fit the planet, whose size may have changed.
 	planet_view.sync()
@@ -339,6 +360,7 @@ func _track_phase() -> void:
 		elif phase == PHASE_INTERMISSION and _phase == PHASE_WAVE:
 			bands.go_to(BandController.Band.SURFACE)
 	_phase = phase
+	_refresh_aim()  # M2.11: re-aiming opens and closes with the waves
 	_refresh_forecast()
 	if phase == PHASE_WON or phase == PHASE_LOST:
 		clear_selection()
@@ -360,6 +382,13 @@ func _handle_events() -> void:
 			_refresh_upgrades(true)
 		elif type == "WeakPointHit":  # M2.4
 			weak_assist.flash(Vector2(float(event.get("x", 0.0)), float(event.get("y", 0.0))))
+		elif sky_threats.handle_event(event):  # M2.10: impact / absorb flashes
+			pass
+		elif str(event.get("type", "")) == "ShieldOffline":  # M2.10
+			hud.toast("Shield down - recharging")
+		elif str(event.get("type", "")) == "AimChanged":  # M2.11
+			planet_view.sync()
+			_refresh_aim()
 
 
 func _refresh_forecast() -> void:
@@ -367,6 +396,7 @@ func _refresh_forecast() -> void:
 	var count: int = int(config.num("sim", "forecastCount", 5.0))
 	var forecast: Array[Dictionary] = sim.get_forecast(count)
 	planet_view.forecast = forecast
+	sky_threats.forecast = forecast  # M2.10
 	hud.show_forecast(forecast)
 
 
@@ -377,6 +407,8 @@ func _reject_text(reason: int) -> String:
 			return "No room there"
 		4:
 			return "Not enough stardust"
+		7:
+			return "Not now: re-aim between waves"  # M2.11 (also any command after the run)
 		8:
 			return "Needs a building below"
 		9:
@@ -423,6 +455,7 @@ func _select_slot(slot: int, layer: int = 0) -> void:
 	planet_view.selected_slot = slot
 	planet_view.selected_layer = layer
 	_refresh_upgrades(true)
+	_refresh_aim()  # M2.11
 
 
 ## M2.1 details for the menu of the building anchored on `owner`, tapped at
@@ -432,11 +465,40 @@ func _building_extra(slot: int, layer: int, owner: int) -> Dictionary:
 	var notes: Array[String] = []
 	var kind: String = str(planet_view.building_def(planet_view.site_building(owner)).get("kind", ""))
 	for stat: int in PlanetView.STAT_NAMES.size():
-		if (stat == 3) != (kind == "panel") or kind == "support":
+		if (stat == 3) != (kind == "panel") or kind == "support" or kind == "shield":
 			continue  # towers show range, fire rate, damage; panels show income
 		var mult: float = planet_view.site_modifier(owner, stat)
 		if absf(mult - 1.0) > 0.001:
 			notes.append("%+d%% %s" % [roundi((mult - 1.0) * 100.0), PlanetView.STAT_NAMES[stat]])
+	if kind == "shield":  # M2.10: live energy and the recharge rule
+		notes.append(BuildMenu.shield_note(planet_view.building_def(planet_view.site_building(owner)),
+			_shield_state(owner)))
+	# M2.7: a drill's heat or cooldown, a cooler's cooling right now.
+	if kind == "drill":
+		var drill: Dictionary = planet_view.drill_states.get(owner, {})
+		if bool(drill.get("overheated", false)):
+			notes.append("Overheated: restarts in %d s (no damage)" % ceili(float(drill.get("cooldown", 0.0))))
+		else:
+			notes.append("Drilling, heat %d%%" % roundi(float(drill.get("heat", 0.0)) * 100.0))
+	elif kind == "cooler":
+		var flags: int = planet_view.site_flags[owner] if owner < planet_view.site_flags.size() else 0
+		var lit: bool = (flags & (PlanetView.FLAG_LIT | PlanetView.FLAG_SHADED)) == PlanetView.FLAG_LIT
+		notes.append("Cools best in the dark" if lit else "Cooling at full strength (dark side)")
+	# M2.6: auras that are not multipliers (Radar detection, Amplifier shield damage).
+	var links: PackedInt32Array = planet_view.adjacency_links
+	var seen: Dictionary[int, bool] = {}
+	for i: int in range(0, links.size() - 2, 3):
+		if links[i + 1] != owner or seen.has(links[i + 2]):
+			continue
+		seen[links[i + 2]] = true
+		if links[i + 2] == 4:
+			notes.append("Sees camo (Radar)")
+		elif links[i + 2] == 5:
+			notes.append("x2 against shields (Amplifier)")
+	# M2.6: the Sun Lens shows the light it channels.
+	if planet_view.building_def(planet_view.site_building(owner)).get("projectile_kind", -1) == 2 \
+			and sim.has_method(&"get_channel"):
+		notes.append("Channelling %d%% of the panels' light" % roundi(float(sim.get_channel()) * 100.0))
 	var carrying: bool = false
 	if layer == 0 and planet_view.layer_count > 1:
 		var first: int = planet_view.site_slot(owner)
@@ -447,6 +509,16 @@ func _building_extra(slot: int, layer: int, owner: int) -> Dictionary:
 		"layer": layer, "notes": notes, "carrying": carrying,
 		"can_build_above": layer == 0 and planet_view.can_build_above(slot),
 	}
+
+
+## M2.10: get_shields entry of the shield on `site`, or {}.
+func _shield_state(site: int) -> Dictionary:
+	if not sim.has_method(&"get_shields"):
+		return {}
+	for shield: Dictionary in sim.get_shields():
+		if int(shield.get("slot", -1)) == site:
+			return shield
+	return {}
 
 
 func _select_site(site: int) -> void:
@@ -497,16 +569,19 @@ func _on_band_changed(band: int) -> void:
 
 func _on_preview_changed(building: int) -> void:
 	planet_view.ghost_building = building
+	_refresh_aim()  # M2.11
 
 
 func _on_build_requested(building: int) -> void:
 	if selected_slot < 0:
 		return
 	_last_building = building
+	# M2.11: an aim-mounted building is placed with the mount chosen in the menu (free).
+	var aim: float = _build_aim if bool(planet_view.building_def(building).get("aim_mount", false)) else 0.0
 	if selected_layer > 0:
-		sim.place_building(selected_slot, building, 0.0, selected_layer)
+		sim.place_building(selected_slot, building, aim, selected_layer)
 	else:
-		sim.place_building(selected_slot, building, 0.0)
+		sim.place_building(selected_slot, building, aim)
 	clear_selection()
 
 
@@ -540,6 +615,7 @@ func _on_sell_requested() -> void:
 ## M2.2: keeps the open building's upgrade paths current (tiers, affordability,
 ## Build view only). Rebuilt only when something it shows changed.
 func _refresh_upgrades(force: bool = false) -> void:
+	_refresh_active()
 	if selected_slot < 0 or not hud.build_menu.is_open() or not sim.has_method(&"get_slot_upgrades"):
 		_upgrade_key = ""
 		planet_view.selected_stats = {}
@@ -566,6 +642,98 @@ func _on_upgrade_requested(path: int) -> void:
 	sim.upgrade_building(planet_view.site_of(selected_slot, selected_layer), path)
 
 
+## M2.6: keeps the open building's active button (Overcharge) current.
+func _refresh_active() -> void:
+	if selected_slot < 0 or not hud.build_menu.is_open() or not sim.has_method(&"get_site_actives"):
+		return
+	var owner: int = planet_view.site_owner(planet_view.site_of(selected_slot, selected_layer))
+	if owner < 0:
+		return
+	var actives: PackedFloat32Array = sim.get_site_actives()
+	if 2 * owner + 1 < actives.size():
+		hud.build_menu.set_active_state(actives[2 * owner], actives[2 * owner + 1])
+
+
+## M2.6: tap the tower, then its active button (or F): Overcharge. Works in
+## both views; the sim refuses it while it cools down.
+func _on_activate_requested() -> void:
+	if selected_slot < 0 or not sim.has_method(&"activate_building"):
+		return
+	sim.activate_building(planet_view.site_of(selected_slot, selected_layer))
+
+
+# --- M2.11 bent aim (begin) ---
+
+## Mount steps from the rules (rad); the Q33 default when the sim has none.
+func _aim_offsets() -> PackedFloat32Array:
+	if _aim_rules.is_empty() and sim.has_method(&"get_aim_rules"):
+		_aim_rules = sim.get_aim_rules()
+	var offsets: PackedFloat32Array = _aim_rules.get("offsets", PackedFloat32Array())
+	if offsets.is_empty():
+		for deg: float in [-60.0, -30.0, 0.0, 30.0, 60.0]:
+			offsets.append(deg_to_rad(deg))
+	return offsets
+
+
+## Index of the step nearest `offset`.
+static func nearest_step(offsets: PackedFloat32Array, offset: float) -> int:
+	var best: int = 0
+	for i: int in offsets.size():
+		if absf(offsets[i] - offset) < absf(offsets[best] - offset):
+			best = i
+	return best
+
+
+## Shows the menu's mount row for the selection: the ghost's mount on an
+## empty slot (free), or the tower's aim with its re-aim price (between waves).
+func _refresh_aim() -> void:
+	_aim_offsets()  # fetches the rules once
+	if selected_slot < 0 or not hud.build_menu.is_open():
+		planet_view.ghost_aim = 0.0
+		return
+	var site: int = planet_view.site_of(selected_slot, selected_layer)
+	var owner: int = planet_view.site_owner(site)
+	if owner < 0:
+		var def: Dictionary = planet_view.building_def(hud.build_menu.previewed)
+		if bool(def.get("aim_mount", false)):
+			planet_view.ghost_aim = _build_aim
+			hud.build_menu.show_aim("Mount %+d°  (free now)" % roundi(rad_to_deg(_build_aim)), true)
+		else:
+			planet_view.ghost_aim = 0.0
+			hud.build_menu.show_aim("", false)
+		return
+	var built: Dictionary = planet_view.building_def(planet_view.site_building(owner))
+	if not bool(built.get("aim_mount", false)) or not sim.has_method(&"get_reaim_cost"):
+		hud.build_menu.show_aim("", false)
+		return
+	var deg: int = roundi(rad_to_deg(planet_view.site_aim(owner)))
+	var mid_wave: bool = _phase == PHASE_WAVE and bool(_aim_rules.get("between_waves_only", true))
+	if mid_wave:
+		hud.build_menu.show_aim("Aim %+d°  (re-aim between waves)" % deg, false)
+	else:
+		hud.build_menu.show_aim("Aim %+d°  re-aim %d" % [deg, ceili(float(sim.get_reaim_cost(owner)))], true)
+
+
+## Touch (< >) and keyboard (, .) path: one mount step left or right.
+func _on_aim_step_requested(direction: int) -> void:
+	if selected_slot < 0:
+		return
+	var offsets: PackedFloat32Array = _aim_offsets()
+	var site: int = planet_view.site_of(selected_slot, selected_layer)
+	var owner: int = planet_view.site_owner(site)
+	if owner < 0:
+		var at: int = nearest_step(offsets, _build_aim)
+		_build_aim = offsets[clampi(at + direction, 0, offsets.size() - 1)]
+		_refresh_aim()
+		return
+	var now: int = nearest_step(offsets, planet_view.site_aim(owner))
+	var next: int = clampi(now + direction, 0, offsets.size() - 1)
+	if next != now and sim.has_method(&"set_aim"):
+		sim.set_aim(owner, offsets[next])
+
+# --- M2.11 bent aim (end) ---
+
+
 func _on_menu_closed() -> void:
 	selected_slot = -1
 	selected_layer = 0
@@ -584,12 +752,17 @@ func _parse_args() -> void:
 			force_mock = true
 		elif arg == "--demo":
 			_demo = true
+		elif arg == "--demo-drills":  # M2.7
+			_demo = true
+			_demo_drills = true
 		elif arg == "--demo-placement":
 			_demo_placement = true
 		elif arg == "--debug":
 			_debug_arg = true
 		elif arg.begins_with("--seed="):
 			run_seed = arg.get_slice("=", 1).to_int()
+		elif arg.begins_with("--waves="):  # M2.10: wave set id
+			_waves_arg = arg.get_slice("=", 1)
 		elif arg.begins_with("--planet="):  # M2.8: skip the picker
 			_planet_arg = arg.get_slice("=", 1)
 		elif arg.begins_with("--band="):
@@ -598,6 +771,8 @@ func _parse_args() -> void:
 			_select_arg = arg.get_slice("=", 1).to_int()
 		elif arg.begins_with("--play="):
 			_play = arg.get_slice("=", 1)
+		elif arg.begins_with("--ff-beam="):
+			_ff_beam = arg.get_slice("=", 1)
 		elif arg.begins_with("--ff-wave="):
 			_ff_wave = arg.get_slice("=", 1).to_int()
 		elif arg.begins_with("--ff-seconds="):
@@ -608,14 +783,30 @@ func _parse_args() -> void:
 			_ff_end = true
 		elif arg.begins_with("--end="):
 			_end_arg = arg.get_slice("=", 1)
-		elif arg.begins_with("--waves="):  # M2.4: wave set id, e.g. trial_bulwark
-			_waves_arg = arg.get_slice("=", 1)
 		elif arg == "--codex":  # M2.3: start with the codex open (screenshots)
 			_codex_arg = true
 		elif arg == "--screenshot" and i + 1 < args.size():
 			i += 1
 			_screenshot_path = args[i]
 		i += 1
+
+
+## M2.10: picks the wave set from --waves=ID or, on the web, ?waves=ID. A chosen
+## set plays on its own planet, so the planet picker is skipped.
+func _resolve_wave_set() -> void:
+	var wanted: String = _waves_arg
+	if wanted == "" and OS.has_feature("web"):
+		var query: Variant = JavaScriptBridge.eval("new URLSearchParams(location.search).get('waves') || ''")
+		wanted = str(query) if query != null else ""
+	if wanted == "" or not sim.has_method(&"get_wave_sets"):
+		return
+	var sets: PackedStringArray = sim.get_wave_sets()
+	var index: int = sets.find(wanted)
+	if index < 0:
+		push_warning("unknown wave set '%s' (have %s)" % [wanted, ", ".join(sets)])
+		return
+	wave_set = index
+	planet_picker_enabled = false
 
 
 ## Scripted mid-wave state for screenshots: panels in the beam, towers on both
@@ -627,12 +818,20 @@ func _setup_demo() -> void:
 	var defs: Array[Dictionary] = sim.get_building_defs()
 	var panel: int = -1
 	var towers: Array[int] = []
+	var drill: int = -1
+	var cooler: int = -1
 	for def: Dictionary in defs:
-		if str(def.get("kind", "")) == "panel":
+		var kind: String = str(def.get("kind", ""))
+		if kind == "panel":
 			panel = int(def.get("index", -1))
-		else:
+		elif kind == "tower":
 			towers.append(int(def.get("index", -1)))
+		elif kind == "drill":
+			drill = int(def.get("index", -1))
+		elif kind == "cooler":
+			cooler = int(def.get("index", -1))
 	var n: int = sim.get_slot_count()
+	_place_demo_shield(defs, n)  # M2.10
 	if panel >= 0:
 		for slot: int in [n - 3, n - 2, n - 1, 0, 1]:
 			sim.place_building(slot, panel, 0.0)
@@ -641,18 +840,60 @@ func _setup_demo() -> void:
 		var lane_slots: Array[int] = [2, 3, 4, n / 2 - 2, n / 2 - 1, n / 2]
 		for k: int in lane_slots.size():
 			sim.place_building(lane_slots[k], towers[k % towers.size()], 0.0)
+	if _demo_drills and drill >= 0:
+		@warning_ignore("integer_division")
+		var night: int = n / 2 + n / 9
+		for k: int in 6:
+			sim.place_building(night + k, drill, 0.0)
+		if cooler >= 0:
+			sim.place_building(night + 6, cooler, 0.0)
 	sim.step_ticks(2)
 	sim.start_wave()
 	sim.step_ticks(30 * 19)
 	if mock != null:
 		var sun: Vector2 = Vector2.from_angle(float(sim.get_sun_bearing()))
 		mock.debug_spawn("eclipser", sun * 260.0 + sun.orthogonal() * 22.0)
+		_spawn_demo_meteors(mock)  # M2.10
 		if _end_arg == "won":
 			mock.debug_set_phase(PHASE_WON)
 		elif _end_arg == "lost":
 			mock.debug_set_planet_hp(0.0)
 			mock.debug_set_phase(PHASE_LOST)
 	bands.update()
+
+
+## M2.10: a shield under the next wave's first volley (or a quarter turn round),
+## so demo screenshots show a dome catching meteors; on the mock also two meteors,
+## one over the shield and one that will hit the planet.
+func _place_demo_shield(defs: Array[Dictionary], n: int) -> void:
+	var shield: int = -1
+	for def: Dictionary in defs:
+		if str(def.get("kind", "")) == "shield":
+			shield = int(def.get("index", -1))
+	if shield < 0:
+		return
+	var bearing: float = PI * 0.5
+	var forecast: Array[Dictionary] = sim.get_forecast(1)
+	if not forecast.is_empty():
+		for entry: Dictionary in forecast[0].get("entries", []):
+			if bool(entry.get("volley", false)):
+				bearing = Palette.angle_of(entry.get("lane_bearing", bearing))
+				break
+	var slot: int = posmod(roundi(bearing / TAU * float(n)), n)
+	sim.place_building(slot, shield, 0.0)
+	_demo_shield_bearing = bearing
+
+
+## M2.10: on the mock, meteors in flight for the demo screenshot (after the demo
+## has stepped the sim): one warned over the shield, one warned that will hit the
+## planet, one still high up.
+func _spawn_demo_meteors(mock: MockSimServer) -> void:
+	if is_nan(_demo_shield_bearing):
+		return
+	var r: float = float(sim.get_planet_radius())
+	mock.debug_spawn_falling("meteor", _demo_shield_bearing, r + 150.0)
+	mock.debug_spawn_falling("meteor", _demo_shield_bearing + PI * 0.6, r + 120.0)
+	mock.debug_spawn_falling("bomb", _demo_shield_bearing - PI * 0.4, r + 330.0)
 
 
 ## M2.1 screenshot layout, between waves: towers with towers above them, and on
@@ -722,13 +963,15 @@ func _build_above_bot_towers() -> void:
 ## Plays the run with the playtest bot, as fast as the sim steps, up to the moment
 ## the --ff-* arguments ask for. Uses contract calls only.
 func _fast_forward() -> void:
-	if _ff_wave <= 0 and not _ff_shadow and not _ff_end:
+	if _ff_wave <= 0 and not _ff_shadow and not _ff_end and _ff_beam == "":
 		return
 	for i: int in 40000:
 		var phase: int = sim.get_phase()
 		if phase >= PHASE_WON:
 			break
 		if _ff_shadow and sim.get_shade_intervals().size() > 0:
+			break
+		if _ff_beam != "" and _beam_moment(_ff_beam == "dim"):
 			break
 		if _ff_wave > 0 and int(sim.get_wave_index()) == _ff_wave - 1:
 			if phase == PHASE_INTERMISSION and _ff_seconds < 0.0:
@@ -740,6 +983,21 @@ func _fast_forward() -> void:
 		sim.step_ticks(3)
 	sim.drain_events()
 	bands.update()
+
+
+## M2.6: a Sun Lens is firing at full power (`dim` false) or, with a shadow on
+## the planet, at under half power.
+func _beam_moment(dim: bool) -> bool:
+	if not sim.has_method(&"get_beams"):
+		return false
+	var beams: PackedFloat32Array = sim.get_beams()
+	for i: int in range(0, beams.size() - PlanetView.BEAM_FLOATS + 1, PlanetView.BEAM_FLOATS):
+		var power: float = beams[i + 4]
+		if dim and power < 0.5 and sim.get_shade_intervals().size() > 0 and sim.get_channel() < 0.5:
+			return true
+		if not dim and power > 0.9:
+			return true
+	return false
 
 
 func _save_screenshot() -> void:

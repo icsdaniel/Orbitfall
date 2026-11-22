@@ -1,51 +1,68 @@
 {
-  "shieldMult": { "emp": 2 },
+  "shieldMult": {
+    "emp": 2
+  },
   "traits": {
     "camo": {
-      "name": "Camo", "cue": "dashed, translucent",
+      "name": "Camo",
+      "cue": "dashed, translucent",
       "effect": "About half of undetected shots miss",
-      "easierWith": "Radar, Scanner satellite"
+      "easierWith": "Radar, Scanner satellite",
+      "missChance": 0.5
     },
     "armored": {
-      "name": "Armored", "cue": "thick grey outline",
+      "name": "Armored",
+      "cue": "thick grey outline",
       "effect": "Kinetic damage halved",
-      "easierWith": "Explosive, Energy, Pierce",
-      "mult": { "kinetic": 0.5, "pierce": 1.5 }
+      "easierWith": "Explosive (Flak, Cannon), Energy (Sun Lens), Pierce (Railgun)",
+      "mult": {
+        "kinetic": 0.5,
+        "pierce": 1.5
+      }
     },
     "shielded": {
-      "name": "Shielded", "cue": "glow ring",
+      "name": "Shielded",
+      "cue": "glow ring",
       "effect": "A shield absorbs the first damage; EMP strips it twice as fast",
-      "easierWith": "EMP, Tesla"
+      "easierWith": "EMP, Tesla, Amplifier"
     },
     "fast": {
-      "name": "Fast", "cue": "elongated, trail",
+      "name": "Fast",
+      "cue": "elongated, trail",
       "effect": "Outruns slow shots",
-      "easierWith": "Cryo, slow fields, hitscan"
+      "easierWith": "Cryo, slow fields, hitscan (Sun Lens)"
     },
     "layered": {
-      "name": "Layered", "cue": "colour tier changes",
+      "name": "Layered",
+      "cue": "colour tier changes",
       "effect": "Each layer popped drops it one colour tier",
       "easierWith": "High fire rate"
     },
     "regrow": {
-      "name": "Regrow", "cue": "plus badge",
+      "name": "Regrow",
+      "cue": "plus badge",
       "effect": "Regains layers over time",
       "easierWith": "Burst, burn"
     },
     "splitter": {
-      "name": "Splitter", "cue": "notched",
+      "name": "Splitter",
+      "cue": "notched",
       "effect": "Splits into 2 to 4 when killed",
       "easierWith": "Splash, chain"
     },
     "heat_resistant": {
-      "name": "Heat-resistant", "cue": "orange rim",
+      "name": "Heat-resistant",
+      "cue": "orange rim",
       "effect": "Energy damage halved",
       "easierWith": "Kinetic, Cryo",
-      "mult": { "energy": 0.5, "cryo": 1.5 }
+      "mult": {
+        "energy": 0.5,
+        "cryo": 1.5
+      }
     },
     "bulwark": {
       "name": "Bulwark", "cue": "plate with a bright wedge on its weak side",
-      "effect": "Body hits deal about 25%; a precision shot (Lance) from right under it (within 8 degrees) hits the weak point for 3.5x",
+      "effect": "Body hits deal about 25%; a precision shot (Lance, Railgun) from right under it (within 8 degrees) hits the weak point for 3.5x",
       "easierWith": "Lance, Railgun; rotate the planet to line one up"
     }
   }

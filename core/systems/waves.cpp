@@ -5,6 +5,7 @@
 #include "sim/mathx.h"
 #include "sim/sim.h"
 #include "systems/enemies.h"
+#include "systems/falling.h"
 #include "systems/shadows.h"
 #include "systems/sun.h"
 #include "systems/systems.h"
@@ -27,6 +28,7 @@ bool startWave(World& world) {
   world.intermissionTime = 0.0f;
   world.lightMult = wave->lightMult;
   for (uint16_t& n : world.spawned) n = 0;
+  for (uint16_t& n : world.volleysSpawned) n = 0;  // M2.10
   world.emit(EventType::WaveStarted, static_cast<int32_t>(world.waveIndex), wave->wave, 0.0f, 0.0f,
              wave->lightMult);
   return true;
@@ -41,6 +43,18 @@ void spawners(World& world, float dt) {
     uint16_t& done = world.spawned[s];
     while (done < spawn.count && world.waveTime >= spawnTime(*wave, spawn.count, done)) {
       spawnEnemy(world, spawn.enemy, spawn.lane);  // a full pool drops the unit (overflowCount)
+      ++done;
+    }
+  }
+  // M2.10: volleys of falling objects, each on its bearing +- a seeded spread.
+  for (size_t v = 0; v < wave->volleys.size() && v < world.volleysSpawned.size(); ++v) {
+    const VolleyDef& volley = wave->volleys[v];
+    uint16_t& done = world.volleysSpawned[v];
+    while (done < volley.count && world.waveTime >= volleyTime(volley, done)) {
+      float bearing = volley.bearing;
+      if (volley.spread > 0.0f) bearing += world.rng.range(-volley.spread, volley.spread);
+      const float dist = world.content->falling[static_cast<size_t>(volley.falling)].spawnRadius;
+      spawnFalling(world, volley.falling, bearing, dist);  // a full pool drops it (overflowCount)
       ++done;
     }
   }
@@ -59,9 +73,12 @@ void waveFlow(World& world, float /*dt*/) {
   }
   if (world.phase != Phase::Wave) return;
   const WaveDef* wave = currentWave(world);
-  if (wave == nullptr || world.enemies.count > 0) return;
+  if (wave == nullptr || world.enemies.count > 0 || world.falling.count > 0) return;
   for (size_t s = 0; s < wave->spawns.size(); ++s) {
     if (world.spawned[s] < wave->spawns[s].count) return;
+  }
+  for (size_t v = 0; v < wave->volleys.size(); ++v) {  // M2.10
+    if (world.volleysSpawned[v] < wave->volleys[v].count) return;
   }
 
   world.emit(EventType::WaveCleared, static_cast<int32_t>(world.waveIndex), wave->wave);
@@ -103,6 +120,7 @@ std::vector<WaveForecast> forecast(const World& world, int count) {
         e.enemy = spawn.enemy;
         e.count = f.exact ? spawn.count : -1;
         e.shadowCaster = def.shadowCaster;
+        e.drops = def.hasBomber ? def.bomber.bomb : kNoIndex;  // M2.10
         f.entries.push_back(e);
 
         if (!f.exact || !def.shadowCaster || !def.hasHover || world.sun == nullptr) continue;
@@ -122,10 +140,22 @@ std::vector<WaveForecast> forecast(const World& world, int count) {
           f.eclipserGhostArcs.push_back(sigma + std::asin(hi / radius));
         }
       }
+      appendVolleyEntries(wave, f.exact, f.entries);  // M2.10
     }
     out.push_back(std::move(f));
   }
   return out;
+}
+
+void appendVolleyEntries(const WaveDef& wave, bool exact, std::vector<ForecastEntry>& out) {
+  for (const VolleyDef& v : wave.volleys) {
+    ForecastEntry e;
+    e.laneBearing = v.bearing;
+    e.falling = v.falling;
+    e.spread = v.spread;
+    e.count = exact ? v.count : -1;
+    out.push_back(e);
+  }
 }
 
 uint64_t replayHash(const SimConfig& config, const std::vector<Command>& log, uint32_t ticks) {

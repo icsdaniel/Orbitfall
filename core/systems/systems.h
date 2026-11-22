@@ -16,7 +16,9 @@ void planetRotation(World& world, float dt);
 // slots, b = merged intervals) when the set of shaded slots changes.
 void sunlight(World& world, float dt);
 // M1.7: lit, unshaded panels earn panelRate * beamStrength per second.
-// Sets world.incomePerSecond; emits StardustChanged per whole unit earned.
+// M2.7: running drills earn drillRate per second whatever the light.
+// Sets world.incomePerSecond (panels) and drillIncomePerSecond; emits
+// StardustChanged per whole unit earned.
 void income(World& world, float dt);
 // M1.9: releases the current wave's spawns, spread over its spawnSeconds.
 void spawners(World& world, float dt);
@@ -33,6 +35,9 @@ void spatialRebuild(World& world, float dt);
 void towerTargeting(World& world, float dt);
 // M1.6: towers with a target and a ready cooldown fire a led shot.
 void towerFire(World& world, float dt);
+// M2.6: Sun Lens beams (continuous damage, ramp, channel) and active abilities.
+void beamFire(World& world, float dt);
+void abilities(World& world, float dt);
 // M1.6: moves projectiles and ages them.
 void projectileMovement(World& world, float dt);
 // M1.6: swept projectile-vs-enemy test through the grid; applies damage
@@ -44,6 +49,16 @@ void collisions(World& world, float dt);
 // PlanetHit (a = enemy type, b = lane, x/y, value = damage) and, at HP 0,
 // GameOver (a = wave index); the phase becomes Lost.
 void landing(World& world, float dt);
+// M2.5 Regrow: living enemies with the Regrow trait that took no damage for
+// their regrowSeconds regain one layer, capped at the type they spawned as.
+// Emits LayerRegrown (a = type before, b = type after, x/y).
+void regrow(World& world, float dt);
+// M2.5 Splitter: enemies killed by damage this tick with a split spawn their
+// children (splitCount of splitInto, spread sideways, same lane) before
+// cleanup. Emits EnemySplit (a = type, b = child type, x/y, value = spawned).
+void splits(World& world, float dt);
+// M2.7: instability, drill heat, overheat and restart (systems/drills.h).
+void drills(World& world, float dt);
 // Removes entities flagged dead during the tick (swap-remove).
 void cleanup(World& world, float dt);
 

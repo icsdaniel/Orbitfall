@@ -3,6 +3,7 @@
 #include "sim/pipeline.h"
 #include "sim/world.h"
 #include "systems/buildings.h"
+#include "systems/towers.h"
 #include "systems/upgrades.h"
 #include "systems/waves.h"
 
@@ -64,6 +65,9 @@ void apply(World& world, const Command& c) {
       break;
     case CommandType::UpgradeBuilding:  // M2.2
       if (!runOver(world, c)) upgradeBuilding(world, c.slot, c.id);
+      break;
+    case CommandType::ActivateBuilding:  // M2.6
+      if (!runOver(world, c)) activateBuilding(world, c.slot);
       break;
     case CommandType::StartWave:
       if (world.content != nullptr && !startWave(world)) {

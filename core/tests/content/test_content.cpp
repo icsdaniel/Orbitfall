@@ -103,13 +103,14 @@ TEST_CASE("every shipped content file loads with zero errors") {
   const Files files = shipped_files();
   // Every file ended up as exactly one definition (rules.json is the +1).
   CHECK(files.size() == db.planets.size() + db.suns.size() + db.buildings.size() +
-                            db.enemies.size() + db.waveSets.size() + 2);
+                            db.enemies.size() + db.waveSets.size() + db.falling.size() + 2);
   CHECK(db.planets.size() == 3);  // M2.8: small, medium, large
   CHECK(db.suns.size() == 1);
-  CHECK(db.buildings.size() == 4);  // M2.4: + lance
-  CHECK(db.enemies.size() == 6);    // M2.4: + bulwark
-  CHECK(db.waveSets.size() == 2);   // M2.4: + trial_bulwark (m1 stays wave set 0)
-  CHECK(db.wave_set_index("m1") == 0);
+  CHECK(db.buildings.size() == 13);  // M2.4: + lance; M2.10: + shield; M2.7: + drill, cooler; M2.6: + flak, railgun, cryo, radar, amplifier, sun_lens
+  CHECK(db.enemies.size() == 15);   // M2.4: + bulwark; M2.10: + bomber; M2.5: + brick, phantom, bubble, ember, spore x3, splitter
+  CHECK(db.waveSets.size() == 5);   // M2.4: + trial_bulwark; M2.10: + the m2_storm demo set; M2.5: + m2_bestiary; M2.11: + m2_swarm
+  CHECK(db.falling.size() == 2);    // M2.10: meteor, bomb
+  CHECK(db.wave_set_index("m1") == 0);  // the M1 run stays wave set 0
 }
 
 TEST_CASE("loading from strings matches loading from the directory") {
@@ -334,7 +335,7 @@ TEST_CASE("m1 waves match the balanced BRIEF 8.2 table; wave 5 lightMult is 0.5"
 
 TEST_CASE("rejects malformed JSON with file and position") {
   expect_rejected("enemies/dart.json", "\"speed\": 110,", "\"speed\": 110", "JSON parse error: line 3");
-  expect_rejected("rules.json", "{", "[", "JSON parse error");
+  expect_rejected("rules.json", "\"tickRate\": 30,", "\"tickRate\": 30", "JSON parse error");
 }
 
 TEST_CASE("rejects unknown references") {
@@ -552,7 +553,8 @@ TEST_CASE("M2.1 placement fields: shipped values, defaults and an aura building 
   CHECK(db.buildings[static_cast<size_t>(db.building_index("solar_panel"))].layer == BuildingLayer::Ground);
   for (const BuildingDef& b : db.buildings) {
     CHECK(b.footprint == 1);
-    CHECK(b.auras.empty());
+    // M2.6: only the support buildings (Radar, Amplifier) carry auras.
+    CHECK(b.auras.empty() == (b.kind != BuildingKind::Support));
   }
 
   // The new fields are optional: files without them keep loading.

@@ -23,7 +23,11 @@ bool placeBuilding(World& world, int32_t slot, int32_t building, float aimOffset
 // sellRefund (M2.2). A ground building that carries an elevated one cannot be
 // sold (SupportsElevated).
 bool sellBuilding(World& world, int32_t slot);
-// Sets the mount offset of an aim-mounted building (free in M1; M2.11 prices it).
+// Sets the mount offset of an aim-mounted building. M2.11: the offset snaps to
+// rules.aim.offsets; a change costs rules.aim.reaimCostFrac of the building's
+// cost (Unaffordable otherwise) and, with rules.aim.reaimBetweenWavesOnly, is
+// refused while a wave runs (WrongPhase). Emits AimChanged and re-solves the
+// focus points; asking for the current offset is a free no-op.
 bool setAim(World& world, int32_t slot, float aimOffset);
 // Picks one of the targeting modes the building's definition lists.
 bool setTargeting(World& world, int32_t slot, uint8_t mode);

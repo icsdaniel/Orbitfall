@@ -26,6 +26,7 @@ struct SimConfig {
   uint32_t commandLogCapacity = 16384;  // logged commands before the replay log grows
   uint32_t enemyCapacity = 16384;       // fixed; spawns beyond it are refused
   uint32_t projectileCapacity = 32768;  // fixed; shots beyond it are refused
+  uint32_t fallingCapacity = 4096;      // M2.10: fixed; falling objects beyond it are refused
   // Loaded content; must outlive the world. nullptr gives the bare M0 sim.
   const ContentDB* content = nullptr;
   // Wave set to play (index into content->waveSets); it names the planet and
@@ -47,6 +48,8 @@ enum SlotFlag : uint8_t {
   kSlotLit = 1u << 0,        // inside the sun beam
   kSlotShaded = 1u << 1,     // inside the beam but in an enemy's shadow
   kSlotHasTarget = 1u << 2,  // a tower with an enemy in arc and range
+  kSlotShieldOffline = 1u << 3,  // M2.10: a shield at 0 energy, recharging
+  kSlotLensMerged = 1u << 4,     // M2.11: a Lens whose beam merged at a focus point this tick
 };
 
 // One entry per slot of the planet's ring. Buildings are few, so this is a
@@ -72,6 +75,52 @@ struct BuildingSlot {
   float damageMult = 1.0f;
   float incomeMult = 1.0f;
   uint8_t tiers[kUpgradePaths] = {0, 0};  // M2.2: bought tiers per upgrade path (anchors)
+  // M2.10 shields: energy left, and recharge progress (seconds at 1x) while offline.
+  float energy = 0.0f;
+  float charge = 0.0f;
+  // M2.7 drills (anchors): heat 0..1 (overheats at 1) and the seconds left of
+  // an overheat shutdown (0 = running). Never damage: only uptime.
+  float heat = 0.0f;
+  float overheat = 0.0f;
+  // --- M2.6 ---
+  // Derived by recomputeLayout (not hashed): camo detection (0..1) and the
+  // multiplier on damage dealt to shields, from adjacency auras.
+  float detect = 0.0f;
+  float shieldDamageMult = 1.0f;
+  // State (hashed): camo miss accumulator (every 1/missChance-th undetected
+  // shot misses, deterministic), beam ramp time on `beamTarget`, active
+  // ability cooldown and time left.
+  float missAcc = 0.5f;
+  float ramp = 0.0f;
+  uint32_t beamTarget = 0xFFFFFFFFu;
+  float activeCooldown = 0.0f;
+  float activeTime = 0.0f;
+};
+
+// M2.6: one Sun Lens beam drawn this tick (derived, not hashed).
+struct BeamShot {
+  uint16_t site = 0;
+  float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;  // tower -> target, world space
+  float power = 0.0f;       // ramp x channel factor x active multiplier
+  bool overcharged = false;
+  // M2.11: a merged Lens beam (from a focus point outward, summed power of
+  // every feeding Lens; `site` is the first feeder).
+  bool merged = false;
+};
+
+// M2.11 focus point: where the aim axes of two or more aim-mounted towers
+// cross within their ranges (BRIEF §6). Planet-local, so it turns with the
+// planet; derived by solveFocus whenever the layout or an aim changes (not
+// hashed: a pure function of hashed state).
+inline constexpr int kMaxFocusFeeders = 8;
+inline constexpr uint32_t kMaxFocusPoints = 64;
+struct FocusPoint {
+  float x = 0.0f, y = 0.0f;  // planet-local centre
+  float radius = 0.0f;       // zone radius
+  uint8_t feeders = 0;       // towers whose axis feeds this zone
+  uint8_t lenses = 0;        // of which beam towers (Sun Lens)
+  uint16_t pairs = 0;        // axis crossings merged into this point
+  uint16_t sites[kMaxFocusFeeders] = {};
 };
 
 // One adjacency link (M2.1), for the Build view: `source` buffs `target`.
@@ -113,6 +162,15 @@ struct World {
   float lightMult = 1.0f;        // the wave's light level
   float beamStrength = 0.0f;     // sun baseStrength * lightMult, set by sunlight
   float incomePerSecond = 0.0f;  // stardust/s from lit unshaded panels right now
+  float drillIncomePerSecond = 0.0f;  // M2.7: stardust/s from running drills right now
+
+  // --- M2.7 instability (derived every tick by the drills system, not hashed) ---
+  float instability = 0.0f;      // global level, max(0, curve(load) - cooling)
+  float instabilityLoad = 0.0f;  // summed instability weight of the running drills
+  float cooling = 0.0f;          // summed cooling of the coolers right now
+  // M2.6: lit, unshaded fraction of the solar panel capacity (0..1), set by
+  // sunlight every tick; the Sun Lens channels it.
+  float channel = 0.0f;
 
   // --- planet ---
   float planetRotation = 0.0f;  // rad in [0, 2*pi); world angle = local + this
@@ -131,6 +189,7 @@ struct World {
   float waveTime = 0.0f;          // sim seconds since the wave started
   float intermissionTime = 0.0f;  // real seconds in this intermission (auto-start)
   std::vector<uint16_t> spawned;  // per spawn entry of the current wave: units out so far
+  std::vector<uint16_t> volleysSpawned;  // M2.10: per volley of the current wave: objects out so far
 
   uint32_t waveCount() const { return waveSet ? static_cast<uint32_t>(waveSet->waves.size()) : 0u; }
 
@@ -178,6 +237,7 @@ struct World {
   // --- entity pools (fixed capacity from SimConfig, reserved in initWorld) ---
   EnemyPool enemies;
   ProjectilePool projectiles;
+  FallingPool falling;  // M2.10
 
   // --- derived each tick (not hashed) ---
   SpatialGrid grid;              // enemies by position, rebuilt by spatialRebuild
@@ -185,6 +245,9 @@ struct World {
   std::vector<ShadeInterval> shade;   // merged shadows in beam space, sorted
   uint32_t shadeCount = 0;
   std::vector<uint32_t> slotTargets;  // per slot: enemy index picked by towerTargeting
+  std::vector<BeamShot> beams;        // M2.6: beams fired this tick (reserved per site)
+  // M2.11: focus points, recomputed by solveFocus on layout / aim changes only.
+  std::vector<FocusPoint> focus;
 
   // --- replay log (not hashed): every applied command, stamped with the tick
   // it applied on. seed + this log reproduces the run (systems/waves.h). ---

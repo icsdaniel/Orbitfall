@@ -63,6 +63,13 @@ void initWorld(World& world, const SimConfig& config) {
     if (!world.waveSet->waves.empty()) world.lightMult = world.waveSet->waves[0].lightMult;
   }
   world.spawned.assign(maxSpawns, 0);
+  size_t maxVolleys = 0;  // M2.10
+  if (world.waveSet != nullptr) {
+    for (const WaveDef& wave : world.waveSet->waves) {
+      if (wave.volleys.size() > maxVolleys) maxVolleys = wave.volleys.size();
+    }
+  }
+  world.volleysSpawned.assign(maxVolleys, 0);
   world.waveTime = 0.0f;
   world.intermissionTime = 0.0f;
   world.commandLog.clear();
@@ -71,6 +78,8 @@ void initWorld(World& world, const SimConfig& config) {
   world.commandLog.reserve(config.commandLogCapacity);
   world.beamStrength = world.sun ? world.sun->baseStrength : 0.0f;
   world.incomePerSecond = 0.0f;
+  world.drillIncomePerSecond = 0.0f;  // M2.7
+  world.instability = world.instabilityLoad = world.cooling = 0.0f;
   world.planetRotation = 0.0f;
   world.planetAngVel = 0.0f;
   world.planetHp = world.planet ? world.planet->hp : 0.0f;
@@ -82,12 +91,18 @@ void initWorld(World& world, const SimConfig& config) {
   world.weakPointHits = 0;
   world.bodyHits = 0;
   world.stardust = world.planet ? world.planet->startStardust : 0.0f;
+  if (world.waveSet != nullptr && world.waveSet->startStardust >= 0.0f) world.stardust = world.waveSet->startStardust;
   world.slots.assign(world.planet ? static_cast<size_t>(world.planet->slots) : 0, BuildingSlot());
   world.elevated.assign(world.planet && world.planet->elevatedLayer ? world.slots.size() : 0,
                         BuildingSlot());
   world.slotTargets.assign(world.siteCount(), kInvalidIndex);
   world.auraLinks.clear();
   world.auraLinks.reserve(world.siteCount() * 4);
+  world.beams.clear();
+  world.beams.reserve(world.siteCount() * 2);  // M2.6: one beam per site (+ M2.11 merged beams)
+  world.focus.clear();
+  world.focus.reserve(kMaxFocusPoints);  // M2.11
+  world.channel = 0.0f;
   world.rng.seed(config.seed);
   world.commandsApplied = 0;
   world.commandDigest = 0;
@@ -100,6 +115,9 @@ void initWorld(World& world, const SimConfig& config) {
   }
   world.projectiles.clear();
   world.projectiles.overflowCount = 0;
+  if (world.falling.capacity != config.fallingCapacity) world.falling.reserve(config.fallingCapacity);  // M2.10
+  world.falling.clear();
+  world.falling.overflowCount = 0;
   // The grid covers the furthest spawn point; cells are a fixed fraction of it.
   world.maxEnemyRadius = 0.0f;
   float extent = world.planet ? world.planet->radius * 2.0f : 1.0f;
@@ -159,6 +177,7 @@ uint64_t hashWorld(const World& world) {
   h.add(world.waveTime);
   h.add(world.intermissionTime);
   h.array(world.spawned.data(), world.spawned.size());
+  h.array(world.volleysSpawned.data(), world.volleysSpawned.size());
   h.add(world.stardust);
   for (uint32_t s = 0; s < world.siteCount(); ++s) {
     const BuildingSlot& b = world.site(s);
@@ -169,6 +188,15 @@ uint64_t hashWorld(const World& world) {
     h.add(b.cooldown);
     h.add(b.anchor);
     for (const uint8_t t : b.tiers) h.add(t);  // M2.2
+    h.add(b.energy);
+    h.add(b.charge);
+    h.add(b.heat);      // M2.7
+    h.add(b.overheat);  // M2.7
+    h.add(b.missAcc);  // M2.6
+    h.add(b.ramp);
+    h.add(b.beamTarget);
+    h.add(b.activeCooldown);
+    h.add(b.activeTime);
   }
   h.array(world.rng.s, 4);
   h.add(world.commandsApplied);
@@ -176,6 +204,7 @@ uint64_t hashWorld(const World& world) {
   h.add(world.events.totalEmitted);
   world.enemies.hashInto(h);
   world.projectiles.hashInto(h);
+  world.falling.hashInto(h);
   return h.state;
 }
 

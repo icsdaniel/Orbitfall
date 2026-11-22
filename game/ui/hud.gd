@@ -33,6 +33,8 @@ var debug_button: Button
 ## M2.3: enemy codex and trait legend, one tap away.
 var codex_button: Button
 var codex: CodexPanel
+## M2.7: instability meter under the HP bar (shown once a drill or cooler stands).
+var instability: InstabilityMeter
 
 var _stardust: Label
 var _income: Label
@@ -68,6 +70,8 @@ func setup(sim_node: Node, band_controller: BandController, input_router: InputR
 	_build_top_bar()
 	forecast = ForecastStrip.new()
 	forecast.set_enemy_defs(sim.get_enemy_defs())
+	if sim.has_method(&"get_falling_defs"):  # M2.10
+		forecast.set_falling_defs(sim.get_falling_defs())
 	_pin(forecast, 1.0, 0.0, Vector2(-80.0, 10.0), Control.GROW_DIRECTION_BEGIN, Control.GROW_DIRECTION_END)
 
 	debug_button = UiKit.button("DBG", Vector2(60.0, 56.0), Color(0.14, 0.16, 0.22))
@@ -147,6 +151,10 @@ func refresh() -> void:
 	var phase: int = sim.get_phase()
 	var stardust: float = sim.get_stardust()
 	var income: float = sim.get_income_per_second()
+	if sim.has_method(&"get_instability"):  # M2.7: drills earn too
+		var info: Dictionary = sim.get_instability()
+		income += float(info.get("drill_income", 0.0))
+		instability.show_info(info)
 	_set_text(_stardust, "%d" % floori(stardust))
 	_set_text(_income, "+%.1f/s" % income)
 	_income.add_theme_color_override(
@@ -256,6 +264,9 @@ func _build_top_bar() -> void:
 	_hp_bar.add_theme_stylebox_override(&"fill", fill)
 	_hp_bar.add_theme_stylebox_override(&"background", back)
 	box.add_child(_hp_bar)
+	instability = InstabilityMeter.new()
+	instability.name = "Instability"
+	box.add_child(instability)
 	_hp_text = UiKit.label("HP", 20)
 	_hp_text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_hp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

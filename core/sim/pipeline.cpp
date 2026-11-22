@@ -1,6 +1,7 @@
 #include "sim/pipeline.h"
 
 #include "sim/world.h"
+#include "systems/falling.h"
 #include "systems/systems.h"
 
 namespace orbitfall {
@@ -30,10 +31,22 @@ Pipeline defaultPipeline() {
   p.add("spatialRebuild", spatialRebuild);
   p.add("towerTargeting", towerTargeting);
   p.add("towerFire", towerFire);
+  p.add("beamFire", beamFire);  // M2.6: Sun Lens beams (continuous, no projectile)
   p.add("projectileMovement", projectileMovement);
   p.add("collisions", collisions);
+  // M2.10: falling objects move and are telegraphed, shields recharge and
+  // absorb, whatever is left hits the planet (HP only).
+  p.add("fallingObjects", fallingObjects);
+  p.add("shields", shields);
+  p.add("fallingImpact", fallingImpact);
   p.add("landing", landing);
+  // M2.5: Spores regrow a layer when left alone; Splitters killed this tick
+  // split before cleanup removes them.
+  p.add("regrow", regrow);
+  p.add("splits", splits);
+  p.add("drills", drills);  // M2.7: before income, so overheated drills do not earn
   p.add("income", income);
+  p.add("abilities", abilities);  // M2.6: active ability timers (light-charged)
   p.add("cleanup", cleanup);
   p.add("waveFlow", waveFlow);
   p.add("advanceClock", advanceClock);

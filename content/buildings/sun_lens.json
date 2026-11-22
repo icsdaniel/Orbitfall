@@ -1,0 +1,24 @@
+{
+  "id": "sun_lens", "name": "Sun Lens", "kind": "tower", "footprint": 1, "layer": "any", "cost": 120,
+  "arcDeg": 35, "range": 320, "aimMount": true, "aimOffsetDeg": 0,
+  "projectile": { "kind": "beam", "damage": 4, "type": "energy" },
+  "beam": { "rampSeconds": 1.5, "rampStart": 0.3, "channelFloor": 0.2 },
+  "falloff": [[0, 1], [1, 0.75]],
+  "targeting": ["strong", "first", "close"],
+  "active": { "id": "overcharge", "name": "Overcharge", "cooldown": 24, "seconds": 4, "damageMult": 2.5 },
+  "paths": [
+    { "id": "focus", "name": "Focus", "tiers": [
+      { "name": "Ground Lens", "cost": 70, "mods": [{ "stat": "damage", "op": "add", "value": 1 }] },
+      { "name": "Long Focus", "cost": 110, "mods": [{ "stat": "range", "op": "mul", "value": 1.15 }] },
+      { "name": "Prism Stack", "cost": 170, "mods": [{ "stat": "damage", "op": "mul", "value": 1.35 }] },
+      { "name": "Solar Spear", "cost": 265, "mods": [{ "stat": "damage", "op": "mul", "value": 1.5 }, { "stat": "arc", "op": "add", "value": 5 }] }
+    ] },
+    { "id": "overcharge", "name": "Overcharge", "tiers": [
+      { "name": "Capacitor Bank", "cost": 70, "mods": [{ "stat": "activeCooldown", "op": "mul", "value": 0.85 }] },
+      { "name": "Hot Mirror", "cost": 110, "mods": [{ "stat": "activePower", "op": "add", "value": 0.5 }] },
+      { "name": "Light Battery", "cost": 170, "mods": [{ "stat": "activeCooldown", "op": "mul", "value": 0.8 }] },
+      { "name": "Supernova", "cost": 265, "mods": [{ "stat": "activePower", "op": "add", "value": 1 }, { "stat": "activeCooldown", "op": "mul", "value": 0.85 }] }
+    ] }
+  ],
+  "visual": { "shape": "disc", "color": "tower.sun_lens" }
+}

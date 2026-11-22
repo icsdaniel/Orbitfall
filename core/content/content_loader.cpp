@@ -55,16 +55,22 @@ constexpr Named<Shape> kShapes[] = {
     {"disc", Shape::Disc}};
 constexpr Named<BuildingKind> kBuildingKinds[] = {{"tower", BuildingKind::Tower},
                                                   {"panel", BuildingKind::Panel},
-                                                  {"support", BuildingKind::Support}};
+                                                  {"support", BuildingKind::Support},
+                                                  {"shield", BuildingKind::Shield},  // M2.10
+                                                  {"drill", BuildingKind::Drill},    // M2.7
+                                                  {"cooler", BuildingKind::Cooler}};  // M2.7
 constexpr Named<BuildingLayer> kBuildingLayers[] = {{"ground", BuildingLayer::Ground},
                                                     {"elevated", BuildingLayer::Elevated},
                                                     {"any", BuildingLayer::Any}};
 constexpr Named<AuraStat> kAuraStats[] = {{"range", AuraStat::Range},
                                           {"fireRate", AuraStat::FireRate},
                                           {"damage", AuraStat::Damage},
-                                          {"income", AuraStat::Income}};
+                                          {"income", AuraStat::Income},
+                                          {"detect", AuraStat::Detect},          // M2.6
+                                          {"shieldDamage", AuraStat::ShieldDamage}};
 constexpr Named<ProjectileKind> kProjectileKinds[] = {{"dot", ProjectileKind::Dot},
-                                                      {"shell", ProjectileKind::Shell}};
+                                                      {"shell", ProjectileKind::Shell},
+                                                      {"beam", ProjectileKind::Beam}};  // M2.6
 constexpr Named<DamageType> kDamageTypes[] = {
     {"kinetic", DamageType::Kinetic}, {"explosive", DamageType::Explosive},
     {"energy", DamageType::Energy},   {"cryo", DamageType::Cryo},
@@ -75,12 +81,18 @@ constexpr Named<TargetingMode> kTargetingModes[] = {{"first", TargetingMode::Fir
 constexpr Named<SunPathType> kSunPathTypes[] = {{"constant_drift", SunPathType::ConstantDrift},
                                                 {"fixed", SunPathType::Fixed}};
 constexpr Named<EnemyBehavior> kEnemyBehaviors[] = {{"lane", EnemyBehavior::Lane},
-                                                    {"eclipser", EnemyBehavior::Eclipser}};
+                                                    {"eclipser", EnemyBehavior::Eclipser},
+                                                    {"bomber", EnemyBehavior::Bomber}};  // M2.10
 // M2.2: stats an upgrade tier may modify, and how.
 constexpr Named<UpgradeStat> kUpgradeStats[] = {
     {"damage", UpgradeStat::Damage}, {"fireRate", UpgradeStat::FireRate},
     {"range", UpgradeStat::Range},   {"arc", UpgradeStat::Arc},
-    {"splash", UpgradeStat::Splash}, {"income", UpgradeStat::Income}};
+    {"splash", UpgradeStat::Splash}, {"income", UpgradeStat::Income},
+    // M2.6
+    {"slow", UpgradeStat::Slow},     {"pierce", UpgradeStat::Pierce},
+    {"auraAmount", UpgradeStat::AuraAmount}, {"auraRadius", UpgradeStat::AuraRadius},
+    {"activeCooldown", UpgradeStat::ActiveCooldown}, {"activePower", UpgradeStat::ActivePower},
+    {"instability", UpgradeStat::Instability}, {"cooling", UpgradeStat::Cooling}};  // M2.7
 constexpr Named<ModOp> kModOps[] = {{"add", ModOp::Add}, {"mul", ModOp::Mul}};
 constexpr Named<uint32_t> kTraits[] = {
     {"camo", kTraitCamo},         {"armored", kTraitArmored},
@@ -90,6 +102,20 @@ constexpr Named<uint32_t> kTraits[] = {
     {"orbiter", kTraitOrbiter},   {"healer", kTraitHealer},
     {"bulwark", kTraitBulwark},   {"carrier", kTraitCarrier},
     {"layered", kTraitLayered}};
+
+// M2.2/M2.7: which upgrade stats each kind of building has.
+bool statFitsKind(UpgradeStat stat, BuildingKind kind) {
+  switch (kind) {
+    case BuildingKind::Panel: return stat == UpgradeStat::Income;
+    case BuildingKind::Drill: return stat == UpgradeStat::Income || stat == UpgradeStat::Instability;
+    case BuildingKind::Cooler: return stat == UpgradeStat::Cooling;
+    case BuildingKind::Tower:
+    case BuildingKind::Support:
+    case BuildingKind::Shield:
+    case BuildingKind::Count: break;
+  }
+  return stat != UpgradeStat::Income && stat != UpgradeStat::Instability && stat != UpgradeStat::Cooling;
+}
 
 int trait_bit_index(uint32_t bit) {
   int i = 0;
@@ -275,6 +301,8 @@ class Obj {
 struct PendingEnemy {
   std::string where;
   std::string popsInto;
+  std::string bomb;  // M2.10: the falling object a Bomber drops
+  std::string splitInto;  // M2.5: the enemy a Splitter splits into
   bool weakWindowSet = false;  // M2.4: else rules.weakWindowDeg applies
 };
 struct PendingSpawn {
@@ -284,6 +312,7 @@ struct PendingWaveSet {
   std::string where;
   std::string planet, sun;
   std::vector<std::vector<PendingSpawn>> spawns;  // per wave
+  std::vector<std::vector<std::string>> volleys;  // M2.10: falling object id per volley, per wave
 };
 
 struct Loader {
@@ -335,6 +364,77 @@ struct Loader {
                 Range{0.0, false, static_cast<double>(kMaxUpgradeTiers)});
     if (o.has("weakWindowDeg")) o.angle("weakWindowDeg", r.weakWindow, Range{0.0, true, 45.0});
     if (o.has("weakPointPrecisionOnly")) o.boolean("weakPointPrecisionOnly", r.weakPointPrecisionOnly);
+    if (o.has("fallingWarnSeconds")) o.num("fallingWarnSeconds", r.fallingWarnSeconds, kNonNeg);  // M2.10
+    if (o.has("instability")) read_instability(o.object("instability"), r.instability);  // M2.7
+    if (o.has("aim")) read_aim(o.object("aim"), r.aim);        // M2.11
+    if (o.has("focus")) read_focus(o.object("focus"), r.focus);  // M2.11
+  }
+
+  // M2.11 "aim": { "offsetsDeg": [-60, -30, 0, 30, 60], "reaimCostFrac",
+  // "reaimBetweenWavesOnly" }.
+  void read_aim(const Obj& o, AimRulesDef& d) {
+    if (!o.valid()) return;
+    if (o.has("reaimCostFrac")) o.num("reaimCostFrac", d.reaimCostFrac, Range{0.0, false, 10.0});
+    if (o.has("reaimBetweenWavesOnly")) o.boolean("reaimBetweenWavesOnly", d.reaimBetweenWavesOnly);
+    const Value* list = o.array("offsetsDeg");
+    if (list == nullptr) return;
+    if (list->array.empty()) o.field_error("offsetsDeg", "must not be empty");
+    double prev = -1.0e9;
+    bool zero = false;
+    for (const Value& v : list->array) {
+      if (!v.is_number()) {
+        o.field_error("offsetsDeg", "each offset must be a number of degrees");
+        continue;
+      }
+      const double deg = v.number;
+      if (!o.check_range("offsetsDeg", deg, Range{-kMaxAimOffsetDeg, false, kMaxAimOffsetDeg})) continue;
+      if (deg <= prev) o.field_error("offsetsDeg", "offsets must be strictly ascending");
+      prev = deg;
+      zero = zero || deg == 0.0;
+      d.offsets.push_back(deg2rad(deg));
+    }
+    if (!list->array.empty() && !zero) o.field_error("offsetsDeg", "must include 0 (the straight mount)");
+  }
+
+  // M2.11 "focus": { "bonusPerExtra", "cap", "radius", "minAltitude", "lensMerge",
+  // "preferZone" }.
+  void read_focus(const Obj& o, FocusRulesDef& d) {
+    if (!o.valid()) return;
+    o.num("bonusPerExtra", d.bonusPerExtra, Range{0.0, false, 5.0});
+    o.num("cap", d.cap, Range{0.0, false, 5.0});
+    o.num("radius", d.radius, kPositive);
+    if (o.has("minAltitude")) o.num("minAltitude", d.minAltitude, kNonNeg);
+    if (o.has("lensMerge")) o.boolean("lensMerge", d.lensMerge);
+    if (o.has("preferZone")) o.boolean("preferZone", d.preferZone);
+  }
+
+  // M2.7 "instability": { "curve": [[drills, level], ...], "threshold",
+  // "riseBase", "risePerExcess", "decayPerSec", "overheatSeconds" }.
+  void read_instability(const Obj& o, InstabilityDef& d) {
+    if (!o.valid()) return;
+    o.num("threshold", d.threshold, kPositive);
+    o.num("riseBase", d.riseBase, kPositive);
+    o.num("risePerExcess", d.risePerExcess, kNonNeg);
+    o.num("decayPerSec", d.decayPerSec, kNonNeg);
+    o.num("overheatSeconds", d.overheatSeconds, kPositive);
+    const Value* c = o.array("curve");
+    if (c == nullptr) return;
+    if (c->array.empty()) o.field_error("curve", "must not be empty");
+    double prevX = -1.0, prevY = 0.0;
+    for (const Value& pt : c->array) {
+      if (!pt.is_array() || pt.array.size() != 2 || !pt.array[0].is_number() ||
+          !pt.array[1].is_number()) {
+        o.field_error("curve", "each point must be [drills, level]");
+        continue;
+      }
+      const double x = pt.array[0].number, y = pt.array[1].number;
+      if (!o.check_range("curve", x, kNonNeg) || !o.check_range("curve", y, kNonNeg)) continue;
+      if (x <= prevX) o.field_error("curve", "points must be in strictly ascending drill order");
+      if (y < prevY) o.field_error("curve", "instability must not fall as drills are added");
+      prevX = x;
+      prevY = y;
+      d.curve.push_back({static_cast<float>(x), static_cast<float>(y)});
+    }
   }
 
   // {"kinetic": 0.5, ...} -> out[type]. The floor is checked in resolve().
@@ -374,6 +474,7 @@ struct Loader {
       t.str("effect", def.effect);
       if (t.has("easierWith")) t.str("easierWith", def.easierWith);
       if (t.has("mult")) read_type_mults(t, "mult", def.mult);
+      if (t.has("missChance")) t.num("missChance", def.missChance, Range{0.0, false, 0.75});  // M2.6
     }
   }
 
@@ -438,19 +539,40 @@ struct Loader {
     if (o.has("aimOffsetDeg"))
       o.angle("aimOffsetDeg", b.aimOffset, Range{-kMaxAimOffsetDeg, false, kMaxAimOffsetDeg});
     read_visual(o, b.visual, true);
+    b.name = b.id;  // M2.6: display name (the client capitalises the id when absent)
+    if (o.has("name")) o.str("name", b.name);
 
     if (kindOk && b.kind == BuildingKind::Tower) {
       o.angle("arcDeg", b.arc, Range{0.0, true, 180.0});
       o.num("range", b.range, kPositive);
-      o.num("fireRate", b.fireRate, kPositive);
       const Obj pr = o.object("projectile");
       if (pr.valid()) {
         b.hasProjectile = true;
         pr.named("kind", kProjectileKinds, b.projectile.kind);
-        pr.num("speed", b.projectile.speed, kPositive);
+        // M2.6: a beam has no flying shot: speed is optional (unused).
+        if (b.projectile.kind != ProjectileKind::Beam || pr.has("speed"))
+          pr.num("speed", b.projectile.speed, kPositive);
         pr.num("damage", b.projectile.damage, kNonNeg);
         pr.named("type", kDamageTypes, b.projectile.type);
         if (pr.has("splash")) pr.num("splash", b.projectile.splash, kNonNeg);
+        // M2.6 (optional)
+        if (pr.has("pierce")) pr.integer("pierce", b.projectile.pierce, Range{0.0, false, 32.0});
+        if (pr.has("slow")) pr.num("slow", b.projectile.slow, Range{0.0, false, kMaxSlow});
+        if (pr.has("slowSeconds")) pr.num("slowSeconds", b.projectile.slowSeconds, kNonNeg);
+      }
+      // M2.6: a beam deals damage per second and has no fire rate (default 1).
+      if (b.hasProjectile && b.projectile.kind == ProjectileKind::Beam && !o.has("fireRate")) {
+        b.fireRate = 1.0f;
+      } else {
+        o.num("fireRate", b.fireRate, kPositive);
+      }
+      if (o.has("beam")) {  // M2.6 Sun Lens
+        const Obj bo = o.object("beam");
+        if (bo.valid()) {
+          if (bo.has("rampSeconds")) bo.num("rampSeconds", b.beam.rampSeconds, kNonNeg);
+          if (bo.has("rampStart")) bo.num("rampStart", b.beam.rampStart, kUnit);
+          if (bo.has("channelFloor")) bo.num("channelFloor", b.beam.channelFloor, kUnit);
+        }
       }
       if (const Value* t = o.array("targeting")) {
         if (t->array.empty()) o.field_error("targeting", "a tower needs at least one mode");
@@ -468,10 +590,40 @@ struct Loader {
       if (o.has("precision")) o.boolean("precision", b.precision);  // M2.4
     } else if (kindOk && b.kind == BuildingKind::Panel) {
       o.num("panelRate", b.panelRate, kNonNeg);
+    } else if (kindOk && b.kind == BuildingKind::Shield) {  // M2.10
+      const Obj sh = o.object("shield");
+      if (sh.valid()) {
+        sh.angle("widthDeg", b.shield.width, Range{0.0, true, 360.0});
+        sh.num("height", b.shield.height, kPositive);
+        sh.num("energy", b.shield.energy, kPositive);
+        sh.num("rechargeSeconds", b.shield.rechargeSeconds, kPositive);
+        if (sh.has("regenPerSec")) sh.num("regenPerSec", b.shield.regenPerSec, kNonNeg);
+        if (sh.has("upkeepPerSec")) sh.num("upkeepPerSec", b.shield.upkeepPerSec, kNonNeg);
+      }
+    } else if (kindOk && b.kind == BuildingKind::Drill) {  // M2.7
+      o.num("drillRate", b.drillRate, kNonNeg);
+      if (o.has("instability")) o.num("instability", b.instability, kNonNeg);
+    } else if (kindOk && b.kind == BuildingKind::Cooler) {  // M2.7
+      o.num("cooling", b.cooling, kNonNeg);
+      if (o.has("litCoolingMult")) o.num("litCoolingMult", b.litCoolingMult, kNonNeg);
     }
+    if (o.has("active")) read_active(o, b);  // M2.6
     if (kindOk && o.has("paths")) read_paths(o, b);  // M2.2
     buildingWhere.push_back(o.where());
     db.buildings.push_back(std::move(b));
+  }
+
+  // M2.6 "active": { "id", "name", "cooldown", "seconds", "damageMult" } or null.
+  void read_active(const Obj& o, BuildingDef& b) {
+    const Obj a = o.object("active");
+    if (!a.valid()) return;
+    b.hasActive = true;
+    a.str("id", b.active.id);
+    b.active.name = b.active.id;
+    if (a.has("name")) a.str("name", b.active.name);
+    a.num("cooldown", b.active.cooldown, kPositive);
+    a.num("seconds", b.active.seconds, kPositive);
+    if (a.has("damageMult")) a.num("damageMult", b.active.damageMult, Range{1.0, false, 20.0});
   }
 
   // "auras": [{ "stat", "amount", "radius", "affects": [kinds] }] (M2.1,
@@ -559,10 +711,40 @@ struct Loader {
     const bool opOk = mo.named("op", kModOps, mod.op);
     double value = 0.0;
     if (!statOk || !opOk) return;
-    const bool forPanel = mod.stat == UpgradeStat::Income;
-    if (forPanel != (b.kind == BuildingKind::Panel)) {
-      mo.field_error("stat", forPanel ? "'income' only applies to panels"
-                                      : "only 'income' applies to panels");
+    const bool forAura = mod.stat == UpgradeStat::AuraAmount || mod.stat == UpgradeStat::AuraRadius;
+    const bool forActive =
+        mod.stat == UpgradeStat::ActiveCooldown || mod.stat == UpgradeStat::ActivePower;
+    // M2.6: aura stats need auras (any kind); active stats need an active.
+    if (forAura) {
+      if (b.auras.empty()) {
+        mo.field_error("stat", "'auraAmount' and 'auraRadius' need the building to have auras");
+        return;
+      }
+    } else if (forActive) {
+      if (!b.hasActive) {
+        mo.field_error("stat", "'activeCooldown' and 'activePower' need an 'active'");
+        return;
+      }
+    } else if (b.kind == BuildingKind::Support) {
+      mo.field_error("stat", "support buildings only take aura stats");
+      return;
+    } else if (!statFitsKind(mod.stat, b.kind)) {
+      // M2.2 wording kept for towers and panels; M2.7 adds drills and coolers.
+      std::string msg;
+      if (b.kind == BuildingKind::Panel) {
+        msg = "only 'income' applies to panels";
+      } else if (b.kind == BuildingKind::Drill) {
+        msg = "only 'income' and 'instability' apply to drills";
+      } else if (b.kind == BuildingKind::Cooler) {
+        msg = "only 'cooling' applies to coolers";
+      } else if (mod.stat == UpgradeStat::Income) {
+        msg = "'income' only applies to panels";
+      } else if (mod.stat == UpgradeStat::Cooling) {
+        msg = "'cooling' only applies to coolers";
+      } else {
+        msg = "'instability' only applies to drills";
+      }
+      mo.field_error("stat", msg);
       return;
     }
     // A multiplier of 0 or less would switch the stat off: not an upgrade.
@@ -667,6 +849,17 @@ struct Loader {
     if ((e.traits & kTraitBulwark) && !e.hasWeakPoint)
       o.field_error("traits", "'bulwark' needs a 'weakPoint' object");
     if (e.hasWeakPoint) e.traits |= kTraitBulwark;
+    if (e.behavior == EnemyBehavior::Bomber) {  // M2.10
+      const Obj bo = o.object("bomber");
+      if (bo.valid()) {
+        e.hasBomber = true;
+        bo.num("orbitRadius", e.bomber.orbitRadius, kPositive);
+        bo.angle("orbitDegPerSec", e.bomber.orbitSpeed, kAny);
+        bo.num("dropSeconds", e.bomber.dropSeconds, kPositive);
+        bo.integer("bombs", e.bomber.bombs, Range{0.0, false, 63.0});
+        bo.str("bomb", pe.bomb);
+      }
+    }
     if (e.behavior == EnemyBehavior::Eclipser) {
       const Obj h = o.object("hover");
       if (h.valid()) {
@@ -680,9 +873,39 @@ struct Loader {
           h.field_error("spawnRadius", "must be >= hoverRadius");
       }
     }
+    // --- M2.5: Regrow and Splitter (optional blocks; the trait bit follows the block) ---
+    if (o.has("regrow")) {
+      const Obj ro = o.object("regrow");
+      if (ro.valid()) ro.num("seconds", e.regrowSeconds, kPositive);
+    }
+    if (e.regrowSeconds > 0.0f) e.traits |= kTraitRegrow;
+    else if (e.traits & kTraitRegrow) o.field_error("traits", "'regrow' needs a 'regrow' block with 'seconds' > 0");
+    if (o.has("split")) {
+      const Obj so = o.object("split");
+      if (so.valid()) {
+        so.str("into", pe.splitInto);
+        so.integer("count", e.splitCount, Range{1.0, false, 8.0});
+        if (so.has("spread")) so.num("spread", e.splitSpread, kNonNeg);
+      }
+    }
+    if (e.splitCount > 0) e.traits |= kTraitSplitter;
+    else if (e.traits & kTraitSplitter) o.field_error("traits", "'splitter' needs a 'split' block");
+    pe.where = o.where();
     if (o.has("popsInto")) o.str("popsInto", pe.popsInto);
     pendingEnemies.push_back(std::move(pe));
     db.enemies.push_back(std::move(e));
+  }
+
+  // M2.10: content/falling/<id>.json.
+  void read_falling(const Obj& o, const std::string& stem) {
+    FallingDef f;
+    if (!read_id(o, stem, db.fallingIds, db.falling.size(), f.id)) return;
+    o.num("damage", f.damage, kNonNeg);
+    o.num("speed", f.speed, kPositive);
+    o.num("size", f.size, kPositive);
+    if (o.has("spawnRadius")) o.num("spawnRadius", f.spawnRadius, kPositive);
+    read_visual(o, f.visual, true);
+    db.falling.push_back(std::move(f));
   }
 
   void read_wave_set(const Obj& o, const std::string& stem) {
@@ -693,6 +916,7 @@ struct Loader {
     o.str("planet", pw.planet);
     o.str("sun", pw.sun);
     if (o.has("autoStartSeconds")) o.num("autoStartSeconds", ws.autoStartSeconds, kNonNeg);
+    if (o.has("startStardust")) o.num("startStardust", ws.startStardust, kNonNeg);  // M2.10
     if (const Value* waves = o.array("waves")) {
       if (waves->array.empty()) o.field_error("waves", "must not be empty");
       for (size_t i = 0; i < waves->array.size(); ++i) {
@@ -708,6 +932,27 @@ struct Loader {
         }
         w.num("lightMult", wave.lightMult, kPositive);
         w.num("spawnSeconds", wave.spawnSeconds, kPositive);
+        // M2.10: optional volleys of falling objects; a wave with volleys may
+        // have no lane spawns.
+        std::vector<std::string> volleyIds;
+        if (w.has("falling")) {
+          if (const Value* fall = w.array("falling")) {
+            for (size_t j = 0; j < fall->array.size(); ++j) {
+              const Obj v = w.element("falling", *fall, j);
+              if (!v.valid()) continue;
+              VolleyDef volley;
+              std::string id;
+              v.str("object", id);
+              v.angle("bearingDeg", volley.bearing, kAny);
+              if (v.has("spreadDeg")) v.angle("spreadDeg", volley.spread, Range{0.0, false, 180.0});
+              v.integer("count", volley.count, Range{1.0, false, 100000.0});
+              if (v.has("startSeconds")) v.num("startSeconds", volley.startSeconds, kNonNeg);
+              v.num("seconds", volley.seconds, kNonNeg);
+              wave.volleys.push_back(volley);
+              volleyIds.push_back(std::move(id));
+            }
+          }
+        }
         const Obj fc = w.object("forecast");
         if (fc.valid()) {
           fc.integer("exactAhead", wave.forecast.exactAhead, Range{0.0, false, 1000.0});
@@ -716,7 +961,8 @@ struct Loader {
             fc.field_error("iconsAhead", "must be >= exactAhead");
         }
         if (const Value* spawns = w.array("spawns")) {
-          if (spawns->array.empty()) w.field_error("spawns", "must not be empty");
+          if (spawns->array.empty() && wave.volleys.empty())
+            w.field_error("spawns", "must not be empty (unless the wave has 'falling' volleys)");
           for (size_t j = 0; j < spawns->array.size(); ++j) {
             const Obj s = w.element("spawns", *spawns, j);
             if (!s.valid()) continue;
@@ -731,6 +977,7 @@ struct Loader {
         }
         ws.waves.push_back(std::move(wave));
         pw.spawns.push_back(std::move(pending));
+        pw.volleys.push_back(std::move(volleyIds));
       }
     }
     pendingWaveSets.push_back(std::move(pw));
@@ -800,6 +1047,18 @@ struct Loader {
         if (e.weakPoint.bodyMult < floor)
           err(pe.where, "'weakPoint': 'bodyMult' " + fmt(e.weakPoint.bodyMult) + floorMsg);
       }
+      if (e.hasBomber) {  // M2.10
+        e.bomber.bomb = db.falling_index(pe.bomb);
+        if (e.bomber.bomb == kNoIndex) err(pe.where, "'bomber': 'bomb': unknown falling object id '" + pe.bomb + "'");
+      }
+      if (e.behavior == EnemyBehavior::Bomber && !e.hasBomber)
+        err(pe.where, "missing field 'bomber' (behavior 'bomber')");
+      if (!pe.splitInto.empty()) {  // M2.5
+        e.splitInto = db.enemy_index(pe.splitInto);
+        if (e.splitInto == kNoIndex) err(pe.where, "'split': 'into': unknown enemy id '" + pe.splitInto + "'");
+      } else if (e.splitCount > 0) {
+        err(pe.where, "'split': missing field 'into'");
+      }
       if (!pe.popsInto.empty()) {
         e.popsInto = db.enemy_index(pe.popsInto);
         if (e.popsInto == kNoIndex)
@@ -832,6 +1091,33 @@ struct Loader {
                        std::to_string(next.layers) + " (must be exactly one fewer)");
     }
 
+    // M2.5: a split may not lead back to itself (it would never end), and a
+    // regrowing enemy must have layers to regrow.
+    for (size_t i = 0; i < db.enemies.size(); ++i) {
+      const EnemyDef& e = db.enemies[i];
+      const std::string& where = pendingEnemies[i].where;
+      if (e.regrowSeconds > 0.0f && e.layers < 2 && e.popsInto == kNoIndex) {
+        bool isLayer = false;  // the bottom of a chain regrows into the layer above
+        for (const EnemyDef& o : db.enemies) isLayer = isLayer || o.popsInto == static_cast<int>(i);
+        if (!isLayer) err(where, "'regrow': a single-layer enemy that no chain pops into has nothing to regrow");
+      }
+      if (e.splitInto == kNoIndex) continue;
+      // Every type reachable through splitInto and popsInto must never split back into i.
+      std::vector<int> seen(db.enemies.size(), 0), stack{e.splitInto};
+      bool loops = false;
+      while (!stack.empty() && !loops) {
+        const int cur = stack.back();
+        stack.pop_back();
+        if (cur == kNoIndex || seen[static_cast<size_t>(cur)]) continue;
+        seen[static_cast<size_t>(cur)] = 1;
+        if (cur == static_cast<int>(i)) loops = true;
+        const EnemyDef& c = db.enemies[static_cast<size_t>(cur)];
+        stack.push_back(c.splitInto);
+        stack.push_back(c.popsInto);
+      }
+      if (loops) err(where, "'split': splitting leads back to '" + e.id + "' (it would never end)");
+    }
+
     for (size_t i = 0; i < db.waveSets.size(); ++i) {
       WaveSetDef& ws = db.waveSets[i];
       const PendingWaveSet& pw = pendingWaveSets[i];
@@ -860,6 +1146,22 @@ struct Loader {
             if (spawn.lane == kNoIndex)
               err(where, "'lane': unknown lane '" + ps.lane + "' on planet '" + planet->id + "'");
           }
+        }
+        // M2.10 volleys: the object must exist and start above the planet.
+        for (size_t v = 0; v < ws.waves[w].volleys.size(); ++v) {
+          VolleyDef& volley = ws.waves[w].volleys[v];
+          const std::string& id = pw.volleys[w][v];
+          const std::string where =
+              pw.where + ": waves[" + std::to_string(w) + "]: falling[" + std::to_string(v) + "]";
+          if (id.empty()) continue;
+          volley.falling = db.falling_index(id);
+          if (volley.falling == kNoIndex) {
+            err(where, "'object': unknown falling object id '" + id + "'");
+            continue;
+          }
+          const FallingDef& f = db.falling[static_cast<size_t>(volley.falling)];
+          if (planet != nullptr && !(f.spawnRadius > planet->radius))
+            err(where, "'object': '" + id + "' needs a 'spawnRadius' above the planet's radius to fall in a volley");
         }
       }
     }
@@ -929,6 +1231,8 @@ bool load_content_from_strings(const std::map<std::string, std::string>& files, 
       loader.read_enemy(o, stem);
     } else if (category == "waves") {
       loader.read_wave_set(o, stem);
+    } else if (category == "falling") {  // M2.10
+      loader.read_falling(o, stem);
     } else {
       errors.push_back(kv.first + ": unknown content category '" + category + "'");
     }

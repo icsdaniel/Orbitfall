@@ -1,0 +1,6 @@
+{
+  "id": "brick", "behavior": "lane", "layers": 1, "hp": 6,
+  "speed": 26, "size": 11, "landDamage": 3, "bounty": 3,
+  "traits": ["armored"], "shadowCaster": false, "hpBar": false, "popsInto": null,
+  "shape": "square", "visual": { "color": "tier.yellow" }
+}

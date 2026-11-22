@@ -1,6 +1,8 @@
 class_name Autoplay
 extends RefCounted
-## Playtest bot for screenshots and smoke tests (`--play=sensible|towers|none`).
+## Playtest bot for screenshots and smoke tests (`--play=sensible|towers|lens|focus|none`;
+## M2.6 `lens` = sensible with the Sun Lens as its second tower; M2.11 `focus` =
+## towers on bent mounts that cross over each lane, Sun Lenses on the second lane).
 ## It plays through the SimServer contract only, like a player: builds in the
 ## intermissions, then starts the wave. A GDScript cousin of the "sensible" bot in
 ## core/tests/balance_bots.h (without its small turns for light); the balance
@@ -11,11 +13,16 @@ const LANE_SPREAD: Array[int] = [0, 1, -1, 2, -2, 3]
 const WANT_A: Array[int] = [1, 1, 1, 1, 2, 2, 3, 3]
 const WANT_B: Array[int] = [0, 1, 1, 1, 1, 2, 2, 3]
 const WANT_PANELS: Array[int] = [1, 2, 4, 5, 5, 6, 6, 4]
+## M2.11 focus formation per lane: slot offset from the lane's slot and mount
+## (deg) toward the lane; crossings at about 250-290 from the centre merge.
+const FOCUS_SLOTS: Array[int] = [0, 2, -2, 4, -4]
+const FOCUS_AIMS: Array[float] = [0.0, -30.0, 30.0, -60.0, 60.0]
 
 var sim: Node
 var mode: String = "sensible"
 var _gatling: Dictionary = {}
 var _cannon: Dictionary = {}
+var _lens: Dictionary = {}
 var _panel: Dictionary = {}
 var _lance: Dictionary = {}  # M2.4: first precision tower, for weak-point waves
 var _weak_enemies: Dictionary[int, bool] = {}
@@ -37,8 +44,14 @@ func setup(sim_node: Node, play_mode: String) -> void:
 		elif bool(def.get("precision", false)):  # M2.4: the Lance is not a lane tower
 			if _lance.is_empty():
 				_lance = def
-		else:
-			towers.append(def)
+		elif str(def.get("kind", "tower")) == "tower":  # M2.10: not shields or supports
+			# M2.6: the plain shooters (no beam, slow or pierce); the specialists
+			# of batch 1 are left to the player (and --play=lens adds the Sun Lens).
+			if int(def.get("projectile_kind", 0)) == 2 and _lens.is_empty():
+				_lens = def
+			if int(def.get("projectile_kind", 0)) <= 1 and float(def.get("slow", 0.0)) == 0.0 \
+					and int(def.get("pierce", 0)) == 0:
+				towers.append(def)
 	for def: Dictionary in sim.get_enemy_defs():
 		if not (def.get("weak_point", {}) as Dictionary).is_empty():
 			_weak_enemies[int(def["index"])] = true
@@ -49,6 +62,8 @@ func setup(sim_node: Node, play_mode: String) -> void:
 		_gatling = towers[0]
 	if towers.size() > 1:
 		_cannon = towers[1]
+	if mode == "lens" and not _lens.is_empty():  # M2.6 screenshots: the dear tower is the Sun Lens
+		_cannon = _lens
 	# Tower slots under each lane, from the forecast's lane bearings (rotation 0).
 	var n: int = sim.get_slot_count()
 	var bearings: Array[float] = []
@@ -83,10 +98,12 @@ func act() -> void:
 	for slot: int in buildings.size():
 		if buildings[slot] >= 0:
 			_taken[slot] = true
-	if mode == "sensible":
+	if mode == "sensible" or mode == "lens":
 		_plan_sensible(wave, buildings)
 	elif mode == "towers":
 		_plan_towers()
+	elif mode == "focus":
+		_plan_focus()
 	sim.start_wave()
 
 
@@ -170,6 +187,23 @@ func _buy_lance_if_needed(n: int) -> void:
 			if slot >= 0:
 				_buy(slot, _lance)
 			return
+
+
+## M2.11: the focus formation on every lane, lane by lane; on the second lane
+## the two first leaning towers are Sun Lenses (their beams merge).
+func _plan_focus() -> void:
+	var n: int = sim.get_slot_count()
+	for k: int in FOCUS_SLOTS.size():
+		for lane: int in _lanes.size():
+			var centre: int = _lanes[lane][0]
+			var slot: int = posmod(centre + FOCUS_SLOTS[k], n)
+			var lens: bool = lane == 1 and (k == 1 or k == 2) and not _lens.is_empty()
+			var def: Dictionary = _lens if lens else _gatling
+			if _taken.has(slot) or def.is_empty() or float(def.get("cost", 0.0)) > _budget:
+				continue
+			_budget -= float(def.get("cost", 0.0))
+			_taken[slot] = true
+			sim.place_building(slot, int(def["index"]), deg_to_rad(FOCUS_AIMS[k]))
 
 
 func _towers_on(slots: Array) -> int:

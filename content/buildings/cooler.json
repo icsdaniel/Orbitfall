@@ -1,0 +1,19 @@
+{
+  "id": "cooler", "kind": "cooler", "footprint": 1, "layer": "any", "cost": 60,
+  "cooling": 0.4, "litCoolingMult": 0.5, "aimMount": false, "aimOffsetDeg": 0,
+  "paths": [
+    { "id": "radiator", "name": "Radiators", "tiers": [
+      { "name": "Fins", "cost": 36, "mods": [{ "stat": "cooling", "op": "mul", "value": 1.25 }] },
+      { "name": "Wide Fins", "cost": 54, "mods": [{ "stat": "cooling", "op": "mul", "value": 1.25 }] },
+      { "name": "Night Vanes", "cost": 84, "mods": [{ "stat": "cooling", "op": "mul", "value": 1.3 }] },
+      { "name": "Frost Sail", "cost": 132, "mods": [{ "stat": "cooling", "op": "mul", "value": 1.4 }] }
+    ] },
+    { "id": "loop", "name": "Coolant Loop", "tiers": [
+      { "name": "Coolant", "cost": 36, "mods": [{ "stat": "cooling", "op": "add", "value": 0.1 }] },
+      { "name": "Pump", "cost": 54, "mods": [{ "stat": "cooling", "op": "add", "value": 0.15 }] },
+      { "name": "Deep Loop", "cost": 84, "mods": [{ "stat": "cooling", "op": "add", "value": 0.2 }] },
+      { "name": "Cryo Loop", "cost": 132, "mods": [{ "stat": "cooling", "op": "add", "value": 0.3 }] }
+    ] }
+  ], "active": null,
+  "visual": { "shape": "circle", "color": "building.cooler" }
+}

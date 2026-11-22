@@ -28,12 +28,19 @@
 //                         landing damage, never looks at the sun.
 //   balance               lane towers and panels; every moment weighs lit panels against
 //                         covered threat and turns to the better rotation.
-//   bank-and-drill        the sensible build, but banks stardust ahead of dim waves and buys
-//                         drills instead of panels (the drill part is a no-op until M2.7).
+//   bank-and-drill        the sensible build, but before a dim wave buys drills on the night
+//                         side (up to four, with a Cooler when the fourth would push
+//                         instability over the threshold) instead of panels, and banks the
+//                         rest until enough drills stand (M2.7).
 // M2.2 bot:
 //   upgrader              sensible, but the stardust left after the wanted towers and panels
 //                         buys upgrade tiers (cheapest first, one path per tower) instead of
 //                         extra towers.
+// M2.11 bot:
+//   focus-builder         never-rotate's plan, but each lane's towers go on the slots whose
+//                         bent mounts (rules.aim.offsets) put their axes through one point on
+//                         the lane, so they form a focus zone there; hands off the rotation.
+//                         never-rotate is its no-focus twin (same plan, straight mounts).
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -58,6 +65,7 @@ enum class Strategy {
   Balance,
   BankAndDrill,
   Upgrader,  // M2.2
+  FocusBuilder,  // M2.11
   Count
 };
 
@@ -106,6 +114,12 @@ struct RunResult {
   uint32_t rejected = 0;
   uint32_t towers = 0, panels = 0;  // standing at the end
   uint32_t upgrades = 0;            // upgrade tiers bought (M2.2)
+  uint32_t drills = 0, coolers = 0;  // M2.7: standing at the end
+  uint32_t overheats = 0;            // M2.7: DrillOverheated events over the run
+  // M2.11: hit points of the enemy layers destroyed over the run (each popped
+  // or killed layer counts its full layer HP), and focus points standing at the end.
+  float hpDestroyed = 0.0f;
+  uint32_t focusPoints = 0;
   uint64_t hash = 0;
   // Per enemy definition (index into ContentDB::enemies), all lanes.
   std::vector<uint32_t> leaksByEnemy;

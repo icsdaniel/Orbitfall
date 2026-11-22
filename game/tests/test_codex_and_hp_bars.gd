@@ -40,7 +40,7 @@ func _codex(sim: Node) -> CodexPanel:
 ## A copy of the shipped content plus one enemy that exists only in this test.
 func _content_with_extra_enemy() -> String:
 	var root: String = ProjectSettings.globalize_path(TEST_CONTENT)
-	for sub: String in ["", "buildings", "enemies", "planets", "sun", "waves"]:
+	for sub: String in ["", "buildings", "enemies", "falling", "planets", "sun", "waves"]:
 		DirAccess.make_dir_recursive_absolute(root.path_join(sub))
 		var src: String = "res://content".path_join(sub)
 		for file_name: String in DirAccess.get_files_at(src):

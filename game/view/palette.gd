@@ -15,13 +15,26 @@ const NAMED: Dictionary[String, Color] = {
 	"tower.cannon": Color(0.93, 0.55, 0.25),
 	"tower.gatling": Color(0.45, 0.85, 0.95),
 	"tower.lance": Color(0.92, 0.96, 1.0),  # M2.4: pale, thin, precise
+	# M2.6 towers batch 1
+	"tower.flak": Color(0.95, 0.40, 0.30),
+	"tower.railgun": Color(0.75, 0.80, 1.0),
+	"tower.cryo": Color(0.55, 0.95, 1.0),
+	"tower.radar": Color(0.45, 0.95, 0.55),
+	"tower.amplifier": Color(0.90, 0.45, 0.95),
+	"tower.sun_lens": Color(1.0, 0.86, 0.45),
 	"building.solar_panel": Color(0.35, 0.55, 1.0),
+	"building.drill": Color(0.78, 0.66, 0.48),  # M2.7: sandy, turns DRILL_HOT red as it heats
+	"building.cooler": Color(0.55, 0.92, 1.0),  # M2.7: ice blue
 	"planet.small": Color(0.22, 0.27, 0.36),  # M2.8
 	"planet.medium": Color(0.17, 0.22, 0.33),
 	"planet.large": Color(0.15, 0.20, 0.30),  # M2.8
 	"enemy.eclipser": Color(0.24, 0.13, 0.34),  # dark violet: reads against the night sky
 	"enemy.bulwark": Color(0.52, 0.58, 0.68),  # M2.4: steel plate; the weak side is a bright wedge
 	"projectile": Color(1.0, 0.92, 0.55),
+	"building.shield": Color(0.45, 0.85, 1.0),  # M2.10
+	"falling.meteor": Color(1.0, 0.62, 0.32),  # M2.10
+	"falling.bomb": Color(0.95, 0.30, 0.45),  # M2.10
+	"enemy.bomber": Color(0.80, 0.45, 0.25),  # M2.10
 }
 const SHAPE_NAMES: Dictionary[String, int] = {
 	"circle": 0, "triangle": 1, "square": 2, "hexagon": 3, "star": 4,
@@ -37,6 +50,9 @@ const UNLIT: Color = Color(0.36, 0.42, 0.55)
 const SHADED: Color = Color(0.45, 0.25, 0.75)
 const SHADOW: Color = Color(0.0, 0.0, 0.02)
 const THREAT: Color = Color(1.0, 0.35, 0.30)
+const DRILL_HOT: Color = Color(1.0, 0.36, 0.10)  # M2.7: drill heat and the instability meter
+const COOL: Color = Color(0.55, 0.92, 1.0)  # M2.7: cooler halo and a calm meter
+const FOCUS: Color = Color(1.0, 0.85, 0.30)  # M2.11: focus reticles and the axes feeding them
 const GOOD: Color = Color(0.35, 0.90, 0.50)
 const TEXT: Color = Color(0.93, 0.95, 1.0)
 const TEXT_DIM: Color = Color(0.62, 0.68, 0.80)

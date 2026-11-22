@@ -1,0 +1,4 @@
+{
+  "id": "bomb", "damage": 5, "speed": 45, "size": 5,
+  "visual": { "shape": "star", "color": "falling.bomb" }
+}

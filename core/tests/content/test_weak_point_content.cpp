@@ -115,17 +115,28 @@ TEST_CASE("lance.json: narrow, cheap, precision, Pierce, weak against everything
   for (const BuildingDef& b : db.buildings)
     if (b.kind == BuildingKind::Tower && b.id != l.id && b.cost < cheapest) cheapest = b.cost;
   CHECK(l.cost < cheapest);
-  // Weak against everything else: less damage per second than any other tower.
+  // Weak against everything else: less damage per second than any other
+  // damage tower (the Cryo's slow is its job, not its damage; M2.6).
   const float dps = l.projectile.damage * l.fireRate;
   for (const BuildingDef& b : db.buildings) {
-    if (!b.hasProjectile || b.id == l.id) continue;
+    if (!b.hasProjectile || b.id == l.id || b.projectile.slow > 0.0f) continue;
     CAPTURE(b.id);
     CHECK(dps < b.projectile.damage * b.fireRate);
   }
-  // Only the Lance is a precision tower in M2.4.
+  // The precision towers are the Lance and the Railgun (the dear, long-range
+  // second answer to the Bulwark, M2.6): both fire Pierce.
   int precision = 0;
-  for (const BuildingDef& b : db.buildings) precision += b.precision ? 1 : 0;
-  CHECK(precision == 1);
+  for (const BuildingDef& b : db.buildings) {
+    if (!b.precision) continue;
+    CAPTURE(b.id);
+    CHECK(b.projectile.type == DamageType::Pierce);
+    ++precision;
+  }
+  CHECK(precision == 2);
+  const int r = db.building_index("railgun");
+  REQUIRE(r != kNoIndex);
+  CHECK(db.buildings[static_cast<size_t>(r)].precision);
+  CHECK(db.buildings[static_cast<size_t>(r)].cost > l.cost);
 }
 
 TEST_CASE("waves: M1 has no Bulwarks; the trial wave set does") {

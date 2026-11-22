@@ -1,0 +1,6 @@
+{
+  "id": "ember", "behavior": "lane", "layers": 1, "hp": 2,
+  "speed": 95, "size": 6, "landDamage": 2, "bounty": 2,
+  "traits": ["fast", "heat_resistant"], "shadowCaster": false, "hpBar": false, "popsInto": null,
+  "shape": "triangle", "visual": { "color": "tier.blue", "trail": true }
+}

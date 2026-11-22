@@ -23,6 +23,20 @@ enum class EventType : uint8_t {
   BuildingSold,     // a = slot, b = building index, value = refund
   CommandRejected,  // a = slot, b = RejectReason, x = CommandType, value = cost (Unaffordable)
   BuildingUpgraded, // M2.2: a = slot, b = path, x = new tier of that path, value = cost paid
+  // --- M2.10 falling objects and shields ---
+  FallingWarning,  // a = falling type, b = slot of the shield covering it now (-1), x/y = impact point, value = seconds to impact
+  FallingImpact,   // a = falling type, x/y = impact point, value = planet HP lost
+  ShieldAbsorbed,  // a = slot, b = falling type, x/y = where, value = energy left
+  ShieldOffline,   // a = slot
+  ShieldOnline,    // a = slot (recharged, full)
+  BuildingActivated, // M2.6: a = slot, b = building index, value = cooldown (s, before light)
+  // M2.7 drills (nothing is damaged; only the drill's uptime changes):
+  DrillOverheated,  // a = site, b = building index, x = instability level, value = shutdown seconds
+  DrillRestarted,   // a = site, b = building index, x = instability level after the restart
+  // M2.5 enemies batch 1:
+  LayerRegrown,  // a = enemy type before, b = enemy type after (one layer up), x/y = where
+  EnemySplit,    // a = enemy type that split, b = child type, x/y = where, value = children spawned
+  AimChanged,       // M2.11: a = site, b = building index, x = new aim offset (rad), value = cost paid
   WeakPointHit,     // M2.4: a = enemy type, b = building index of the shot, x/y, value = damage
   Count
 };
@@ -42,6 +56,7 @@ enum class RejectReason : int32_t {
   WrongLayer,        // the building may not stand on that layer
   SupportsElevated,  // selling a foundation that carries an elevated building
   UpgradeBlocked,   // M2.2: no such path, top tier reached, or capped by the other path
+  ActiveNotReady,   // M2.6: the active ability is running or cooling down
 };
 
 // Generic payload; each emitting system documents which fields it fills.

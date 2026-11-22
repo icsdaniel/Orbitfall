@@ -142,6 +142,26 @@ class SimServer : public Node {
   // Id of the current run's planet ("" before the first new_run).
   String get_planet_id() const;
   // --- end M2.8 ---
+  // --- M2.10 falling objects and shields ---
+  // Falling objects (meteors, bombs) in the BatchRenderer layout, interpolated
+  // like the enemies: custom = shape id, colour tier, 0, 0.
+  PackedFloat32Array get_falling_buffer();
+  int64_t get_falling_count() const { return curr_->fallingCount; }
+  // Objects within get_falling_warn_seconds() of impact: {pos: Vector2 (now),
+  // impact: Vector2 (on the surface), bearing (world rad), eta (s), damage,
+  // falling (def index), shield_slot (the online shield covering that bearing
+  // now, or -1)}.
+  TypedArray<Dictionary> get_falling_warnings() const;
+  float get_falling_warn_seconds() const;
+  // Placed shields: {slot, angle (world rad, interpolated), half_width (rad),
+  // dome_radius, energy, energy_max, energy_frac, online, charge_frac
+  // (recharge progress while offline), lit (charging lightChargeMult x faster)}.
+  TypedArray<Dictionary> get_shields() const;
+  // {index, id, name, damage, speed, size, spawn_radius, shape, color}.
+  TypedArray<Dictionary> get_falling_defs() const;
+  // Wave set ids in new_run(seed, wave_set) order (m1 is 0; m2_storm is the demo).
+  PackedStringArray get_wave_sets() const;
+  // --- end M2.10 ---
   // --- M2.4 weak points ---
   // Aim assist: {active: bool, and when active: site (precision tower's site
   // index), site_angle (its local angle, rad), bearing (world angle of the
@@ -149,8 +169,6 @@ class SimServer : public Node {
   // distance, turn (rad, + = increase the planet rotation, wrapped to +-pi),
   // window (rad, the enemy's weak-point half-width)}.
   Dictionary get_weak_point_hint() const;
-  // Wave set ids in index order (new_run's wave_set); "m1" is 0.
-  PackedStringArray get_wave_sets() const;
   // --- end M2.4 ---
   Dictionary get_debug_stats() const;
   bool set_tunable(const String& path, float value);
@@ -159,6 +177,19 @@ class SimServer : public Node {
   // surfaceTimeEaseSeconds): the client sends them back as set_time_scale.
   float get_surface_time_scale() const;
   float get_surface_time_ease_seconds() const;
+
+  // --- M2.7 drills, instability and coolers (begin) ---
+  // Global instability: {level, threshold, load (summed weight of the running
+  // drills), cooling (coolers right now, light-aware), drills, running,
+  // overheated, coolers, drill_income (stardust/s), overheat_seconds}.
+  // level > threshold means running drills heat up and, at heat 1, overheat.
+  Dictionary get_instability() const;
+  // One entry per drill, site order: {site, building, heat (0..1),
+  // overheated (bool), cooldown (seconds left), cooldown_max}.
+  TypedArray<Dictionary> get_drill_states() const;
+  // Stardust per second from running drills (panels: get_income_per_second).
+  float get_drill_income_per_second() const { return curr_->drillIncomePerSecond; }
+  // --- M2.7 drills, instability and coolers (end) ---
 
   // --- M2.2 upgrade paths (begin) ---
   // Command: buys the next tier of `path` (0 or 1) for the building on `slot`.
@@ -180,6 +211,44 @@ class SimServer : public Node {
   // sell_refund, paths (one get_upgrade_preview dictionary per path).
   Dictionary get_slot_upgrades(int64_t slot) const;
   // --- M2.2 upgrade paths (end) ---
+
+  // --- M2.6 towers batch 1 (begin) ---
+  // Command: fires the active ability (Sun Lens Overcharge) of the building on
+  // `slot` (a site). Emits BuildingActivated {a: anchor site, b: building,
+  // value: cooldown s} or CommandRejected {b: 5 EmptySlot, 6 NotAllowed (no
+  // active), 12 ActiveNotReady; x: 9}.
+  void activate_building(int64_t slot);
+  // Lit, unshaded fraction of the solar panel capacity (0..1): what the Sun Lens channels.
+  float get_channel() const { return curr_->channel; }
+  // Sun Lens beams this tick, 7 floats each: x0, y0 (tower), x1, y1 (target),
+  // power (ramp x channel x overcharge; 1 = full beam), overcharged (0/1), site.
+  PackedFloat32Array get_beams() const;
+  // 2 floats per site: active cooldown left (s), active time left (s); zeros
+  // for buildings without an active.
+  PackedFloat32Array get_site_actives() const;
+  // --- M2.6 towers batch 1 (end) ---
+
+  // --- M2.11 bent aim and focus fire (begin) ---
+  // set_aim(slot, offset) (above) snaps to get_aim_rules().offsets, costs
+  // reaim_cost_frac of the building's cost and is refused mid-wave: emits
+  // AimChanged {a: site, b: building, x: offset rad, value: cost} or
+  // CommandRejected {b: 4 Unaffordable / 6 NotAllowed / 7 WrongPhase, x: 3}.
+  // Per site: the aim offset (rad) added to the slot normal.
+  PackedFloat32Array get_site_aims() const;
+  // Mount steps and focus numbers from rules.json: {offsets: PackedFloat32Array
+  // (rad), reaim_cost_frac, between_waves_only, focus_bonus, focus_cap,
+  // focus_radius, lens_merge}.
+  Dictionary get_aim_rules() const;
+  // Stardust a re-aim of the building on `slot` costs; -1 when there is none
+  // or it has no aim mount.
+  float get_reaim_cost(int64_t slot) const;
+  // Focus points: [{local: Vector2 (planet frame), pos: Vector2 (world, at the
+  // interpolated rotation), radius, feeders: PackedInt32Array (sites),
+  // lenses: int, mult: float (damage multiplier inside)}].
+  Array get_focus_points() const;
+  // get_beams(): the overcharged float gains +2 for a merged Lens beam (from
+  // the focus point outward).
+  // --- M2.11 bent aim and focus fire (end) ---
 
   // --- extras (not in CONTRACT.md) ---
   // Colours for palette keys that are not colour tiers ("enemy.eclipser"); default white.
@@ -223,6 +292,7 @@ class SimServer : public Node {
   orbitfall_binding::Snapshot* prev_ = &buffers_[0];
   orbitfall_binding::Snapshot* curr_ = &buffers_[1];
   std::vector<float> enemyColors_;  // RGBA per enemy def; read by the sim thread, written while idle
+  std::vector<float> fallingColors_;  // M2.10: RGBA per falling def, same rules
   std::unordered_map<std::string, Color> palette_;
   uint64_t hashCache_ = 0;
   uint32_t hashCacheTick_ = 0xFFFFFFFFu;
