@@ -106,9 +106,9 @@ TEST_CASE("every shipped content file loads with zero errors") {
                             db.enemies.size() + db.waveSets.size() + db.falling.size() + 2);
   CHECK(db.planets.size() == 3);  // M2.8: small, medium, large
   CHECK(db.suns.size() == 1);
-  CHECK(db.buildings.size() == 12);  // M2.10: + shield; M2.7: + drill, cooler; M2.6: + flak, railgun, cryo, radar, amplifier, sun_lens
-  CHECK(db.enemies.size() == 14);   // M2.10: + bomber; M2.5: + brick, phantom, bubble, ember, spore x3, splitter
-  CHECK(db.waveSets.size() == 4);   // M2.10: + the m2_storm demo set; M2.5: + m2_bestiary; M2.11: + m2_swarm
+  CHECK(db.buildings.size() == 13);  // M2.4: + lance; M2.10: + shield; M2.7: + drill, cooler; M2.6: + flak, railgun, cryo, radar, amplifier, sun_lens
+  CHECK(db.enemies.size() == 15);   // M2.4: + bulwark; M2.10: + bomber; M2.5: + brick, phantom, bubble, ember, spore x3, splitter
+  CHECK(db.waveSets.size() == 5);   // M2.4: + trial_bulwark; M2.10: + the m2_storm demo set; M2.5: + m2_bestiary; M2.11: + m2_swarm
   CHECK(db.falling.size() == 2);    // M2.10: meteor, bomb
   CHECK(db.wave_set_index("m1") == 0);  // the M1 run stays wave set 0
 }

@@ -24,6 +24,8 @@ var _gatling: Dictionary = {}
 var _cannon: Dictionary = {}
 var _lens: Dictionary = {}
 var _panel: Dictionary = {}
+var _lance: Dictionary = {}  # M2.4: first precision tower, for weak-point waves
+var _weak_enemies: Dictionary[int, bool] = {}
 var _lanes: Array[Array] = []
 var _reserved: Dictionary[int, bool] = {}
 var _budget: float = 0.0
@@ -39,6 +41,9 @@ func setup(sim_node: Node, play_mode: String) -> void:
 	for def: Dictionary in sim.get_building_defs():
 		if str(def.get("kind", "")) == "panel":
 			_panel = def
+		elif bool(def.get("precision", false)):  # M2.4: the Lance is not a lane tower
+			if _lance.is_empty():
+				_lance = def
 		elif str(def.get("kind", "tower")) == "tower":  # M2.10: not shields or supports
 			# M2.6: the plain shooters (no beam, slow or pierce); the specialists
 			# of batch 1 are left to the player (and --play=lens adds the Sun Lens).
@@ -47,6 +52,9 @@ func setup(sim_node: Node, play_mode: String) -> void:
 			if int(def.get("projectile_kind", 0)) <= 1 and float(def.get("slow", 0.0)) == 0.0 \
 					and int(def.get("pierce", 0)) == 0:
 				towers.append(def)
+	for def: Dictionary in sim.get_enemy_defs():
+		if not (def.get("weak_point", {}) as Dictionary).is_empty():
+			_weak_enemies[int(def["index"])] = true
 	towers.sort_custom(func(x: Dictionary, y: Dictionary) -> bool:
 		return float(x.get("cost", 0.0)) < float(y.get("cost", 0.0)))
 	# The cheap tower is the bread and butter; the dearer one alternates with it.
@@ -127,6 +135,7 @@ func _plan_sensible(wave: int, buildings: PackedInt32Array) -> void:
 		if stale_panel or stale_gun:
 			sim.sell_building(slot)
 			_taken.erase(slot)
+	_buy_lance_if_needed(n)
 	while _towers_on(_lanes[0]) < WANT_A[k] and _buy_tower(_lanes[0]):
 		pass
 	while _towers_on(_lanes[1]) < WANT_B[k] and _buy_tower(_lanes[1]):
@@ -157,6 +166,27 @@ func _plan_sensible(wave: int, buildings: PackedInt32Array) -> void:
 		var a: bool = _towers_on(_lanes[0]) <= _towers_on(_lanes[1])
 		if not _buy_tower(_lanes[0] if a else _lanes[1]) and not _buy_tower(_lanes[1] if a else _lanes[0]):
 			break
+
+
+## M2.4: one Lance beside the lane of the first weak-point enemy forecast for
+## the coming wave (the bot never turns, so it relies on the spread).
+func _buy_lance_if_needed(n: int) -> void:
+	if _lance.is_empty():
+		return
+	var buildings: PackedInt32Array = sim.get_slot_buildings()
+	if buildings.has(int(_lance["index"])):
+		return
+	var forecast: Array[Dictionary] = sim.get_forecast(1)
+	if forecast.is_empty():
+		return
+	var entries: Array = forecast[0].get("entries", [])
+	for entry: Dictionary in entries:
+		if _weak_enemies.has(int(entry.get("enemy", -1))):
+			var bearing: float = float(entry.get("lane_bearing", 0.0))
+			var slot: int = _nearest_free(bearing - TAU / float(n), deg_to_rad(25.0), n)
+			if slot >= 0:
+				_buy(slot, _lance)
+			return
 
 
 ## M2.11: the focus formation on every lane, lane by lane; on the second lane

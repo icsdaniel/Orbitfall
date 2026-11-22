@@ -8,6 +8,8 @@
   "surfaceTimeEaseSeconds": 0.3,
   "elevatedRangeBonus": 0.15,
   "upgradeExclusiveTier": 2,
+  "weakWindowDeg": 8,
+  "weakPointPrecisionOnly": true,
   "aim": { "offsetsDeg": [-60, -30, 0, 30, 60], "reaimCostFrac": 0.1, "reaimBetweenWavesOnly": true },
   "focus": { "bonusPerExtra": 0.25, "cap": 0.5, "radius": 50, "minAltitude": 10, "lensMerge": true, "preferZone": true },
   "instability": {

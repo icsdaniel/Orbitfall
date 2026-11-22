@@ -15,6 +15,7 @@
 #include "content/content.h"
 #include "sim/mathx.h"
 #include "sim/sim.h"
+#include "systems/combat.h"
 #include "systems/drills.h"
 #include "systems/enemies.h"
 #include "systems/sun.h"
@@ -39,7 +40,7 @@ const StrategyInfo kInfo[kStrategyCount] = {
     {Strategy::Sensible, "sensible", "sensible (panels + both lanes)", "mixed", true},
     {Strategy::NeverRotate, "never-rotate", "never-rotate (sensible build, hands off)", "layout", true},
     {Strategy::RotateToLane, "rotate-to-lane", "rotate-to-lane (battery to the busiest lane)", "rotation", true},
-    {Strategy::RotateToWeakPoint, "rotate-to-weak-point", "rotate-to-weak-point (battery to the nearest enemy)",
+    {Strategy::RotateToWeakPoint, "rotate-to-weak-point", "rotate-to-weak-point (Lance under the weak point)",
      "rotation", true},
     {Strategy::ChaseTheLight, "chase-the-light", "chase-the-light (panel field under the sun)", "light", true},
     {Strategy::FaceTheThreat, "face-the-threat", "face-the-threat (battery to the most damage)", "rotation", true},
@@ -101,6 +102,7 @@ struct Bot {
   const ContentDB& db;
   int gatling, cannon, panel;
   int drill, cooler;  // M2.7; kNoIndex when the content has none
+  int precision;  // M2.4: the first precision tower (the Lance), by data flag
   float budget = 0.0f;  // stardust not yet committed this intermission
   float lastInput = 0.0f;
   uint32_t towersBought = 0;
@@ -111,7 +113,8 @@ struct Bot {
         cannon(content.building_index("cannon")),
         panel(content.building_index("solar_panel")),
         drill(content.building_index("drill")),
-        cooler(content.building_index("cooler")) {
+        cooler(content.building_index("cooler")),
+        precision(firstPrecisionTower(content)) {
     m1Layout();
   }
 
@@ -154,6 +157,12 @@ struct Bot {
     static const int panels[] = {0, -1, 1, -2, 2, -3}, towers[] = {3, -4, 4, -5, 5, -6};
     for (int q : panels) chaserPanels.push_back(slotAt(q));
     for (int t : towers) chaserTowers.push_back(slotAt(t));
+  }
+
+  static int firstPrecisionTower(const ContentDB& content) {
+    for (size_t i = 0; i < content.buildings.size(); ++i)
+      if (content.buildings[i].precision) return static_cast<int>(i);
+    return kNoIndex;
   }
 
   World& world() { return sim.world(); }
@@ -591,6 +600,24 @@ struct Bot {
     const float half = 0.5f * litArc(w.planet->radius, w.sun->beamWidth);
     const bool dim = w.waveSet->waves[w.waveIndex].lightMult < 1.0f;
 
+    // M2.4: a lane that brings weak-point enemies gets a Lance right under
+    // it (these bots never aim it; the lane is where it does most good).
+    if (precision >= 0) {
+      for (const SpawnDef& sp : w.waveSet->waves[w.waveIndex].spawns) {
+        if (!db.enemies[static_cast<size_t>(sp.enemy)].hasWeakPoint) continue;
+        if (sp.lane < 0 || sp.lane >= static_cast<int>(laneSlots.size())) continue;
+        const std::vector<int>& lane = laneSlots[static_cast<size_t>(sp.lane)];
+        bool have = false;
+        for (int slot : lane) have = have || (!free(slot) && w.slots[static_cast<size_t>(slot)].type == precision);
+        for (int slot : lane) {
+          if (have) break;
+          if (taken(slot)) continue;
+          have = buy(slot, precision);
+          break;
+        }
+      }
+    }
+
     for (size_t l = 0; l < laneSlots.size(); ++l) {
       const int want = l == 0 ? kWantFirstLane[k] : kWantOtherLane[k];
       while (towersOn(laneSlots[l]) < want && buyTower(laneSlots[l], aimsOf(l))) {}
@@ -712,6 +739,23 @@ struct Bot {
     const uint32_t k = waveTableIndex();
     const float ref = w.planet->lanes.empty() ? 0.0f : w.planet->lanes[static_cast<size_t>(heaviestLane())].bearing;
     target = wrapTau(ref);
+    // M2.4: rotate-to-weak-point puts precision towers (Lances) in the middle
+    // of its battery when weak-point enemies are coming: one, two from four.
+    if (strategy == Strategy::RotateToWeakPoint && precision >= 0) {
+      int weakUnits = 0;
+      for (const SpawnDef& sp : w.waveSet->waves[w.waveIndex].spawns)
+        if (db.enemies[static_cast<size_t>(sp.enemy)].hasWeakPoint) weakUnits += sp.count;
+      const int wantLances = weakUnits == 0 ? 0 : (weakUnits >= 4 ? 2 : 1);
+      int have = 0;
+      for (int slot : batterySlots)
+        if (!free(slot) && w.slots[static_cast<size_t>(slot)].type == precision) ++have;
+      for (int slot : batterySlots) {
+        if (have >= wantLances) break;
+        if (taken(slot)) continue;
+        if (!buy(slot, precision)) break;
+        ++have;
+      }
+    }
     const int wantTowers = kWantFirstLane[k] + kWantOtherLane[k];
     while (towersOn(batterySlots) < wantTowers && buyTower(batterySlots)) {}
     tendPanels(ref, kWantPanels[k], true);
@@ -847,10 +891,18 @@ struct Bot {
     target = wrapTau(w.planet->lanes[best].bearing);
   }
 
-  // rotate-to-weak-point (stub): the battery faces the enemy nearest the planet.
+  // rotate-to-weak-point: with a precision tower built and a weak-point enemy
+  // out there, turn so the tower sits right under it (weakPointHint, the
+  // same answer the client's aim assist shows); otherwise the battery faces
+  // the enemy nearest the planet.
   void aimAtNearestEnemy() {
     World& w = world();
     if (w.phase != Phase::Wave) return;
+    WeakPointHint hint;
+    if (weakPointHint(w, hint)) {
+      target = wrapTau(w.planetRotation + hint.turn);
+      return;
+    }
     const EnemyPool& e = w.enemies;
     float bestD2 = 0.0f;
     bool found = false;
@@ -1055,6 +1107,19 @@ struct Bot {
 };
 
 }  // namespace
+
+float weakPointRotateInput(const World& world) {
+  WeakPointHint hint;
+  if (world.planet == nullptr || !weakPointHint(world, hint)) return 0.0f;
+  const PlanetDef& p = *world.planet;
+  const float dist = std::fabs(hint.turn);
+  if (dist < 0.5f * kDeg) return 0.0f;  // lined up: let it settle
+  // 70% of the fastest speed from which it can still stop in `dist`.
+  float speed = 0.7f * std::sqrt(2.0f * p.rotAccel * dist);
+  if (speed > p.rotMaxSpeed) speed = p.rotMaxSpeed;
+  if (!(p.rotMaxSpeed > 0.0f)) return 0.0f;
+  return clampf((hint.turn > 0.0f ? speed : -speed) / p.rotMaxSpeed, -1.0f, 1.0f);
+}
 
 RunResult play(const ContentDB& db, Strategy strategy, const RunOptions& options) {
   SimConfig cfg;

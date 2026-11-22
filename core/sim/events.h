@@ -37,6 +37,7 @@ enum class EventType : uint8_t {
   LayerRegrown,  // a = enemy type before, b = enemy type after (one layer up), x/y = where
   EnemySplit,    // a = enemy type that split, b = child type, x/y = where, value = children spawned
   AimChanged,       // M2.11: a = site, b = building index, x = new aim offset (rad), value = cost paid
+  WeakPointHit,     // M2.4: a = enemy type, b = building index of the shot, x/y, value = damage
   Count
 };
 

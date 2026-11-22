@@ -47,7 +47,8 @@ uint32_t spawnEnemy(World& world, int enemyType, int lane) {
   const EnemyDef& def = db.enemies[static_cast<size_t>(enemyType)];
 
   const float radius = def.hasHover ? def.hover.spawnRadius : db.rules.spawnRadius;
-  const float jitter = def.hasHover ? def.hover.spawnJitter : db.rules.spawnJitter;
+  const float jitter = def.hasHover ? def.hover.spawnJitter
+                                    : (def.laneJitter >= 0.0f ? def.laneJitter : db.rules.spawnJitter);
   float bearing = world.planet->lanes[static_cast<size_t>(lane)].bearing;
   if (jitter > 0.0f) bearing += world.rng.range(-jitter, jitter);
 

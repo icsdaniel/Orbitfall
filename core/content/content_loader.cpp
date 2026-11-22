@@ -303,6 +303,7 @@ struct PendingEnemy {
   std::string popsInto;
   std::string bomb;  // M2.10: the falling object a Bomber drops
   std::string splitInto;  // M2.5: the enemy a Splitter splits into
+  bool weakWindowSet = false;  // M2.4: else rules.weakWindowDeg applies
 };
 struct PendingSpawn {
   std::string lane, enemy;
@@ -361,6 +362,8 @@ struct Loader {
     if (o.has("upgradeExclusiveTier"))  // M2.2
       o.integer("upgradeExclusiveTier", r.upgradeExclusiveTier,
                 Range{0.0, false, static_cast<double>(kMaxUpgradeTiers)});
+    if (o.has("weakWindowDeg")) o.angle("weakWindowDeg", r.weakWindow, Range{0.0, true, 45.0});
+    if (o.has("weakPointPrecisionOnly")) o.boolean("weakPointPrecisionOnly", r.weakPointPrecisionOnly);
     if (o.has("fallingWarnSeconds")) o.num("fallingWarnSeconds", r.fallingWarnSeconds, kNonNeg);  // M2.10
     if (o.has("instability")) read_instability(o.object("instability"), r.instability);  // M2.7
     if (o.has("aim")) read_aim(o.object("aim"), r.aim);        // M2.11
@@ -584,6 +587,7 @@ struct Loader {
         }
       }
       read_falloff(o, b);
+      if (o.has("precision")) o.boolean("precision", b.precision);  // M2.4
     } else if (kindOk && b.kind == BuildingKind::Panel) {
       o.num("panelRate", b.panelRate, kNonNeg);
     } else if (kindOk && b.kind == BuildingKind::Shield) {  // M2.10
@@ -823,6 +827,28 @@ struct Loader {
     if (e.shield > 0.0f) e.traits |= kTraitShielded;
     if (o.has("hpBarSegments")) o.integer("hpBarSegments", e.hpBarSegments, Range{1.0, false, 64.0});
     PendingEnemy pe;
+    pe.where = o.where();
+    // M2.4: "weakPoint": {"mult": 3.5, "bodyMult": 0.25, "windowDeg": 8 (optional)}.
+    if (o.has("weakPoint")) {
+      const Obj w = o.object("weakPoint");
+      if (w.valid()) {
+        e.hasWeakPoint = true;
+        w.num("mult", e.weakPoint.mult, Range{1.0, false, 10.0});
+        w.num("bodyMult", e.weakPoint.bodyMult, Range{0.0, false, 1.0});
+        if (w.has("windowDeg")) {
+          pe.weakWindowSet = w.angle("windowDeg", e.weakPoint.window, Range{0.0, true, 45.0});
+        }
+      }
+    }
+    if (o.has("spawnJitterDeg")) {
+      if (e.behavior != EnemyBehavior::Lane)
+        o.field_error("spawnJitterDeg", "only for lane enemies (an Eclipser sets it in 'hover')");
+      else
+        o.angle("spawnJitterDeg", e.laneJitter, Range{0.0, false, 180.0});
+    }
+    if ((e.traits & kTraitBulwark) && !e.hasWeakPoint)
+      o.field_error("traits", "'bulwark' needs a 'weakPoint' object");
+    if (e.hasWeakPoint) e.traits |= kTraitBulwark;
     if (e.behavior == EnemyBehavior::Bomber) {  // M2.10
       const Obj bo = o.object("bomber");
       if (bo.valid()) {
@@ -1015,6 +1041,11 @@ struct Loader {
         const float m = e.damageMult[static_cast<int>(dt.value)];
         if (m < floor)
           err(pe.where, std::string("damageMult: '") + dt.name + "': multiplier " + fmt(m) + floorMsg);
+      }
+      if (e.hasWeakPoint) {  // M2.4
+        if (!pe.weakWindowSet) e.weakPoint.window = db.rules.weakWindow;
+        if (e.weakPoint.bodyMult < floor)
+          err(pe.where, "'weakPoint': 'bodyMult' " + fmt(e.weakPoint.bodyMult) + floorMsg);
       }
       if (e.hasBomber) {  // M2.10
         e.bomber.bomb = db.falling_index(pe.bomb);

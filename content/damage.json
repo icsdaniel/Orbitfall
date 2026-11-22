@@ -59,6 +59,11 @@
         "energy": 0.5,
         "cryo": 1.5
       }
+    },
+    "bulwark": {
+      "name": "Bulwark", "cue": "plate with a bright wedge on its weak side",
+      "effect": "Body hits deal about 25%; a precision shot (Lance, Railgun) from right under it (within 8 degrees) hits the weak point for 3.5x",
+      "easierWith": "Lance, Railgun; rotate the planet to line one up"
     }
   }
 }

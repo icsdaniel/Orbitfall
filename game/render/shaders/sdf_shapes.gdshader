@@ -8,6 +8,8 @@ shader_type canvas_item;
 //   bit2 shielded: glow ring                       bit3 fast: speed streaks behind
 //   bit4 regrow: green plus badge                  bit5 splitter: notch cut in the tail
 //   bit6 heat-resistant: orange rim                bit12 layered: colour tier (no extra cue)
+//   bit10 bulwark (M2.4): bright wedge on the front, the weak side that faces the
+//   planet (lane enemies fly nose first at it); drawn at every size
 
 uniform sampler2D palette : filter_nearest, repeat_disable;
 uniform float palette_size = 8.0;
@@ -21,6 +23,7 @@ uniform vec4 armored_color : source_color = vec4(0.62, 0.64, 0.68, 1.0);
 uniform vec4 shield_color : source_color = vec4(0.45, 0.85, 1.0, 1.0);
 uniform vec4 heat_color : source_color = vec4(1.0, 0.55, 0.12, 1.0);
 uniform vec4 regrow_color : source_color = vec4(0.45, 1.0, 0.55, 1.0);
+uniform vec4 weak_color : source_color = vec4(1.0, 0.93, 0.35, 1.0);
 
 // The quad is QUAD_PAD times larger than the shape so outline and glow fit.
 const float QUAD_PAD = 1.5;
@@ -117,6 +120,7 @@ void fragment() {
 	bool regrow = (flags & 16) != 0;
 	bool splitter = (flags & 32) != 0;
 	bool heat = (flags & 64) != 0;
+	bool bulwark = (flags & 1024) != 0;
 
 	float px_unit = 2.0 / max(v_px, 1.0); // one screen pixel in shape units
 	float d = shape_sdf(shape, p);
@@ -198,6 +202,15 @@ void fragment() {
 		float plus_cover = clamp(0.5 - plus / px_unit, 0.0, 1.0);
 		col = mix(col, mix(vec3(0.03, 0.10, 0.05), regrow_color.rgb, plus_cover), badge);
 		alpha = alpha + badge * (1.0 - alpha);
+	}
+
+	if (bulwark) {
+		// A bright wedge from the middle to the front edge (-y is the front),
+		// poking a little past the outline so it reads even as a few pixels.
+		float wedge = max(max(abs(p.x) + p.y + 0.15, -(p.y + 1.1)), abs(p.x) - 0.8);
+		float w_cover = clamp(0.5 - wedge / px_unit, 0.0, 1.0);
+		col = mix(col, weak_color.rgb, w_cover);
+		alpha = alpha + w_cover * (1.0 - alpha);
 	}
 
 	COLOR = vec4(col, alpha * tint.a);

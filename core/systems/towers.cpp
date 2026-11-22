@@ -176,7 +176,7 @@ void mergeLensBeams(World& world, float dt) {
       if (!onBeam(i, t)) return;
       const float fraction = lstats.range > 0.0f ? (base + t) / lstats.range : 0.0f;
       const float damage = dps * dt * beamHitShare(db, lb, e.traits[i]) *
-                           damageMultiplier(db, ldef, db.enemies[e.type[i]], fraction);
+                           hitMultiplier(db, ldef, db.enemies[e.type[i]], fraction, false);  // M2.4: a beam is never precision
       damageEnemy(world, i, damage, ldef.projectile.type, lb.shieldDamageMult);
     });
   }
@@ -225,7 +225,8 @@ void beamFire(World& world, float dt) {
     // M2.11: a target inside a focus zone this Lens feeds takes the focus bonus.
     const float focus = focusBonusAt(world, s, e.posX[target], e.posY[target]);
     const float damage =
-        stats.damage * dt * power * hitShare * focus * damageMultiplier(db, def, enemy, fraction);
+        stats.damage * dt * power * hitShare * focus *
+        hitMultiplier(db, def, enemy, fraction, false);  // M2.4: a beam hits a Bulwark's body
     BeamShot shot;
     shot.site = static_cast<uint16_t>(s);
     shot.x0 = aim.x;

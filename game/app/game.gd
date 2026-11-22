@@ -28,6 +28,7 @@ var config: ClientConfig
 var camera: OrbitCamera
 var planet_view: PlanetView
 var entity_view: EntityView
+var weak_assist: WeakPointAssist  # M2.4
 var sky_threats: SkyThreats  # M2.10
 var input_router: InputRouter
 var bands: BandController
@@ -79,6 +80,7 @@ var planet_id: String = ""
 var planet_picker: PlanetPicker
 var _planet_arg: String = ""
 ## M2.10: index of the wave set to play (get_wave_sets); 0 = the default set.
+## M2.4: the debug overlay's wave set button cycles it (e.g. "trial_bulwark").
 var wave_set: int = 0
 var _waves_arg: String = ""
 var _demo_shield_bearing: float = NAN
@@ -126,6 +128,7 @@ func _process(delta: float) -> void:
 	planet_view.view_zoom = zoom
 	planet_view.surface_weight = bands.surface_weight
 	entity_view.view_zoom = zoom
+	weak_assist.view_zoom = zoom
 	sky_threats.view_zoom = zoom  # M2.10
 	sky_threats.surface_weight = bands.surface_weight
 	input_router.planet_centre = world_to_screen(Vector2.ZERO)
@@ -165,6 +168,21 @@ func slot_screen_position(slot: int) -> Vector2:
 func site_screen_position(site: int) -> Vector2:
 	planet_view.sync()
 	return world_to_screen(planet_view.site_position(site))
+
+
+## M2.4: wave set ids in index order (["m1"] when the sim cannot list them).
+func wave_set_ids() -> PackedStringArray:
+	if sim.has_method(&"get_wave_sets"):
+		return sim.get_wave_sets()
+	return PackedStringArray(["m1"])
+
+
+## M2.4: restart on the next wave set (debug overlay button).
+func cycle_wave_set() -> void:
+	var ids: PackedStringArray = wave_set_ids()
+	wave_set = (wave_set + 1) % maxi(ids.size(), 1)
+	hud.toast("Waves: %s" % (ids[wave_set] if wave_set < ids.size() else "?"))
+	restart()
 
 
 func restart() -> void:
@@ -246,6 +264,10 @@ func _build_scene() -> void:
 	add_child(entity_view)
 	entity_view.renderer.camera = camera
 
+	weak_assist = WeakPointAssist.new()
+	weak_assist.name = "WeakPointAssist"
+	weak_assist.sim = sim
+	add_child(weak_assist)
 	sky_threats = SkyThreats.new()  # M2.10: shields, warnings, flashes over the entities
 	sky_threats.name = "SkyThreats"
 	sky_threats.sim = sim
@@ -294,6 +316,7 @@ func _build_scene() -> void:
 	bands.band_changed.connect(_on_band_changed)
 	hud.debug_toggle_requested.connect(hud.toggle_debug)
 	hud.restart_requested.connect(restart)
+	hud.debug_overlay.wave_set_requested.connect(cycle_wave_set)  # M2.4
 	hud.build_menu.preview_changed.connect(_on_preview_changed)
 	hud.build_menu.build_requested.connect(_on_build_requested)
 	hud.build_menu.sell_requested.connect(_on_sell_requested)
@@ -351,11 +374,14 @@ func _track_phase() -> void:
 func _handle_events() -> void:
 	var events: Array[Dictionary] = sim.drain_events()
 	for event: Dictionary in events:
-		if str(event.get("type", "")) == "CommandRejected":
+		var type: String = str(event.get("type", ""))
+		if type == "CommandRejected":
 			hud.toast(_reject_text(int(event.get("b", 0))))
-		elif str(event.get("type", "")) == "BuildingUpgraded":  # M2.2
+		elif type == "BuildingUpgraded":  # M2.2
 			planet_view.sync()
 			_refresh_upgrades(true)
+		elif type == "WeakPointHit":  # M2.4
+			weak_assist.flash(Vector2(float(event.get("x", 0.0)), float(event.get("y", 0.0))))
 		elif sky_threats.handle_event(event):  # M2.10: impact / absorb flashes
 			pass
 		elif str(event.get("type", "")) == "ShieldOffline":  # M2.10

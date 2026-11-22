@@ -40,6 +40,7 @@ ORBITFALL_DECLARE_POOL(EnemyPool, ORBITFALL_ENEMY_FIELDS)
   F(float, shieldMult) /* M2.6: x damage dealt to shields */   \
   F(uint32_t, lastHit) /* M2.6: enemy pierced last, skip it */ \
   F(uint16_t, pierce) /* M2.6: enemies it may still pass */    \
+  F(float, origin)   /* M2.4: firing tower's world angle */    \
   F(uint16_t, type)  /* projectile definition index */         \
   F(uint16_t, site)  /* M2.11: firing site (focus feeders) */   \
   F(uint16_t, flags) /* per-entity state bits */

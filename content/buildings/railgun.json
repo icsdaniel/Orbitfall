@@ -1,6 +1,7 @@
 {
   "id": "railgun", "name": "Railgun", "kind": "tower", "footprint": 1, "layer": "any", "cost": 140,
   "arcDeg": 15, "range": 650, "fireRate": 0.45, "aimMount": true, "aimOffsetDeg": 0,
+  "precision": true,
   "projectile": { "kind": "dot", "speed": 2400, "damage": 6, "type": "pierce", "splash": 0, "pierce": 2 },
   "falloff": [[0, 1], [1, 1]],
   "targeting": ["strong", "first", "close"],

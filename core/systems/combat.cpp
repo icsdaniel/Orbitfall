@@ -150,6 +150,63 @@ float damageMultiplier(const ContentDB& db, const BuildingDef& source, const Ene
   return mult < floor ? floor : mult;
 }
 
+// --- M2.4 weak points ---
+bool isWeakPointHit(const EnemyDef& enemy, float towerAngle, float ex, float ey) {
+  if (!enemy.hasWeakPoint) return false;
+  const float bearing = std::atan2(ey, ex);
+  return std::fabs(wrapPi(towerAngle - bearing)) <= enemy.weakPoint.window;
+}
+
+float weakPointFactor(const EnemyDef& enemy, bool weakHit) {
+  if (!enemy.hasWeakPoint) return 1.0f;
+  return weakHit ? enemy.weakPoint.mult : enemy.weakPoint.bodyMult;
+}
+
+float hitMultiplier(const ContentDB& db, const BuildingDef& source, const EnemyDef& enemy,
+                    float rangeFraction, bool weakHit) {
+  const float mult = damageMultiplier(db, source, enemy, rangeFraction) * weakPointFactor(enemy, weakHit);
+  const float floor = damageFloor(db);
+  return mult < floor ? floor : mult;
+}
+
+bool weakPointHint(const World& world, WeakPointHint& out) {
+  if (world.content == nullptr || world.planet == nullptr) return false;
+  const ContentDB& db = *world.content;
+  const EnemyPool& e = world.enemies;
+  // The weak-point enemy nearest the planet: the most urgent one.
+  uint32_t best = kInvalidIndex;
+  float bestD2 = 0.0f;
+  for (uint32_t i = 0; i < e.count; ++i) {
+    if ((e.flags[i] & kEnemyDead) || !db.enemies[e.type[i]].hasWeakPoint) continue;
+    const float d2 = e.posX[i] * e.posX[i] + e.posY[i] * e.posY[i];
+    if (best == kInvalidIndex || d2 < bestD2) {
+      best = i;
+      bestD2 = d2;
+    }
+  }
+  if (best == kInvalidIndex) return false;
+  const float bearing = std::atan2(e.posY[best], e.posX[best]);
+  int32_t bestSlot = -1;
+  float bestTurn = 0.0f;
+  const uint32_t n = world.siteCount();  // both rings (M2.1)
+  for (uint32_t s = 0; s < n; ++s) {
+    const int16_t type = world.site(s).type;
+    if (type < 0 || !db.buildings[static_cast<size_t>(type)].precision) continue;
+    const float turn = wrapPi(bearing - (world.siteAngle(s) + world.planetRotation));
+    if (bestSlot < 0 || std::fabs(turn) < std::fabs(bestTurn)) {
+      bestSlot = static_cast<int32_t>(s);
+      bestTurn = turn;
+    }
+  }
+  if (bestSlot < 0) return false;
+  out.turn = bestTurn;
+  out.bearing = bearing;
+  out.slot = bestSlot;
+  out.enemy = best;
+  out.distance = std::sqrt(bestD2);
+  return true;
+}
+
 bool damageEnemy(World& world, uint32_t i, float damage, DamageType type, float shieldBonus) {
   const ContentDB& db = *world.content;
   EnemyPool& e = world.enemies;
@@ -313,6 +370,10 @@ void towerFire(World& world, float dt) {
     p.range[k] = stats.range;
     p.splash[k] = stats.splash;
     p.type[k] = static_cast<uint16_t>(b.type);
+    // M2.4: where it was launched from: the site's world angle. M2.11 aim
+    // offsets are ignored on purpose (Q33; DECISIONS 2026-11-22), for every
+    // precision tower: "from right under it" means the tower's position.
+    p.origin[k] = wrapTau(world.siteAngle(s) + world.planetRotation);
     p.site[k] = static_cast<uint16_t>(s);  // M2.11: focus zones it feeds
     p.slow[k] = stats.slow;  // M2.6
     p.shieldMult[k] = b.shieldDamageMult;
@@ -378,6 +439,23 @@ void collisions(World& world, float dt) {
       const float shieldBonus = p.shieldMult[i];
       // M2.11 focus fire: a hit inside a zone the firing tower feeds.
       const float focus = focusBonusAt(world, p.site[i], hx, hy);
+      const float origin = p.origin[i];
+      // M2.4: weak point or body for enemies that have one; 1x for the rest.
+      // Only precision towers reach a weak point (rules.weakPointPrecisionOnly).
+      auto strike = [&](uint32_t k, const EnemyDef& def) {
+        const bool weak = (source.precision || !db.rules.weakPointPrecisionOnly) &&
+                          isWeakPointHit(def, origin, e.posX[k], e.posY[k]);
+        const float dealt = damage * focus * hitMultiplier(db, source, def, fraction, weak);
+        if (def.hasWeakPoint) {
+          if (weak) {
+            ++world.weakPointHits;
+            world.emit(EventType::WeakPointHit, e.type[k], p.type[i], e.posX[k], e.posY[k], dealt);
+          } else {
+            ++world.bodyHits;
+          }
+        }
+        damageEnemy(world, k, dealt, source.projectile.type, shieldBonus);
+      };
       if (splash > 0.0f) {
         const float reach = splash + pad;
         world.grid.query(hx - reach, hy - reach, hx + reach, hy + reach, [&](uint32_t k) {
@@ -387,15 +465,13 @@ void collisions(World& world, float dt) {
           const float r = splash + def.size;  // the blast touches the enemy's disc
           if (dx * dx + dy * dy > r * r) return;
           applySlow(e, k, slow, slowSeconds);
-          damageEnemy(world, k, damage * focus * damageMultiplier(db, source, def, fraction),
-                      source.projectile.type, shieldBonus);
+          strike(k, def);
         });
         spent = true;
         break;
       }
       applySlow(e, hit, slow, slowSeconds);
-      damageEnemy(world, hit, damage * focus * damageMultiplier(db, source, db.enemies[e.type[hit]], fraction),
-                  source.projectile.type, shieldBonus);
+      strike(hit, db.enemies[e.type[hit]]);
       if (p.pierce[i] == 0) {
         spent = true;
         break;

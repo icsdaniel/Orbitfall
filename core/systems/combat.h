@@ -42,6 +42,32 @@ float shieldMultiplier(const ContentDB& db, DamageType type);
 float damageMultiplier(const ContentDB& db, const BuildingDef& source, const EnemyDef& enemy,
                        float rangeFraction);
 
+// --- M2.4 weak points (PLAN §5.5) ---
+// True when a shot launched from world angle `towerAngle` hits the weak point
+// of `enemy` at (ex, ey): the enemy has one and |wrap(towerAngle - bearing)|
+// <= its window. Aim offsets do not count: the tower must sit under it.
+// With rules.weakPointPrecisionOnly (the default) collisions only asks this
+// for shots from precision towers.
+bool isWeakPointHit(const EnemyDef& enemy, float towerAngle, float ex, float ey);
+// Multiplier of a hit on `enemy`: 1 when it has no weak point, else
+// weakPoint.mult or weakPoint.bodyMult.
+float weakPointFactor(const EnemyDef& enemy, bool weakHit);
+// Final multiplier with the weak-point factor: falloff x typeMultiplier() x
+// weakPointFactor(), never below the floor (a body hit is never 0).
+float hitMultiplier(const ContentDB& db, const BuildingDef& source, const EnemyDef& enemy,
+                    float rangeFraction, bool weakHit);
+// Signed planet turn (rad, + = increasing planet rotation) that puts a
+// precision tower directly under the nearest-to-the-planet live weak-point
+// enemy. Returns false when there is no such enemy or no precision tower.
+struct WeakPointHint {
+  float turn = 0.0f;     // rad, wrapped to (-pi, pi]
+  float bearing = 0.0f;  // world angle of the enemy
+  int32_t slot = -1;     // site (M2.1 index) of the precision tower to line up
+  uint32_t enemy = 0xFFFFFFFFu;
+  float distance = 0.0f;  // enemy distance from the planet centre
+};
+bool weakPointHint(const World& world, WeakPointHint& out);
+
 // Applies `damage` hit points to enemy `i`, popping layers down the popsInto
 // chain (extra damage carries into the next layer). Emits LayerPopped
 // (a = old type, b = new type, x/y) per layer and, on the last one,

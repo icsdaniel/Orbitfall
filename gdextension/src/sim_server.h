@@ -162,6 +162,14 @@ class SimServer : public Node {
   // Wave set ids in new_run(seed, wave_set) order (m1 is 0; m2_storm is the demo).
   PackedStringArray get_wave_sets() const;
   // --- end M2.10 ---
+  // --- M2.4 weak points ---
+  // Aim assist: {active: bool, and when active: site (precision tower's site
+  // index), site_angle (its local angle, rad), bearing (world angle of the
+  // weak-point enemy nearest the planet, rad), pos (Vector2, interpolated),
+  // distance, turn (rad, + = increase the planet rotation, wrapped to +-pi),
+  // window (rad, the enemy's weak-point half-width)}.
+  Dictionary get_weak_point_hint() const;
+  // --- end M2.4 ---
   Dictionary get_debug_stats() const;
   bool set_tunable(const String& path, float value);
   TypedArray<Dictionary> drain_events();

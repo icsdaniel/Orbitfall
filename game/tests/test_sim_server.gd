@@ -231,14 +231,14 @@ func test_load_content_shipped_content_has_no_errors() -> void:
 	assert_float(server.get_surface_time_ease_seconds()).is_between(0.0, 5.0)
 
 	var buildings: Array[Dictionary] = server.get_building_defs()
-	assert_int(buildings.size()).is_equal(12)  # M2.10: + shield; M2.7: + drill, cooler; M2.6: + six towers of batch 1
+	assert_int(buildings.size()).is_equal(13)  # M2.10: + shield; M2.7: + drill, cooler; M2.6: + six towers of batch 1; M2.4: + lance
 	var ids: Array[String] = []
 	for def: Dictionary in buildings:
 		assert_bool(def.has_all(
 			["index", "id", "name", "cost", "arc", "range", "kind", "shape", "color"])).is_true()
 		assert_int(def["index"]).is_equal(ids.size())
 		ids.append(def["id"])
-	assert_array(ids).contains(["cannon", "gatling", "shield", "solar_panel", "drill", "cooler"])
+	assert_array(ids).contains(["cannon", "gatling", "shield", "solar_panel", "drill", "cooler", "lance"])
 	assert_str(buildings[ids.find("shield")]["kind"]).is_equal("shield")  # M2.10
 	var cannon: Dictionary = buildings[ids.find("cannon")]
 	assert_float(cannon["cost"]).is_greater(0.0)
@@ -246,7 +246,18 @@ func test_load_content_shipped_content_has_no_errors() -> void:
 	assert_str(cannon["kind"]).is_equal("tower")
 	assert_str(buildings[ids.find("solar_panel")]["kind"]).is_equal("panel")
 	assert_str(buildings[ids.find("solar_panel")]["name"]).is_equal("Solar Panel")
-	assert_int(server.get_enemy_defs().size()).is_equal(14)  # M2.10: + bomber; M2.5: + 8 (batch 1, spore is 3 layers)
+	assert_int(server.get_enemy_defs().size()).is_equal(15)  # M2.10: + bomber; M2.5: + 8 (batch 1, spore is 3 layers); M2.4: + bulwark
+	# M2.4: the Lance and the Railgun are the precision towers; the Bulwark has a weak point.
+	assert_bool(buildings[ids.find("lance")]["precision"]).is_true()
+	assert_bool(buildings[ids.find("railgun")]["precision"]).is_true()
+	assert_bool(buildings[ids.find("gatling")]["precision"]).is_false()
+	var bulwark: Dictionary = {}
+	for def: Dictionary in server.get_enemy_defs():
+		if def["id"] == "bulwark":
+			bulwark = def
+	assert_float(float((bulwark["weak_point"] as Dictionary)["mult"])).is_between(3.0, 4.0)
+	assert_float(float((bulwark["weak_point"] as Dictionary)["body_mult"])).is_equal_approx(0.25, 0.001)
+	assert_int(server.get_wave_sets().find("trial_bulwark")).is_greater(0)
 
 
 func test_load_content_reports_errors() -> void:
